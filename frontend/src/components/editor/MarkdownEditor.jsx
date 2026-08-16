@@ -1,0 +1,450 @@
+import React, { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { 
+  Bold, 
+  Italic, 
+  Strikethrough, 
+  Heading1, 
+  Heading2, 
+  Heading3, 
+  Code, 
+  Quote, 
+  List, 
+  ListOrdered, 
+  CheckSquare, 
+  Table, 
+  Link, 
+  Columns, 
+  Eye, 
+  Edit3, 
+  Save, 
+  Download, 
+  Star, 
+  Trash2, 
+  ArrowLeft,
+  Paperclip,
+  Video,
+  Folder,
+  ExternalLink
+} from 'lucide-react';
+import InsertFileModal from './InsertFileModal';
+import { getPresignedDownloadUrl } from '../../api';
+import { useDialog } from '../../context/DialogContext';
+
+// Helper to extract YouTube Video ID
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+}
+
+export default function MarkdownEditor({
+  file,
+  onSave,
+  onBack,
+  onDelete,
+  onToggleFavorite,
+  onNavigateFolder
+}) {
+  const { showAlert } = useDialog();
+  const [title, setTitle] = useState(file?.name || '제목 없는 문서');
+  const [content, setContent] = useState(file?.content || '');
+  const [tags, setTags] = useState(file?.tags || []);
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
+  const [viewMode, setViewMode] = useState('split'); // 'split' | 'edit' | 'preview'
+  const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
+  
+  const textareaRef = useRef(null);
+  const saveTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    if (file) {
+      setTitle(file.name);
+      setContent(file.content || '');
+      setTags(file.tags || []);
+      setSaveStatus('saved');
+    }
+  }, [file?.id]);
+
+  const triggerAutoSave = (newTitle, newContent, newTags) => {
+    setSaveStatus('unsaved');
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      setSaveStatus('saving');
+      try {
+        await onSave({
+          name: newTitle,
+          content: newContent,
+          tags: newTags
+        });
+        setSaveStatus('saved');
+      } catch (err) {
+        setSaveStatus('unsaved');
+        console.error('Auto-save error:', err);
+      }
+    }, 1000);
+  };
+
+  const handleTitleChange = (e) => {
+    const val = e.target.value;
+    setTitle(val);
+    triggerAutoSave(val, content, tags);
+  };
+
+  const handleContentChange = (e) => {
+    const val = e.target.value;
+    setContent(val);
+    triggerAutoSave(title, val, tags);
+  };
+
+  const insertFormatting = (before, after = '', defaultText = '') => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = content.substring(start, end) || defaultText;
+    const newText = content.substring(0, start) + before + selectedText + after + content.substring(end);
+
+    setContent(newText);
+    triggerAutoSave(title, newText, tags);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + before.length, start + before.length + selectedText.length);
+    }, 0);
+  };
+
+  const handleInsertFromModal = (snippet) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      const newText = content + snippet;
+      setContent(newText);
+      triggerAutoSave(title, newText, tags);
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newText = content.substring(0, start) + snippet + content.substring(end);
+    setContent(newText);
+    triggerAutoSave(title, newText, tags);
+  };
+
+  const handleExportMarkdown = () => {
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = title.endsWith('.md') ? title : `${title}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Custom Markdown Component Renderers
+  const customMarkdownComponents = {
+    // Custom Link Renderer
+    a: ({ node, href, children, ...props }) => {
+      // 1. Folder Navigation Link: folder:FOLDER_ID
+      if (href && href.startsWith('folder:')) {
+        const folderId = href.replace('folder:', '');
+        return (
+          <span
+            onClick={(e) => {
+              e.preventDefault();
+              if (onNavigateFolder) onNavigateFolder(folderId === 'root' ? null : folderId);
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              color: 'var(--accent-primary)',
+              cursor: 'pointer',
+              fontWeight: 600,
+              textDecoration: 'underline'
+            }}
+            title="새 탭으로 폴더 열기"
+          >
+            <Folder size={14} />
+            {children}
+            <ExternalLink size={12} />
+          </span>
+        );
+      }
+
+      // 2. Presigned Download Link: /api/storage/presigned-download/FILE_ID
+      if (href && href.includes('/api/storage/presigned-download/')) {
+        const fileId = href.split('/api/storage/presigned-download/')[1];
+        return (
+          <a
+            href={href}
+            onClick={async (e) => {
+              e.preventDefault();
+              try {
+                const { download_url } = await getPresignedDownloadUrl(fileId);
+                window.open(download_url, '_blank');
+              } catch (err) {
+                await showAlert({
+                  title: '다운로드 실패',
+                  message: '다운로드 URL 생성 중 오류가 발생했습니다: ' + err.message,
+                  type: 'error'
+                });
+              }
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '0.2rem 0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(59, 130, 246, 0.15)',
+              color: 'var(--accent-primary)',
+              textDecoration: 'none',
+              fontWeight: 600,
+              border: '1px solid rgba(59, 130, 246, 0.3)'
+            }}
+            title="Presigned URL로 바로 다운로드"
+          >
+            <Download size={13} />
+            {children}
+          </a>
+        );
+      }
+
+      // 3. YouTube URL directly as a link
+      const ytId = extractYouTubeId(href);
+      if (ytId) {
+        return (
+          <span style={{ display: 'block', margin: '1.25rem 0' }}>
+            <span style={{
+              display: 'block',
+              position: 'relative',
+              paddingBottom: '56.25%',
+              height: 0,
+              overflow: 'hidden',
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: 'var(--shadow-md)',
+              border: '1px solid var(--border-subtle)'
+            }}>
+              <iframe
+                src={`https://www.youtube.com/embed/${ytId}`}
+                title="YouTube Video Player"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  border: 'none'
+                }}
+              />
+            </span>
+          </span>
+        );
+      }
+
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props} style={{ color: 'var(--accent-primary)' }}>
+          {children}
+        </a>
+      );
+    }
+  };
+
+  return (
+    <div className="editor-layout">
+      {/* Top Header */}
+      <div className="editor-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+          <button className="btn-icon" onClick={onBack} title="목록으로 돌아가기">
+            <ArrowLeft size={18} />
+          </button>
+          
+          <input 
+            type="text" 
+            className="editor-title-input" 
+            value={title} 
+            onChange={handleTitleChange}
+            placeholder="문서 제목을 입력하세요..."
+          />
+        </div>
+
+        {/* Action status & controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ 
+            fontSize: '0.75rem', 
+            color: saveStatus === 'saved' ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.3rem',
+            marginRight: '0.5rem'
+          }}>
+            {saveStatus === 'saved' ? '● 자동 저장됨' : (saveStatus === 'saving' ? '⟳ 저장 중...' : '○ 미저장')}
+          </span>
+
+          <div style={{ display: 'flex', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: 2 }}>
+            <button 
+              className={`btn-icon ${viewMode === 'edit' ? 'active' : ''}`}
+              onClick={() => setViewMode('edit')}
+              title="에디터만 보기"
+              style={{ background: viewMode === 'edit' ? 'var(--bg-card-hover)' : 'transparent' }}
+            >
+              <Edit3 size={15} />
+            </button>
+            <button 
+              className={`btn-icon ${viewMode === 'split' ? 'active' : ''}`}
+              onClick={() => setViewMode('split')}
+              title="스플릿 뷰"
+              style={{ background: viewMode === 'split' ? 'var(--bg-card-hover)' : 'transparent' }}
+            >
+              <Columns size={15} />
+            </button>
+            <button 
+              className={`btn-icon ${viewMode === 'preview' ? 'active' : ''}`}
+              onClick={() => setViewMode('preview')}
+              title="미리보기만"
+              style={{ background: viewMode === 'preview' ? 'var(--bg-card-hover)' : 'transparent' }}
+            >
+              <Eye size={15} />
+            </button>
+          </div>
+
+          <button className="btn-icon" onClick={handleExportMarkdown} title="마크다운 다운로드">
+            <Download size={16} />
+          </button>
+
+          {file && (
+            <>
+              <button 
+                className="btn-icon" 
+                onClick={() => onToggleFavorite(file)}
+                title="즐겨찾기 토글"
+              >
+                <Star 
+                  size={16} 
+                  color={file.is_favorite ? '#f59e0b' : 'var(--text-muted)'} 
+                  fill={file.is_favorite ? '#f59e0b' : 'none'} 
+                />
+              </button>
+              <button 
+                className="btn-icon" 
+                onClick={() => onDelete(file.id)}
+                title="문서 삭제"
+              >
+                <Trash2 size={16} color="var(--accent-rose)" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Formatting Toolbar */}
+      {viewMode !== 'preview' && (
+        <div className="editor-toolbar">
+          <button className="toolbar-btn" onClick={() => insertFormatting('# ', '', '제목 1')} title="Heading 1">
+            <Heading1 size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('## ', '', '제목 2')} title="Heading 2">
+            <Heading2 size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('### ', '', '제목 3')} title="Heading 3">
+            <Heading3 size={15} />
+          </button>
+          <div className="toolbar-divider" />
+          
+          <button className="toolbar-btn" onClick={() => insertFormatting('**', '**', '굵은 글씨')} title="볼드체">
+            <Bold size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('*', '*', '기울임')} title="이탤릭">
+            <Italic size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('~~', '~~', '취소선')} title="취소선">
+            <Strikethrough size={15} />
+          </button>
+          <div className="toolbar-divider" />
+
+          <button className="toolbar-btn" onClick={() => insertFormatting('`', '`', '인라인 코드')} title="코드">
+            <Code size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('```javascript\n', '\n```', '// 코드')} title="코드 블록">
+            {"{ }"}
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('> ', '', '인용구')} title="인용문">
+            <Quote size={15} />
+          </button>
+          <div className="toolbar-divider" />
+
+          <button className="toolbar-btn" onClick={() => insertFormatting('- ', '', '항목')} title="불릿 목록">
+            <List size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('1. ', '', '항목')} title="숫자 목록">
+            <ListOrdered size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('- [ ] ', '', '할 일')} title="체크리스트">
+            <CheckSquare size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('| 제목 | 설명 |\n| --- | --- |\n| 항목1 | 내용1 |\n', '')} title="표">
+            <Table size={15} />
+          </button>
+          <button className="toolbar-btn" onClick={() => insertFormatting('[', '](https://example.com)', '링크 텍스트')} title="일반 링크">
+            <Link size={15} />
+          </button>
+
+          <div className="toolbar-divider" />
+
+          {/* New Attachments Toolbar Buttons */}
+          <button 
+            className="toolbar-btn" 
+            onClick={() => setIsInsertModalOpen(true)} 
+            title="기존 저장된 파일 첨부 / 유튜브 동영상 임베드"
+            style={{ color: 'var(--accent-primary)', fontWeight: 600, gap: 4 }}
+          >
+            <Paperclip size={14} />
+            <span>파일/영상 삽입</span>
+          </button>
+        </div>
+      )}
+
+      {/* Editor & Preview Panes */}
+      <div className="editor-panes">
+        {(viewMode === 'split' || viewMode === 'edit') && (
+          <div className="editor-pane-raw">
+            <textarea
+              ref={textareaRef}
+              className="editor-textarea"
+              value={content}
+              onChange={handleContentChange}
+              placeholder="마크다운 문법으로 지식을 자유롭게 기록하세요..."
+              spellCheck="false"
+            />
+          </div>
+        )}
+
+        {(viewMode === 'split' || viewMode === 'preview') && (
+          <div className="editor-pane-preview">
+            <div className="markdown-body">
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={customMarkdownComponents}
+              >
+                {content || '*작성된 내용이 없습니다. 왼쪽 에디터에서 내용을 입력하세요.*'}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Insert File / YouTube Modal */}
+      <InsertFileModal
+        isOpen={isInsertModalOpen}
+        onClose={() => setIsInsertModalOpen(false)}
+        onInsertMarkdown={handleInsertFromModal}
+      />
+    </div>
+  );
+}

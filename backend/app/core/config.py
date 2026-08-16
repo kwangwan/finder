@@ -1,0 +1,64 @@
+import os
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Locate .env file in root workspace
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
+ENV_FILE = ROOT_DIR / ".env"
+
+class Settings(BaseSettings):
+    # App
+    APP_NAME: str = "Project Run : Finder"
+    APP_VERSION: str = "1.0.0"
+    DEBUG: bool = False
+    APP_PUBLIC_URL: str = "https://finder.proj.run"
+    
+    # MinIO
+    MINIO_PUBLIC_URL: str = "https://public-storage.proj.run"
+    MINIO_PUBLIC_ROOT_USER: str = "project-run"
+    MINIO_PUBLIC_ROOT_PASSWORD: str = ""
+    MINIO_MAX_CHUNK_SIZE_MB: int = 50
+    MINIO_BUCKET_NAME: str = "knowledge-base"
+    MINIO_REGION: str = "us-east-1"
+    
+    # Optional internal MinIO endpoint if tunnel has separate API routing
+    MINIO_INTERNAL_URL: str = ""
+
+    # PostgreSQL
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = ""
+    POSTGRES_DB: str = "postgres"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
+    SYNC_DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/postgres"
+
+    # OpenWebUI / LLM & Embeddings
+    OPENWEBUI_URL: str = "http://localhost:3000"
+    OPENWEBUI_API_KEY: str = ""
+    OPENWEBUI_MODEL: str = "gemma4:latest"
+    OPENWEBUI_EMBEDDING_MODEL: str = "embeddinggemma:latest"
+    MAX_EMBED_TOKENS: int = 8000
+    EMBEDDING_DIM: int = 768
+
+    # Authentication & Google OAuth
+    JWT_SECRET: str = "change_me_in_env_file"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 10080
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+settings = Settings()
+
+# Normalize database URLs
+if settings.DATABASE_URL.startswith("postgresql://"):
+    settings.SYNC_DATABASE_URL = settings.DATABASE_URL
+    settings.DATABASE_URL = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+elif settings.DATABASE_URL.startswith("postgresql+asyncpg://"):
+    settings.SYNC_DATABASE_URL = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)

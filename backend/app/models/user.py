@@ -1,0 +1,55 @@
+import uuid
+from datetime import datetime
+from sqlalchemy import Column, String, Boolean, DateTime, BigInteger
+from sqlalchemy.dialects.postgresql import UUID
+from app.core.database import Base
+
+# 100 GB in bytes
+DEFAULT_STORAGE_QUOTA = 100 * 1024 * 1024 * 1024  # 107_374_182_400
+
+class User(Base):
+    __tablename__ = "kb_users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    name = Column(String(255), nullable=True)
+    picture = Column(String(1024), nullable=True)
+    google_id = Column(String(255), nullable=True, index=True)
+    hashed_password = Column(String(255), nullable=True)
+    is_admin = Column(Boolean, default=False, nullable=False)
+    is_approved = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    storage_quota_bytes = Column(BigInteger, default=DEFAULT_STORAGE_QUOTA, nullable=False)
+    storage_used_bytes = Column(BigInteger, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    last_login_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    @property
+    def storage_remaining_bytes(self) -> int:
+        return max(0, self.storage_quota_bytes - self.storage_used_bytes)
+
+    @property
+    def storage_usage_percent(self) -> float:
+        if self.storage_quota_bytes == 0:
+            return 100.0
+        return round((self.storage_used_bytes / self.storage_quota_bytes) * 100, 1)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "email": self.email,
+            "name": self.name or self.email.split("@")[0],
+            "picture": self.picture,
+            "google_id": self.google_id,
+            "has_password": bool(self.hashed_password),
+            "is_admin": self.is_admin,
+            "is_approved": self.is_approved,
+            "is_active": self.is_active,
+            "storage_quota_bytes": self.storage_quota_bytes,
+            "storage_used_bytes": self.storage_used_bytes,
+            "storage_remaining_bytes": self.storage_remaining_bytes,
+            "storage_usage_percent": self.storage_usage_percent,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+        }
