@@ -386,18 +386,30 @@ async def remove_member(
 
     is_self = current_user.id == user_id
 
-    # Owner can remove anyone; admin can remove members; users can leave
+    # Owner can remove anyone; admin can remove regular members; users can leave
     if not is_self:
-        # Need owner/admin role to remove others
-        m_res = await db.execute(
-            select(WorkspaceMember).where(
-                WorkspaceMember.workspace_id == workspace_id,
-                WorkspaceMember.user_id == current_user.id
+        is_owner = current_user.is_admin or (workspace.owner_id == current_user.id)
+        if not is_owner:
+            m_res = await db.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.user_id == current_user.id
+                )
             )
-        )
-        actor_member = m_res.scalar_one_or_none()
-        if not actor_member or actor_member.role not in ("owner", "admin"):
-            raise HTTPException(status_code=403, detail="멤버를 제거할 권한이 없습니다.")
+            actor_member = m_res.scalar_one_or_none()
+            if not actor_member or actor_member.role not in ("owner", "admin"):
+                raise HTTPException(status_code=403, detail="멤버를 추방할 권한이 없습니다.")
+
+            # Target member check: Admin cannot remove other admins or the owner
+            target_res = await db.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.user_id == user_id
+                )
+            )
+            target_member = target_res.scalar_one_or_none()
+            if target_member and target_member.role in ("owner", "admin"):
+                raise HTTPException(status_code=403, detail="관리자는 다른 관리자 또는 소유자를 추방할 수 없습니다.")
 
     if workspace.owner_id == user_id:
         raise HTTPException(status_code=400, detail="워크스페이스 소유자는 탈퇴할 수 없습니다. 워크스페이스를 삭제해주세요.")
@@ -409,4 +421,4 @@ async def remove_member(
         )
     )
     await db.commit()
-    return {"status": "success", "message": "멤버가 제거되었습니다."}
+    return {"status": "success", "message": "멤버가 워크스페이스에서 추방되었습니다."}

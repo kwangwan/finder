@@ -168,16 +168,16 @@ export default function WorkspaceSettingsModal({
 
   const handleRemoveMember = async (userId, userEmail) => {
     const isSelf = userId === currentUser?.id;
-    const confirmTitle = isSelf ? '워크스페이스 탈퇴' : '멤버 제외';
+    const confirmTitle = isSelf ? '워크스페이스 탈퇴' : '멤버 추방';
     const confirmMsg = isSelf 
       ? `'${workspace.name}' 워크스페이스에서 정말 탈퇴하시겠습니까?` 
-      : `'${userEmail}' 멤버를 워크스페이스에서 제외하시겠습니까?`;
+      : `'${userEmail}' 멤버를 이 워크스페이스에서 정말 추방하시겠습니까?`;
 
     const confirmed = await showConfirm({
       title: confirmTitle,
       message: confirmMsg,
       type: 'danger',
-      confirmText: isSelf ? '탈퇴' : '제외',
+      confirmText: isSelf ? '탈퇴' : '추방',
       cancelText: '취소'
     });
     if (!confirmed) return;
@@ -189,11 +189,13 @@ export default function WorkspaceSettingsModal({
         onClose();
       } else {
         await loadMembers();
+        setSuccessMsg(`'${userEmail}' 멤버를 워크스페이스에서 추방했습니다.`);
+        setTimeout(() => setSuccessMsg(''), 3000);
       }
     } catch (err) {
       await showAlert({
-        title: '처리 실패',
-        message: '멤버 처리 중 오류가 발생했습니다: ' + err.message,
+        title: isSelf ? '탈퇴 실패' : '추방 실패',
+        message: err.message || '작업을 완료하지 못했습니다.',
         type: 'error'
       });
     }
@@ -617,11 +619,11 @@ export default function WorkspaceSettingsModal({
                       )}
 
                       {/* Remove or Leave Button */}
-                      {!isMemberOwner && (isAdminOrOwner || isSelf) && (
+                      {!isMemberOwner && (isSelf || isOwner || (isAdminOrOwner && m.role === 'member')) && (
                         <button
                           className="btn-icon"
                           onClick={() => handleRemoveMember(m.user_id, m.user_email)}
-                          title={isSelf ? "워크스페이스 탈퇴" : "멤버 제외"}
+                          title={isSelf ? "워크스페이스 탈퇴" : "멤버 추방"}
                           style={{ padding: 4 }}
                         >
                           <UserX size={15} color="var(--accent-rose)" />
