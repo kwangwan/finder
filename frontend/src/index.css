@@ -1026,13 +1026,13 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 1.1rem;
+  padding: 0.95rem;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 140px;
+  min-height: 220px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   overflow: hidden;
 }
@@ -1046,34 +1046,48 @@ body {
 
 .file-card-top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.6rem;
+  min-height: 30px;
 }
 
 .file-icon-wrap {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-md);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
+.card-action-btn {
+  width: 26px !important;
+  height: 26px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: var(--radius-sm) !important;
+}
+
 .badge-embedded {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 700;
   color: #7c3aed;
   background: rgba(124, 58, 237, 0.12);
   border: 1px solid rgba(124, 58, 237, 0.25);
-  padding: 0.12rem 0.45rem;
+  padding: 0.1rem 0.4rem;
   border-radius: var(--radius-full);
   letter-spacing: -0.2px;
+  height: 20px;
+  line-height: 1;
   transition: all 0.2s ease;
 }
 
@@ -1091,10 +1105,10 @@ body {
 .file-card-thumbnail {
   position: relative;
   width: 100%;
-  height: 120px;
+  height: 110px;
   border-radius: var(--radius-md);
   overflow: hidden;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.6rem;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
   cursor: pointer;
@@ -1104,7 +1118,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.2s ease;
+  transition: transform 0.25s ease;
 }
 
 .file-card:hover .file-card-thumbnail img {
@@ -1126,11 +1140,57 @@ body {
   opacity: 1;
 }
 
+.file-card-doc-preview {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  border-radius: var(--radius-md);
+  margin-bottom: 0.6rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  padding: 0.65rem 0.75rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  transition: all 0.2s ease;
+}
+
+.file-card:hover .file-card-doc-preview {
+  border-color: var(--border-medium);
+  background: var(--bg-secondary);
+}
+
+.doc-preview-text {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  text-align: left;
+}
+
+.doc-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .file-card-title {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
   line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
@@ -1142,10 +1202,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   color: var(--text-muted);
   margin-top: auto;
-  padding-top: 0.6rem;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--border-subtle);
 }
 

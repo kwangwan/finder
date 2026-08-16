@@ -108,15 +108,15 @@ export default function FolderExplorer({
   };
 
   const getFileIcon = (file) => {
-    if (file.is_markdown || file.name.endsWith('.md')) return <FileText size={22} color="var(--accent-primary)" />;
-    if (file.file_type === 'pdf' || file.name.endsWith('.pdf')) return <FileText size={22} color="var(--accent-rose)" />;
-    if (file.file_type === 'docx' || file.name.endsWith('.docx') || file.name.endsWith('.doc')) return <FileText size={22} color="#2563eb" />;
-    if (file.file_type === 'xlsx' || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) return <Table size={22} color="var(--accent-emerald)" />;
-    if (file.file_type === 'image' || file.name.match(/\.(png|jpe?g|gif|webp|svg)$/i)) return <ImageIcon size={22} color="var(--accent-emerald)" />;
-    if (file.file_type === 'video' || file.name.match(/\.(mp4|webm|mov)$/i)) return <Film size={22} color="var(--accent-primary)" />;
-    if (file.file_type === 'code') return <FileCode size={22} color="#8b5cf6" />;
-    if (file.file_type === 'archive') return <FileArchive size={22} color="var(--accent-amber)" />;
-    return <File size={22} color="var(--text-secondary)" />;
+    if (file.is_markdown || file.name.endsWith('.md')) return <FileText size={16} color="var(--accent-primary)" />;
+    if (file.file_type === 'pdf' || file.name.endsWith('.pdf')) return <FileText size={16} color="var(--accent-rose)" />;
+    if (file.file_type === 'docx' || file.name.endsWith('.docx') || file.name.endsWith('.doc')) return <FileText size={16} color="#2563eb" />;
+    if (file.file_type === 'xlsx' || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) return <Table size={16} color="var(--accent-emerald)" />;
+    if (file.file_type === 'image' || file.name.match(/\.(png|jpe?g|gif|webp|svg)$/i)) return <ImageIcon size={16} color="var(--accent-emerald)" />;
+    if (file.file_type === 'video' || file.name.match(/\.(mp4|webm|mov)$/i)) return <Film size={16} color="var(--accent-primary)" />;
+    if (file.file_type === 'code') return <FileCode size={16} color="#8b5cf6" />;
+    if (file.file_type === 'archive') return <FileArchive size={16} color="var(--accent-amber)" />;
+    return <File size={16} color="var(--text-secondary)" />;
   };
 
   const formatFileSize = (bytes) => {
@@ -608,11 +608,11 @@ export default function FolderExplorer({
                   }}
                 >
                   <div className="file-card-top">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minHeight: 30 }}>
                       <div 
                         onClick={(e) => toggleFileSelection(file.id, e)}
                         title="선택"
-                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22 }}
                       >
                         {isSelected ? (
                           <CheckSquare size={16} color="var(--accent-primary)" />
@@ -635,45 +635,45 @@ export default function FolderExplorer({
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.2rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
                       {hasMedia && (
                         <button
-                          className="btn-icon"
+                          className="btn-icon card-action-btn"
                           onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
                           title="미디어 미리보기"
                         >
-                          <Eye size={15} color="var(--accent-primary)" />
+                          <Eye size={14} color="var(--accent-primary)" />
                         </button>
                       )}
                       <button 
-                        className="btn-icon" 
+                        className="btn-icon card-action-btn" 
                         onClick={(e) => { e.stopPropagation(); onToggleFavorite(file); }}
                         title="즐겨찾기"
                       >
                         <Star 
-                          size={15} 
+                          size={14} 
                           color={file.is_favorite ? 'var(--accent-amber)' : 'var(--text-muted)'} 
                           fill={file.is_favorite ? 'var(--accent-amber)' : 'none'} 
                         />
                       </button>
                       <button 
-                        className="btn-icon" 
+                        className="btn-icon card-action-btn" 
                         onClick={(e) => handleDownload(file, e)}
                         title="다운로드"
                       >
-                        <Download size={15} />
+                        <Download size={14} />
                       </button>
                       <button 
-                        className="btn-icon" 
+                        className="btn-icon card-action-btn" 
                         onClick={(e) => { e.stopPropagation(); onDeleteFile(file.id); }}
                         title="삭제"
                       >
-                        <Trash2 size={15} color="var(--accent-rose)" />
+                        <Trash2 size={14} color="var(--accent-rose)" />
                       </button>
                     </div>
                   </div>
 
-                  {(file.thumbnail_url || file.thumbnail_s3_key || hasMedia) && (
+                  {hasMedia ? (
                     <div 
                       className="file-card-thumbnail" 
                       onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
@@ -688,6 +688,22 @@ export default function FolderExplorer({
                       <div className="thumbnail-overlay">
                         <Eye size={16} color="#fff" />
                       </div>
+                    </div>
+                  ) : (
+                    <div 
+                      className="file-card-doc-preview"
+                      title="클릭하여 문서 열기"
+                    >
+                      {file.content ? (
+                        <div className="doc-preview-text">
+                          {file.content.slice(0, 160).replace(/[#*`_~>-]/g, '').trim() || '내용이 비어있는 문서입니다.'}
+                        </div>
+                      ) : (
+                        <div className="doc-preview-placeholder">
+                          <FileText size={22} style={{ opacity: 0.35 }} />
+                          <span>{file.file_type ? file.file_type.toUpperCase() : 'DOC'} 문서</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
