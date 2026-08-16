@@ -48,7 +48,7 @@ export default function WorkspaceSwitcher({
   const ActiveIcon = (activeWorkspace?.icon && ICON_MAP[activeWorkspace.icon]) || Briefcase;
 
   return (
-    <div ref={dropdownRef} style={{ position: 'relative', width: '100%', marginBottom: '0.85rem' }}>
+    <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
       {/* Active Workspace Button */}
       <button
         onClick={() => setIsOpen(prev => !prev)}

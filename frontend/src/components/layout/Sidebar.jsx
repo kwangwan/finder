@@ -197,7 +197,7 @@ export default function Sidebar({
       />
 
       {/* Brand Header */}
-      <div className="sidebar-header">
+      <div className="sidebar-header" style={{ padding: '1rem 0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)' }}>
         <div className="brand">
           <div className="brand-icon">
             <Sparkles size={18} />
@@ -212,7 +212,7 @@ export default function Sidebar({
       </div>
 
       {/* Slack-style Workspace Switcher */}
-      <div style={{ padding: '0 0.75rem' }}>
+      <div style={{ padding: '0.75rem 0.85rem 0.25rem' }}>
         <WorkspaceSwitcher
           workspaces={workspaces}
           activeWorkspace={activeWorkspace}
@@ -223,10 +223,10 @@ export default function Sidebar({
       </div>
 
       {/* Quick Nav Section */}
-      <div className="sidebar-section" style={{ marginTop: '0.75rem' }}>
+      <div className="sidebar-section" style={{ padding: '0.65rem 0.85rem 0.3rem' }}>
         <span>빠른 탐색</span>
       </div>
-      <ul className="sidebar-menu">
+      <ul className="sidebar-menu" style={{ padding: '0.15rem 0.85rem' }}>
         <li 
           className={`menu-item ${activeView === 'all' ? 'active' : ''}`}
           onClick={() => onSelectView('all')}
@@ -260,7 +260,7 @@ export default function Sidebar({
       </ul>
 
       {/* Folders Hierarchy Tree */}
-      <div className="sidebar-section" style={{ marginTop: '0.75rem' }}>
+      <div className="sidebar-section" style={{ padding: '0.65rem 0.85rem 0.3rem' }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="폴더 목록">
           폴더
         </span>
@@ -273,7 +273,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      <div className="folder-tree">
+      <div className="folder-tree" style={{ padding: '0.15rem 0.85rem' }}>
         <div className="folder-tree-inner">
           {folders.length === 0 ? (
             <div style={{ padding: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
@@ -288,7 +288,7 @@ export default function Sidebar({
       {/* Storage Footer Status */}
       {stats && (
         <div style={{ 
-          padding: '0.65rem 1rem', 
+          padding: '0.75rem 0.85rem', 
           borderTop: '1px solid var(--border-subtle)',
           backgroundColor: 'var(--bg-tertiary)',
           fontSize: '0.75rem',
