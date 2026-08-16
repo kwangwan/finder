@@ -12,7 +12,9 @@ import {
   CheckCircle2, 
   RefreshCw,
   Send,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Shield,
+  Briefcase
 } from 'lucide-react';
 import { listInvitations, createInvitation, cancelInvitation } from '../../api';
 import { useDialog } from '../../context/DialogContext';
@@ -67,7 +69,7 @@ export default function InvitationManagerModal({
         role
       });
       setEmail('');
-      setMessage({ type: 'success', text: `'${email}' 님에게 7일 유효 초대장이 발송되었습니다.` });
+      setMessage({ type: 'success', text: `'${email}' 님에게 7일 유효 초대장이 성공적으로 발송되었습니다.` });
       await loadInvitations();
     } catch (err) {
       setMessage({ type: 'error', text: err.message || '초대장 발송 실패' });
@@ -110,21 +112,56 @@ export default function InvitationManagerModal({
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 720, padding: '1.75rem' }}>
+      <div 
+        className="modal-content" 
+        onClick={e => e.stopPropagation()} 
+        style={{ 
+          maxWidth: 720, 
+          padding: '2rem',
+          borderRadius: 'var(--radius-xl)',
+          boxShadow: '0 24px 56px rgba(0, 0, 0, 0.5)',
+          background: 'var(--bg-secondary)'
+        }}
+      >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.85rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Mail size={22} color="var(--accent-primary)" />
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'flex-start', 
+          justifyContent: 'space-between', 
+          marginBottom: '1.5rem', 
+          borderBottom: '1px solid var(--border-subtle)', 
+          paddingBottom: '1.25rem' 
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent-primary)',
+              flexShrink: 0
+            }}>
+              <Mail size={22} />
+            </div>
             <div>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
                 초대 관리 & 멤버 승인
               </h2>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
                 초대된 사용자는 7일 동안 유효하며, 최고 관리자 초대는 가입 즉시 자동 승인됩니다.
               </p>
             </div>
           </div>
-          <button className="btn-icon" onClick={onClose}>
+          <button 
+            className="btn-icon" 
+            onClick={onClose}
+            style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title="닫기"
+          >
             <X size={18} />
           </button>
         </div>
@@ -132,183 +169,294 @@ export default function InvitationManagerModal({
         {/* Message Banner */}
         {message.text && (
           <div style={{
-            padding: '0.6rem 0.8rem',
-            background: message.type === 'error' ? 'rgba(244, 63, 94, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-            border: `1px solid ${message.type === 'error' ? 'rgba(244, 63, 94, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+            padding: '0.75rem 1rem',
+            background: message.type === 'error' ? 'rgba(244, 63, 94, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+            border: `1px solid ${message.type === 'error' ? 'rgba(244, 63, 94, 0.25)' : 'rgba(16, 185, 129, 0.25)'}`,
             borderRadius: 'var(--radius-md)',
             color: message.type === 'error' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
             fontSize: '0.85rem',
-            marginBottom: '1rem',
+            marginBottom: '1.5rem',
             display: 'flex',
             alignItems: 'center',
-            gap: 6
+            gap: 8,
+            fontWeight: 500
           }}>
-            {message.type === 'error' ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}
+            {message.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
             <span>{message.text}</span>
           </div>
         )}
 
-        {/* Send Invitation Form */}
-        <form onSubmit={handleSendInvite} style={{ background: 'var(--bg-tertiary)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1.5rem' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <UserPlus size={15} color="var(--accent-primary)" />
+        {/* Send Invitation Form Card */}
+        <form 
+          onSubmit={handleSendInvite} 
+          style={{ 
+            background: 'var(--bg-tertiary)', 
+            padding: '1.25rem 1.4rem', 
+            borderRadius: 'var(--radius-lg)', 
+            border: '1px solid var(--border-subtle)',
+            marginBottom: '1.75rem' 
+          }}
+        >
+          <div style={{ 
+            fontSize: '0.92rem', 
+            fontWeight: 700, 
+            color: 'var(--text-primary)', 
+            marginBottom: '1rem', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 6 
+          }}>
+            <UserPlus size={16} color="var(--accent-primary)" />
             <span>새 멤버 초대장 발송</span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 90px auto', gap: '0.5rem' }}>
-            <input
-              type="email"
-              required
-              placeholder="초대할 사용자 이메일"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.5rem 0.75rem',
-                fontSize: '0.85rem',
-                color: 'var(--text-primary)',
-                outline: 'none'
-              }}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.1fr 100px', gap: '0.75rem', marginBottom: '0.85rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                초대할 이메일 주소
+              </label>
+              <input
+                type="email"
+                required
+                placeholder="name@company.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: 40,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0 0.85rem',
+                  fontSize: '0.875rem',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
 
-            <select
-              value={workspaceId}
-              onChange={e => setWorkspaceId(e.target.value)}
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.5rem 0.6rem',
-                fontSize: '0.82rem',
-                color: 'var(--text-primary)',
-                outline: 'none'
-              }}
-            >
-              {currentUser?.is_admin && <option value="">전체 서비스 (자동 승인)</option>}
-              {workspaces.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                대상 워크스페이스
+              </label>
+              <select
+                value={workspaceId}
+                onChange={e => setWorkspaceId(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: 40,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0 0.75rem',
+                  fontSize: '0.85rem',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              >
+                {currentUser?.is_admin && <option value="">전체 서비스 (기본)</option>}
+                {workspaces.map(w => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            </div>
 
-            <select
-              value={role}
-              onChange={e => setRole(e.target.value)}
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.5rem 0.5rem',
-                fontSize: '0.82rem',
-                color: 'var(--text-primary)',
-                outline: 'none'
-              }}
-            >
-              <option value="member">멤버</option>
-              <option value="admin">관리자</option>
-            </select>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                역할 권한
+              </label>
+              <select
+                value={role}
+                onChange={e => setRole(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: 40,
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '0 0.65rem',
+                  fontSize: '0.85rem',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <option value="member">멤버</option>
+                <option value="admin">관리자</option>
+              </select>
+            </div>
+          </div>
 
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
             <button
               type="submit"
               className="btn-primary"
               disabled={isSending || !email.trim()}
-              style={{ padding: '0.5rem 0.9rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+              style={{ 
+                height: 38, 
+                padding: '0 1.25rem', 
+                fontSize: '0.85rem', 
+                fontWeight: 700, 
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6
+              }}
             >
-              <Send size={13} />
-              <span>{isSending ? '발송 중...' : '초대 발송'}</span>
+              <Send size={14} />
+              <span>{isSending ? '초대장 발송 중...' : '초대장 발송하기'}</span>
             </button>
           </div>
         </form>
 
-        {/* Sent Invitations List */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            발송된 초대 목록 ({invitations.length})
-          </div>
-          <button className="btn-icon" onClick={loadInvitations} title="새로고침">
-            <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
-          </button>
-        </div>
-
-        <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-          {invitations.length === 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              발송된 초대가 없습니다.
+        {/* Sent Invitations List Section */}
+        <div>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between', 
+            marginBottom: '0.85rem' 
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                발송된 초대 내역
+              </span>
+              <span className="menu-badge" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>
+                {invitations.length}
+              </span>
             </div>
-          ) : (
-            invitations.map(inv => {
-              const isPending = inv.status === 'pending';
-              const isExpired = inv.is_expired || inv.status === 'expired';
-              const isAccepted = inv.status === 'accepted';
-              const isCancelled = inv.status === 'cancelled';
+            <button 
+              className="btn-icon" 
+              onClick={loadInvitations} 
+              title="새로고침"
+              style={{ width: 30, height: 30, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <RefreshCw size={14} className={isLoading ? 'spin-anim' : ''} />
+            </button>
+          </div>
 
-              return (
-                <div
-                  key={inv.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.65rem 0.85rem',
-                    background: 'var(--bg-tertiary)',
-                    borderRadius: 'var(--radius-md)',
-                    marginBottom: 6,
-                    fontSize: '0.82rem'
-                  }}
-                >
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: 2 }}>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{inv.email}</span>
-                      <span style={{
-                        fontSize: '0.7rem',
-                        padding: '0.1rem 0.4rem',
-                        borderRadius: 4,
-                        fontWeight: 600,
-                        backgroundColor: isAccepted ? 'rgba(16, 185, 129, 0.2)' : isPending ? 'rgba(59, 130, 246, 0.2)' : 'rgba(244, 63, 94, 0.2)',
-                        color: isAccepted ? 'var(--accent-emerald)' : isPending ? 'var(--accent-primary)' : 'var(--accent-rose)'
-                      }}>
-                        {isAccepted ? '수락 완료' : isPending ? '대기 중 (7일 유효)' : isExpired ? '만료됨' : '취소됨'}
-                      </span>
-                      {inv.is_admin_invite && (
-                        <span style={{ fontSize: '0.68rem', color: 'var(--accent-amber)', fontWeight: 600 }}>[자동승인 대상]</span>
+          <div style={{ maxHeight: 280, overflowY: 'auto', paddingRight: '2px' }}>
+            {invitations.length === 0 ? (
+              <div style={{ 
+                padding: '2.5rem 1rem', 
+                textAlign: 'center', 
+                color: 'var(--text-muted)', 
+                background: 'var(--bg-tertiary)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--border-subtle)',
+                fontSize: '0.85rem' 
+              }}>
+                <Mail size={32} color="var(--text-muted)" style={{ margin: '0 auto 0.6rem', display: 'block', opacity: 0.6 }} />
+                발송된 초대 내역이 없습니다.
+              </div>
+            ) : (
+              invitations.map(inv => {
+                const isPending = inv.status === 'pending';
+                const isExpired = inv.is_expired || inv.status === 'expired';
+                const isAccepted = inv.status === 'accepted';
+                const isCancelled = inv.status === 'cancelled';
+
+                return (
+                  <div
+                    key={inv.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.85rem 1rem',
+                      background: 'var(--bg-tertiary)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border-subtle)',
+                      marginBottom: '0.6rem',
+                      fontSize: '0.85rem',
+                      transition: 'var(--transition-fast)'
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0, paddingRight: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: 4, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                          {inv.email}
+                        </span>
+                        <span style={{
+                          fontSize: '0.72rem',
+                          padding: '0.15rem 0.5rem',
+                          borderRadius: 4,
+                          fontWeight: 700,
+                          backgroundColor: isAccepted ? 'rgba(16, 185, 129, 0.15)' : isPending ? 'rgba(59, 130, 246, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                          color: isAccepted ? 'var(--accent-emerald)' : isPending ? 'var(--accent-primary)' : 'var(--accent-rose)',
+                          border: `1px solid ${isAccepted ? 'rgba(16, 185, 129, 0.3)' : isPending ? 'rgba(59, 130, 246, 0.3)' : 'rgba(244, 63, 94, 0.3)'}`
+                        }}>
+                          {isAccepted ? '수락 완료' : isPending ? '대기 중 (7일 유효)' : isExpired ? '만료됨' : '취소됨'}
+                        </span>
+                        {inv.is_admin_invite && (
+                          <span style={{ 
+                            fontSize: '0.7rem', 
+                            color: 'var(--accent-amber)', 
+                            fontWeight: 700,
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            padding: '0.1rem 0.4rem',
+                            borderRadius: 4,
+                            border: '1px solid rgba(245, 158, 11, 0.25)'
+                          }}>
+                            자동 승인 대상
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <span>워크스페이스: <strong style={{ color: 'var(--text-secondary)' }}>{inv.workspace_name || '전체 서비스'}</strong></span>
+                        <span>·</span>
+                        <span>역할: <strong style={{ color: 'var(--text-secondary)' }}>{inv.role === 'admin' ? '관리자' : '멤버'}</strong></span>
+                        <span>·</span>
+                        <span>만료: {new Date(inv.expires_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                      {isPending && (
+                        <button
+                          className="btn-secondary"
+                          onClick={() => handleCopyLink(inv.token)}
+                          style={{ 
+                            height: 32, 
+                            fontSize: '0.78rem', 
+                            padding: '0 0.75rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}
+                          title="초대 링크 복사"
+                        >
+                          {copiedToken === inv.token ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />}
+                          <span>{copiedToken === inv.token ? '복사됨!' : '링크 복사'}</span>
+                        </button>
+                      )}
+
+                      {isPending && (
+                        <button
+                          className="btn-icon"
+                          onClick={() => handleCancelInvite(inv.id)}
+                          title="초대 취소"
+                          style={{ 
+                            width: 32, 
+                            height: 32, 
+                            borderRadius: 6,
+                            color: 'var(--accent-rose)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       )}
                     </div>
-
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      워크스페이스: <strong>{inv.workspace_name || '전체 서비스'}</strong> ({inv.role === 'admin' ? '관리자' : '멤버'}) · 
-                      만료일: {new Date(inv.expires_at).toLocaleDateString()}
-                    </div>
                   </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    {isPending && (
-                      <button
-                        className="btn-secondary"
-                        onClick={() => handleCopyLink(inv.token)}
-                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
-                        title="초대 링크 복사"
-                      >
-                        {copiedToken === inv.token ? <Check size={12} color="var(--accent-emerald)" /> : <Copy size={12} />}
-                        <span>{copiedToken === inv.token ? '복사됨!' : '링크 복사'}</span>
-                      </button>
-                    )}
-
-                    {isPending && (
-                      <button
-                        className="btn-icon"
-                        onClick={() => handleCancelInvite(inv.id)}
-                        title="초대 취소"
-                        style={{ padding: 4 }}
-                      >
-                        <Trash2 size={14} color="var(--accent-rose)" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     </div>

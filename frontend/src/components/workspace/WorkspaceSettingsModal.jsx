@@ -223,31 +223,95 @@ export default function WorkspaceSettingsModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 640, padding: '1.75rem' }}>
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
+      <div 
+        className="modal-content" 
+        onClick={e => e.stopPropagation()} 
+        style={{ 
+          maxWidth: 660, 
+          padding: '2rem',
+          borderRadius: 'var(--radius-xl)',
+          boxShadow: '0 24px 56px rgba(0, 0, 0, 0.5)',
+          background: 'var(--bg-secondary)'
+        }}
+      >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.85rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Briefcase size={22} color="var(--accent-primary)" />
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>
-              {isCreateMode ? '새 워크스페이스 만들기' : `${workspace?.name} 워크스페이스 관리`}
-            </h2>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'flex-start', 
+          justifyContent: 'space-between', 
+          marginBottom: '1.5rem', 
+          borderBottom: '1px solid var(--border-subtle)', 
+          paddingBottom: '1.25rem' 
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent-primary)',
+              flexShrink: 0
+            }}>
+              <Briefcase size={22} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                {isCreateMode ? '새 워크스페이스 만들기' : `${workspace?.name} 워크스페이스 관리`}
+              </h2>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                {isCreateMode ? '새로운 프로젝트 또는 팀을 위한 독립적인 작업 공간을 생성합니다.' : '워크스페이스 기본 정보 및 소속 멤버 권한을 관리합니다.'}
+              </p>
+            </div>
           </div>
-          <button className="btn-icon" onClick={onClose}>
+          <button 
+            className="btn-icon" 
+            onClick={onClose}
+            style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            title="닫기"
+          >
             <X size={18} />
           </button>
         </div>
 
         {error && (
-          <div style={{ padding: '0.6rem 0.8rem', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)', borderRadius: 'var(--radius-md)', color: 'var(--accent-rose)', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <AlertCircle size={15} />
+          <div style={{ 
+            padding: '0.75rem 1rem', 
+            background: 'rgba(244, 63, 94, 0.12)', 
+            border: '1px solid rgba(244, 63, 94, 0.25)', 
+            borderRadius: 'var(--radius-md)', 
+            color: 'var(--accent-rose)', 
+            fontSize: '0.85rem', 
+            marginBottom: '1.5rem', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 8,
+            fontWeight: 500
+          }}>
+            <AlertCircle size={16} />
             <span>{error}</span>
           </div>
         )}
 
         {successMsg && (
-          <div style={{ padding: '0.6rem 0.8rem', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: 'var(--radius-md)', color: 'var(--accent-emerald)', fontSize: '0.85rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <CheckCircle2 size={15} />
+          <div style={{ 
+            padding: '0.75rem 1rem', 
+            background: 'rgba(16, 185, 129, 0.12)', 
+            border: '1px solid rgba(16, 185, 129, 0.25)', 
+            borderRadius: 'var(--radius-md)', 
+            color: 'var(--accent-emerald)', 
+            fontSize: '0.85rem', 
+            marginBottom: '1.5rem', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 8,
+            fontWeight: 500
+          }}>
+            <CheckCircle2 size={16} />
             <span>{successMsg}</span>
           </div>
         )}
