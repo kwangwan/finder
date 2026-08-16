@@ -83,7 +83,7 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [activeFile, setActiveFile] = useState(null);
   const [stats, setStats] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Sorting & Pagination State
   const [sortBy, setSortBy] = useState('updated_at'); // 'name' | 'file_type' | 'updated_at' | 'created_at' | 'size_bytes'
@@ -1057,7 +1057,7 @@ export default function App() {
         ) : (
           <FolderExplorer
             workspaceName={activeWorkspace?.name || '내 워크스페이스'}
-            isLoading={isLoading}
+            isLoading={isLoading || !isWorkspacesLoaded || isAuthLoading}
             currentFolder={currentFolder}
             subfolders={currentSubfolders}
             files={files}
