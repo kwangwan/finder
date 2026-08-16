@@ -1069,6 +1069,7 @@ export default function App() {
         {activeView === 'trash' ? (
           <TrashExplorer
             activeWorkspace={activeWorkspace}
+            currentUser={currentUser}
             onOpenMediaPreview={(file) => setMediaPreviewFile(file)}
             onRefreshParent={() => {
               refreshFiles();

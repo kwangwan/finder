@@ -223,13 +223,16 @@ async def purge_file_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Permanently delete a file from trash."""
-    if not await access_service.can_access_file(db, current_user, file_id):
-        raise HTTPException(status_code=403, detail="파일을 삭제할 권한이 없습니다.")
-
+    """Permanently delete a file from trash (workspace owner/admin or superadmin only)."""
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
+
+    if file_item.workspace_id:
+        if not await access_service.is_workspace_admin_or_owner(db, current_user, file_item.workspace_id):
+            raise HTTPException(status_code=403, detail="휴지통의 파일을 영구 삭제할 권한이 없습니다. (소유자 및 관리자만 영구 삭제 가능)")
+    elif not current_user.is_admin and file_item.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="파일을 삭제할 권한이 없습니다.")
 
     await _purge_file(db, file_item)
     await db.commit()
@@ -242,13 +245,16 @@ async def purge_folder_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Permanently delete a folder and all its contents from trash."""
-    if not await access_service.can_access_folder(db, current_user, folder_id):
-        raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
-
+    """Permanently delete a folder and all its contents from trash (workspace owner/admin or superadmin only)."""
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+
+    if folder.workspace_id:
+        if not await access_service.is_workspace_admin_or_owner(db, current_user, folder.workspace_id):
+            raise HTTPException(status_code=403, detail="휴지통의 폴더를 영구 삭제할 권한이 없습니다. (소유자 및 관리자만 영구 삭제 가능)")
+    elif not current_user.is_admin and folder.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
 
     await _purge_folder_recursive(db, folder)
     await db.commit()
@@ -261,30 +267,18 @@ async def empty_trash(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Permanently delete all accessible trashed files and folders."""
+    """Permanently delete all accessible trashed files and folders (workspace owner/admin or superadmin only)."""
     # Find accessible trashed folders & files
     folder_conditions = [Folder.is_trashed == True]
     file_conditions = [FileItem.is_trashed == True]
 
     if workspace_id:
-        if not await access_service.is_workspace_member(db, current_user, workspace_id):
-            raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+        if not await access_service.is_workspace_admin_or_owner(db, current_user, workspace_id):
+            raise HTTPException(status_code=403, detail="휴지통 비우기 권한이 없습니다. (워크스페이스 소유자 및 관리자만 비울 수 있습니다)")
         folder_conditions.append(Folder.workspace_id == workspace_id)
         file_conditions.append(FileItem.workspace_id == workspace_id)
     elif not current_user.is_admin:
-        ws_ids = await access_service.get_user_workspace_ids(db, current_user.id)
-        if ws_ids:
-            folder_conditions.append(or_(
-                Folder.workspace_id.in_(list(ws_ids)),
-                and_(Folder.workspace_id.is_(None), Folder.created_by == current_user.id)
-            ))
-            file_conditions.append(or_(
-                FileItem.workspace_id.in_(list(ws_ids)),
-                and_(FileItem.workspace_id.is_(None), FileItem.created_by == current_user.id)
-            ))
-        else:
-            folder_conditions.append(and_(Folder.workspace_id.is_(None), Folder.created_by == current_user.id))
-            file_conditions.append(and_(FileItem.workspace_id.is_(None), FileItem.created_by == current_user.id))
+        raise HTTPException(status_code=403, detail="휴지통 비우기는 특정 워크스페이스의 소유자/관리자 또는 최고 관리자만 수행할 수 있습니다.")
 
     # 1. Purge files
     files_res = await db.execute(select(FileItem).where(and_(*file_conditions)))

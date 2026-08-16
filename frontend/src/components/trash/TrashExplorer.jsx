@@ -34,6 +34,7 @@ function formatDate(dateStr) {
 
 export default function TrashExplorer({
   activeWorkspace,
+  currentUser,
   onOpenMediaPreview,
   onRefreshParent,
 }) {
@@ -42,6 +43,11 @@ export default function TrashExplorer({
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState(null);
+
+  const isOwnerOrAdmin = currentUser?.is_admin || 
+    activeWorkspace?.owner_id === currentUser?.id || 
+    activeWorkspace?.role === 'owner' || 
+    activeWorkspace?.role === 'admin';
 
   const loadTrash = async () => {
     if (!activeWorkspace?.id) {
@@ -216,6 +222,7 @@ export default function TrashExplorer({
   return (
     <div className="explorer-container">
       {/* 30-Day Auto Purge Notification Banner */}
+      {/* 30-Day Auto Purge Notification Banner */}
       <div className="trash-notice-banner">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div className="trash-notice-icon">
@@ -223,10 +230,10 @@ export default function TrashExplorer({
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 2 }}>
-              휴지통 자동 보관 정책 안내
+              휴지통 보관 및 영구 삭제 정책 안내
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              휴지통에 보관된 파일 및 폴더는 삭제일로부터 <strong>30일 후 자동으로 영구 삭제</strong>됩니다. 필요한 항목은 언제든지 원래 위치로 복구할 수 있습니다.
+              휴지통 항목은 <strong>30일 후 자동 영구 삭제</strong>되며 누구나 복구할 수 있습니다. 어뷰징 방지를 위해 <strong>즉시 영구 삭제 및 휴지통 비우기는 소유자 및 관리자만 가능</strong>합니다.
             </div>
           </div>
         </div>
@@ -256,7 +263,7 @@ export default function TrashExplorer({
             <RefreshCw size={16} className={isLoading ? 'spin' : ''} />
           </button>
 
-          {trashData.total_count > 0 && (
+          {trashData.total_count > 0 && isOwnerOrAdmin && (
             <button
               className="btn-danger"
               onClick={handleEmptyTrash}
@@ -273,7 +280,7 @@ export default function TrashExplorer({
                 fontWeight: 600,
                 cursor: 'pointer'
               }}
-              title="휴지통 전체 비우기"
+              title="휴지통 전체 비우기 (소유자 및 관리자 전용)"
             >
               <Trash2 size={15} />
               <span>휴지통 비우기</span>
@@ -374,14 +381,16 @@ export default function TrashExplorer({
                   >
                     <RotateCcw size={15} color="var(--accent-emerald)" />
                   </button>
-                  <button 
-                    className="btn-icon" 
-                    onClick={() => handleDeletePermanentFolder(folder)}
-                    title="영구 삭제"
-                    disabled={actionLoadingId === folder.id}
-                  >
-                    <Trash2 size={15} color="var(--accent-rose)" />
-                  </button>
+                  {isOwnerOrAdmin && (
+                    <button 
+                      className="btn-icon" 
+                      onClick={() => handleDeletePermanentFolder(folder)}
+                      title="영구 삭제 (소유자/관리자 전용)"
+                      disabled={actionLoadingId === folder.id}
+                    >
+                      <Trash2 size={15} color="var(--accent-rose)" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -433,14 +442,16 @@ export default function TrashExplorer({
                   >
                     <RotateCcw size={15} color="var(--accent-emerald)" />
                   </button>
-                  <button 
-                    className="btn-icon" 
-                    onClick={() => handleDeletePermanentFile(file)}
-                    title="영구 삭제"
-                    disabled={actionLoadingId === file.id}
-                  >
-                    <Trash2 size={15} color="var(--accent-rose)" />
-                  </button>
+                  {isOwnerOrAdmin && (
+                    <button 
+                      className="btn-icon" 
+                      onClick={() => handleDeletePermanentFile(file)}
+                      title="영구 삭제 (소유자/관리자 전용)"
+                      disabled={actionLoadingId === file.id}
+                    >
+                      <Trash2 size={15} color="var(--accent-rose)" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

@@ -38,6 +38,16 @@ class AccessService:
         row = res.first()
         return row[0] if row else None
 
+    async def is_workspace_admin_or_owner(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> bool:
+        """Check if user is a workspace owner or admin (or superadmin)."""
+        if user.is_admin:
+            return True
+        ws = await db.get(Workspace, workspace_id)
+        if ws and ws.owner_id == user.id:
+            return True
+        role = await self.get_workspace_role(db, user, workspace_id)
+        return role in ("owner", "admin")
+
     async def can_access_file(self, db: AsyncSession, user: User, file_id: uuid.UUID) -> bool:
         """Check if user can access the file via workspace membership."""
         if user.is_admin:
