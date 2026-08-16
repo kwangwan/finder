@@ -1364,6 +1364,17 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* Prevent awkward word breaking across lines in Korean & Asian typography */
+h1, h2, h3, h4, h5, h6,
+.badge, .role-badge, .badge-embedded, .badge-days,
+.topbar-brand, .explorer-item-count, .sort-label,
+.dialog-title, .dialog-message, .modal-title, .modal-subtitle,
+.trash-notice-banner, .empty-state h3, .empty-state p,
+.workspace-card, .btn, .btn-primary, .btn-secondary,
+.sidebar-header, .sidebar-actions {
+  word-break: keep-all;
+}
+
 /* Mobile Responsive Styles */
 @media (max-width: 768px) {
   .app-container {
@@ -1433,10 +1444,11 @@ body {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
-    height: 56px !important;
-    min-height: 56px !important;
-    max-height: 56px !important;
-    padding: 0 0.85rem !important;
+    height: 52px !important;
+    min-height: 52px !important;
+    max-height: 52px !important;
+    padding: 0 0.75rem !important;
+    gap: 0.4rem !important;
     flex-shrink: 0 !important;
     z-index: 100 !important;
     background: var(--bg-secondary) !important;
@@ -1446,17 +1458,18 @@ body {
   .topbar-left {
     display: flex !important;
     align-items: center !important;
-    gap: 0.6rem !important;
+    gap: 0.5rem !important;
     min-width: 0 !important;
+    flex-shrink: 0 !important;
   }
 
   .topbar-left .btn-icon {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    min-width: 36px !important;
-    min-height: 36px !important;
-    padding: 6px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+    padding: 5px !important;
     background: var(--bg-tertiary) !important;
     border: 1px solid var(--border-subtle) !important;
     border-radius: var(--radius-md) !important;
@@ -1464,43 +1477,189 @@ body {
   }
 
   .topbar-brand {
-    font-size: 1rem !important;
+    font-size: 0.95rem !important;
     font-weight: 800 !important;
     display: block !important;
     color: var(--text-primary) !important;
+    white-space: nowrap !important;
   }
 
   .topbar-center {
     display: none;
   }
 
+  .topbar-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.35rem !important;
+    flex-shrink: 0 !important;
+  }
+
+  .user-dropdown-menu {
+    width: min(280px, calc(100vw - 20px)) !important;
+    right: 0 !important;
+  }
+
   .grid-cards {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)) !important;
+    gap: 0.65rem !important;
   }
 
   .grid-folders {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)) !important;
+    gap: 0.65rem !important;
+  }
+
+  .file-card {
+    min-height: 185px !important;
+    padding: 0.75rem !important;
+  }
+
+  .file-card-thumbnail,
+  .file-card-doc-preview {
+    height: 90px !important;
+  }
+
+  .file-card-title {
+    font-size: 0.82rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    margin-bottom: 0.25rem !important;
+  }
+
+  .file-card-meta {
+    font-size: 0.7rem !important;
+    padding-top: 0.35rem !important;
+    white-space: nowrap !important;
+  }
+
+  .folder-card {
+    padding: 0.75rem !important;
+  }
+
+  .folder-card-title {
+    font-size: 0.82rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   .explorer-header {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 0.4rem !important;
+    margin-bottom: 0.75rem !important;
+    min-height: 36px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .breadcrumb-nav {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.2rem !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    scrollbar-width: none !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .breadcrumb-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .breadcrumb-item {
-    max-width: 160px;
+    max-width: 110px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 0.82rem !important;
+    padding: 0 4px !important;
+    height: 28px !important;
+    line-height: 1 !important;
+    flex-shrink: 1 !important;
   }
 
   .breadcrumb-item.active {
-    max-width: 260px;
-    font-weight: 700;
+    max-width: 140px !important;
+    font-weight: 700 !important;
+    flex-shrink: 0 !important;
   }
 
   .breadcrumb-item:hover,
   .breadcrumb-item:active {
-    max-width: max-content;
+    max-width: max-content !important;
+  }
+
+  .explorer-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .explorer-btn {
+    height: 32px !important;
+    min-width: 32px !important;
+    padding: 0 6px !important;
+    font-size: 0.78rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .explorer-toolbar {
+    padding: 0.4rem 0.65rem !important;
+    margin-bottom: 0.85rem !important;
+    gap: 0.4rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+  }
+
+  .explorer-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .explorer-toolbar-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.4rem !important;
+    flex-shrink: 0 !important;
+    min-width: 0 !important;
+  }
+
+  .explorer-item-count {
+    font-size: 0.78rem !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  .explorer-toolbar-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .sort-select {
+    padding: 0.2rem 0.4rem !important;
+    font-size: 0.74rem !important;
+    max-width: 82px !important;
+    height: 28px !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .sort-order-btn {
+    padding: 0.2rem 0.45rem !important;
+    font-size: 0.74rem !important;
+    height: 28px !important;
   }
 
   .hide-mobile {
@@ -1512,10 +1671,11 @@ body {
   }
 
   .modal-content {
-    width: 95vw !important;
-    max-width: 95vw !important;
-    margin: 10px;
-    padding: 1.25rem !important;
+    width: calc(100vw - 20px) !important;
+    max-width: calc(100vw - 20px) !important;
+    margin: 10px !important;
+    padding: 1.15rem !important;
+    max-height: 92vh !important;
   }
 
   .invitation-grid {
@@ -1527,25 +1687,71 @@ body {
   .folder-explorer {
     flex: 1 !important;
     min-height: 0 !important;
-    height: calc(100% - 56px) !important;
-    padding: 0.85rem !important;
+    height: calc(100% - 52px) !important;
+    padding: 0.75rem 0.65rem !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
   }
 
   .batch-floating-bar {
-    width: calc(100vw - 1.5rem) !important;
-    bottom: 1rem !important;
-    padding: 0.5rem 0.75rem !important;
-    gap: 0.4rem !important;
+    width: calc(100vw - 1.2rem) !important;
+    bottom: 0.85rem !important;
+    padding: 0.45rem 0.65rem !important;
+    gap: 0.35rem !important;
     overflow-x: auto;
   }
 
   .transfer-manager-container {
-    bottom: 1rem !important;
-    right: 1rem !important;
-    width: calc(100vw - 2rem) !important;
-    max-width: calc(100vw - 2rem) !important;
+    bottom: 0.85rem !important;
+    right: 0.85rem !important;
+    width: calc(100vw - 1.7rem) !important;
+    max-width: calc(100vw - 1.7rem) !important;
+  }
+
+  .trash-notice-banner {
+    padding: 0.75rem 0.85rem !important;
+    font-size: 0.78rem !important;
+    line-height: 1.45 !important;
+  }
+
+  .trash-list-item {
+    padding: 0.65rem 0.75rem !important;
+    gap: 0.5rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .grid-cards {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  .grid-folders {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+
+  .file-card {
+    min-height: 165px !important;
+    padding: 0.6rem !important;
+  }
+
+  .file-card-thumbnail,
+  .file-card-doc-preview {
+    height: 76px !important;
+  }
+
+  .doc-preview-text {
+    -webkit-line-clamp: 3 !important;
+    font-size: 0.66rem !important;
+  }
+
+  .breadcrumb-item {
+    max-width: 80px !important;
+  }
+
+  .breadcrumb-item.active {
+    max-width: 100px !important;
   }
 }
 
