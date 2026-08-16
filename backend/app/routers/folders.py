@@ -6,10 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, and_, or_, desc, asc
 
+import io
+import re
+import zipfile
+import urllib.parse
+from fastapi.responses import StreamingResponse
 from app.core.database import get_db
 from app.models import Folder, FileItem, User, WorkspaceMember
 from app.core.security import get_current_approved_user
-from app.schemas.folder import FolderCreate, FolderUpdate, FolderResponse, FolderTreeNode, PagedFolderResponse
+from app.schemas.folder import (
+    FolderCreate, FolderUpdate, FolderResponse, FolderTreeNode, PagedFolderResponse,
+    EnsurePathRequest, EnsurePathResponse
+)
 from app.schemas.file import FileRenameRequest
 from app.services.access_service import access_service
 from app.services.s3_service import s3_service
@@ -399,5 +407,161 @@ async def delete_folder(
     await db.delete(folder)
     await db.commit()
     return None
+
+
+@router.post("/ensure-path", response_model=EnsurePathResponse)
+async def ensure_folder_path(
+    req: EnsurePathRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Ensure all folders along relative_path exist in workspace.
+    Creates missing parent/child folders recursively and returns the target folder ID.
+    """
+    if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
+        raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
+
+    clean_path = req.relative_path.strip().replace('\\', '/')
+    parts = [p.strip() for p in clean_path.split('/') if p.strip()]
+
+    if not parts:
+        folder_name = ""
+        if req.parent_id:
+            parent_folder = await db.get(Folder, req.parent_id)
+            if parent_folder:
+                folder_name = parent_folder.name
+        return EnsurePathResponse(
+            folder_id=req.parent_id,
+            folder_name=folder_name,
+            relative_path=""
+        )
+
+    current_parent_id = req.parent_id
+    last_folder = None
+
+    for part in parts:
+        # Check if folder exists under current_parent_id
+        q = select(Folder).where(
+            and_(
+                Folder.workspace_id == req.workspace_id,
+                Folder.name == part,
+                Folder.parent_id == current_parent_id,
+                Folder.is_trashed == False
+            )
+        )
+        res = await db.execute(q)
+        existing = res.scalar_one_or_none()
+
+        if existing:
+            current_parent_id = existing.id
+            last_folder = existing
+        else:
+            # Create new folder
+            new_folder = Folder(
+                name=part,
+                workspace_id=req.workspace_id,
+                parent_id=current_parent_id,
+                created_by=current_user.id
+            )
+            db.add(new_folder)
+            await db.commit()
+            await db.refresh(new_folder)
+            current_parent_id = new_folder.id
+            last_folder = new_folder
+
+    return EnsurePathResponse(
+        folder_id=last_folder.id if last_folder else None,
+        folder_name=last_folder.name if last_folder else parts[-1],
+        relative_path=clean_path
+    )
+
+
+async def _collect_folder_files_recursive(
+    db: AsyncSession,
+    folder_id: uuid.UUID,
+    current_path: str = ""
+) -> List[tuple[FileItem, str]]:
+    """Recursively collect (FileItem, relative_archive_path) for all files in folder and subfolders."""
+    items = []
+    
+    # 1. Direct files in this folder
+    files_res = await db.execute(
+        select(FileItem).where(
+            and_(FileItem.folder_id == folder_id, FileItem.is_trashed == False)
+        )
+    )
+    for f in files_res.scalars().all():
+        archive_path = f"{current_path}/{f.name}" if current_path else f.name
+        items.append((f, archive_path))
+    
+    # 2. Subfolders
+    folders_res = await db.execute(
+        select(Folder).where(
+            and_(Folder.parent_id == folder_id, Folder.is_trashed == False)
+        )
+    )
+    for sub in folders_res.scalars().all():
+        sub_path = f"{current_path}/{sub.name}" if current_path else sub.name
+        sub_items = await _collect_folder_files_recursive(db, sub.id, sub_path)
+        items.extend(sub_items)
+        
+    return items
+
+
+@router.get("/{folder_id}/download")
+async def download_folder_zip(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Download an entire folder as a ZIP archive with recursive hierarchy.
+    """
+    folder = await db.get(Folder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다.")
+
+    if not await access_service.can_access_folder(db, current_user, folder_id):
+        raise HTTPException(status_code=403, detail="폴더를 다운로드할 권한이 없습니다.")
+
+    # Collect all files recursively
+    files_with_paths = await _collect_folder_files_recursive(db, folder.id, "")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        # If folder is empty, create an empty folder entry
+        if not files_with_paths:
+            zip_file.writestr(f"{folder.name}/.keep", b"")
+
+        for file_item, rel_path in files_with_paths:
+            full_rel_path = f"{folder.name}/{rel_path}"
+            
+            # Read content
+            file_bytes = None
+            if file_item.is_markdown and file_item.content:
+                file_bytes = file_item.content.encode("utf-8")
+            elif file_item.s3_key:
+                file_bytes = s3_service.get_object_content(file_item.s3_key)
+
+            if file_bytes is not None:
+                zip_file.writestr(full_rel_path, file_bytes)
+
+    zip_buffer.seek(0)
+    zip_size = zip_buffer.getbuffer().nbytes
+    safe_filename = urllib.parse.quote(f"{folder.name}.zip")
+
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
+        "Content-Length": str(zip_size),
+        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length"
+    }
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers=headers
+    )
+
 
 

@@ -72,3 +72,10 @@ class PagedFileResponse(BaseModel):
     page_size: int
     total_pages: int
 
+class BatchDownloadRequest(BaseModel):
+    workspace_id: uuid.UUID
+    file_ids: List[uuid.UUID] = []
+    folder_ids: List[uuid.UUID] = []
+    archive_name: Optional[str] = "download_archive.zip"
+
+

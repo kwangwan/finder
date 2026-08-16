@@ -15,6 +15,7 @@ import InvitationManagerModal from './components/admin/InvitationManagerModal';
 import TrashExplorer from './components/trash/TrashExplorer';
 import ContextMenu from './components/common/ContextMenu';
 import RenameModal from './components/modals/RenameModal';
+import TransferManager from './components/transfer/TransferManager';
 import { 
   Folder as FolderIcon,
   FolderPlus,
@@ -27,7 +28,8 @@ import {
   RefreshCw,
   Star,
   Download,
-  Eye
+  Eye,
+  FileArchive
 } from 'lucide-react';
 import { 
   getMe,
@@ -49,7 +51,10 @@ import {
   restoreFolder,
   renameFolder,
   renameFile,
-  getFileDownloadUrl
+  getFileDownloadUrl,
+  downloadFileChunked,
+  downloadFolderAsZip,
+  batchDownloadFiles
 } from './api';
 import { useDialog } from './context/DialogContext';
 
@@ -129,6 +134,134 @@ export default function App() {
   }, [checkAuth]);
 
   const [isWorkspacesLoaded, setIsWorkspacesLoaded] = useState(false);
+  const [transfers, setTransfers] = useState([]);
+  const abortControllersRef = useRef(new Map());
+
+  const addTransfer = (item) => {
+    setTransfers(prev => [item, ...prev.filter(t => t.id !== item.id)]);
+  };
+
+  const updateTransfer = (id, updates) => {
+    setTransfers(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+  };
+
+  const handleCancelTransfer = (id) => {
+    if (abortControllersRef.current.has(id)) {
+      abortControllersRef.current.get(id).abort();
+      abortControllersRef.current.delete(id);
+    }
+    setTransfers(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleClearCompletedTransfers = () => {
+    setTransfers(prev => prev.filter(t => t.status === 'running' || t.status === 'pending'));
+  };
+
+  const startDownloadFile = async (file) => {
+    const transferId = `file-${file.id}-${Date.now()}`;
+    const controller = new AbortController();
+    abortControllersRef.current.set(transferId, controller);
+
+    addTransfer({
+      id: transferId,
+      type: 'download',
+      name: file.name,
+      size: file.size_bytes,
+      percent: 5,
+      status: 'running',
+      statusText: '다운로드 준비 중...',
+      rawFile: file,
+    });
+
+    try {
+      if (file.s3_key) {
+        await downloadFileChunked(
+          file.id,
+          file.name,
+          file.size_bytes,
+          ({ percent, status }) => {
+            updateTransfer(transferId, { percent, statusText: status });
+          },
+          controller.signal
+        );
+      } else if (file.content) {
+        const blob = new Blob([file.content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      updateTransfer(transferId, { percent: 100, status: 'completed', statusText: '다운로드 완료' });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        handleCancelTransfer(transferId);
+        return;
+      }
+      console.error('File download error:', err);
+      updateTransfer(transferId, {
+        status: 'error',
+        statusText: `실패: ${err.message}`,
+        retryFn: () => startDownloadFile(file),
+      });
+    } finally {
+      abortControllersRef.current.delete(transferId);
+    }
+  };
+
+  const startDownloadFolder = async (folder) => {
+    const transferId = `folder-${folder.id}-${Date.now()}`;
+    const controller = new AbortController();
+    abortControllersRef.current.set(transferId, controller);
+
+    addTransfer({
+      id: transferId,
+      type: 'zip_download',
+      name: `${folder.name}.zip`,
+      percent: 10,
+      status: 'running',
+      statusText: '서버에서 폴더 압축 중...',
+      rawFolder: folder,
+    });
+
+    try {
+      await downloadFolderAsZip(
+        folder.id,
+        folder.name,
+        ({ percent, status }) => {
+          updateTransfer(transferId, { percent, statusText: status });
+        },
+        controller.signal
+      );
+      updateTransfer(transferId, { percent: 100, status: 'completed', statusText: 'ZIP 다운로드 완료' });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        handleCancelTransfer(transferId);
+        return;
+      }
+      console.error('Folder zip download error:', err);
+      updateTransfer(transferId, {
+        status: 'error',
+        statusText: `실패: ${err.message}`,
+        retryFn: () => startDownloadFolder(folder),
+      });
+    } finally {
+      abortControllersRef.current.delete(transferId);
+    }
+  };
+
+  const handleRetryTransfer = (item) => {
+    if (item.retryFn) {
+      item.retryFn();
+    } else if (item.rawFile) {
+      startDownloadFile(item.rawFile);
+    } else if (item.rawFolder) {
+      startDownloadFolder(item.rawFolder);
+    }
+  };
 
   // Load Workspaces for approved user
   const loadWorkspaces = useCallback(async () => {
@@ -511,6 +644,11 @@ export default function App() {
             }
           },
         },
+        {
+          label: '폴더를 ZIP으로 다운로드',
+          icon: FileArchive,
+          onClick: () => startDownloadFolder(folder),
+        },
         { divider: true },
         {
           label: '이름 변경',
@@ -553,10 +691,7 @@ export default function App() {
         {
           label: '다운로드',
           icon: Download,
-          onClick: () => {
-            const url = getFileDownloadUrl(file.id);
-            window.open(url, '_blank');
-          },
+          onClick: () => startDownloadFile(file),
         },
         { divider: true },
         {
@@ -790,6 +925,8 @@ export default function App() {
             onFolderContextMenu={handleFolderContextMenu}
             onFileContextMenu={handleFileContextMenu}
             onBackgroundContextMenu={handleBackgroundContextMenu}
+            onDownloadFolder={startDownloadFolder}
+            onDownloadFile={startDownloadFile}
             sortBy={sortBy}
             onSortByChange={(newSort) => {
               setSortBy(newSort);
@@ -898,6 +1035,14 @@ export default function App() {
         item={renameModal.item}
         onClose={() => setRenameModal({ isOpen: false, item: null })}
         onRename={handleRenameItem}
+      />
+
+      {/* Google Drive-style Resilient Transfer Manager */}
+      <TransferManager
+        transfers={transfers}
+        onRetry={handleRetryTransfer}
+        onCancel={handleCancelTransfer}
+        onClearCompleted={handleClearCompletedTransfers}
       />
     </div>
   );

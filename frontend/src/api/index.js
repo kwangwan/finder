@@ -634,18 +634,84 @@ export async function getPresignedDownloadUrl(fileId) {
 }
 
 /**
- * Cloudflare Zero Trust Aware Chunked Range Download & Direct Download
+ * Resilient Fetch with Exponential Backoff Retry (for flaky networks/glitches)
  */
-export async function downloadFileChunked(fileId, filename, sizeBytes, onProgress = () => {}) {
-  const chunkSize = 50 * 1024 * 1024;
+async function fetchWithRetry(url, options = {}, maxRetries = 3, baseDelay = 1000) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok && (res.status >= 500 || res.status === 429)) {
+        throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+      }
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 200;
+        console.warn(`[Network Retry] Attempt ${attempt + 1} failed for ${url}. Retrying in ${Math.round(delay)}ms...`, err);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastError;
+}
 
+/**
+ * Ensure folder path exists (recursively creates missing folders)
+ */
+export async function ensureFolderPath(workspaceId, parentFolderId, relativePath) {
+  const res = await fetchWithRetry(`${API_BASE}/folders/ensure-path`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      parent_id: parentFolderId || null,
+      relative_path: relativePath,
+    }),
+  });
+  if (!res.ok) throw new Error('폴더 경로 생성 실패');
+  return res.json();
+}
+
+/**
+ * Cloudflare Zero Trust Aware Resilient Chunked Range Download
+ */
+export async function downloadFileChunked(fileId, filename, sizeBytes, onProgress = () => {}, signal = null) {
+  const chunkSize = 50 * 1024 * 1024; // 50MB chunks
+
+  // Small file direct download
   if (!sizeBytes || sizeBytes <= chunkSize) {
     try {
-      const res = await fetch(`${API_BASE}/storage/download/${fileId}`, {
+      const res = await fetchWithRetry(`${API_BASE}/storage/download/${fileId}`, {
         headers: authHeaders(),
-      });
+        signal,
+      }, 3);
       if (!res.ok) throw new Error('Direct download failed');
-      const blob = await res.blob();
+
+      const contentLength = Number(res.headers.get('Content-Length')) || sizeBytes || 0;
+      let loaded = 0;
+
+      const reader = res.body.getReader();
+      const chunks = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.length;
+        if (contentLength > 0) {
+          onProgress({
+            percent: Math.min(99, Math.round((loaded / contentLength) * 100)),
+            loaded,
+            total: contentLength,
+            status: `다운로드 중 (${(loaded / (1024 * 1024)).toFixed(1)}MB / ${(contentLength / (1024 * 1024)).toFixed(1)}MB)...`,
+          });
+        }
+      }
+
+      onProgress({ percent: 100, status: '파일 저장 중...' });
+      const blob = new Blob(chunks);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -653,34 +719,41 @@ export async function downloadFileChunked(fileId, filename, sizeBytes, onProgres
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
       return;
     } catch (e) {
-      console.warn('Direct download failed, trying chunk download:', e);
+      if (signal && signal.aborted) throw e;
+      console.warn('Direct download failed, falling back to multi-part chunk download:', e);
     }
   }
 
+  // Large file / multi-part range download
   const totalParts = Math.ceil(sizeBytes / chunkSize) || 1;
   const chunkBlobs = [];
 
   for (let part = 0; part < totalParts; part++) {
+    if (signal && signal.aborted) {
+      throw new Error('Download aborted by user');
+    }
+
     const start = part * chunkSize;
     const end = Math.min(start + chunkSize - 1, sizeBytes - 1);
+    const partSizeMB = ((end - start + 1) / (1024 * 1024)).toFixed(1);
 
-    const percent = Math.round((part / totalParts) * 100);
     onProgress({
-      percent,
-      status: `청크 ${part + 1}/${totalParts} 다운로드 중 (${Math.round((end - start + 1) / (1024 * 1024))}MB)...`,
+      percent: Math.round((part / totalParts) * 100),
+      status: `청크 ${part + 1}/${totalParts} 다운로드 중 (${partSizeMB}MB)...`,
     });
 
-    const res = await fetch(`${API_BASE}/storage/chunk-download/${fileId}`, {
+    const res = await fetchWithRetry(`${API_BASE}/storage/chunk-download/${fileId}`, {
       headers: authHeaders({
         Range: `bytes=${start}-${end}`,
       }),
-    });
+      signal,
+    }, 4, 1500);
 
     if (!res.ok && res.status !== 206) {
-      throw new Error(`청크 ${part + 1} 다운로드 실패: ${res.statusText}`);
+      throw new Error(`청크 ${part + 1}/${totalParts} 다운로드 실패: ${res.statusText}`);
     }
 
     const blob = await res.blob();
@@ -697,7 +770,125 @@ export async function downloadFileChunked(fileId, filename, sizeBytes, onProgres
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(blobUrl);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
+/**
+ * Download entire folder as ZIP archive (recursive)
+ */
+export async function downloadFolderAsZip(folderId, folderName, onProgress = () => {}, signal = null) {
+  onProgress({ percent: 10, status: '서버에서 폴더 압축 준비 중...' });
+
+  const res = await fetchWithRetry(`${API_BASE}/folders/${folderId}/download`, {
+    headers: authHeaders(),
+    signal,
+  }, 3);
+
+  if (!res.ok) throw new Error('폴더 ZIP 다운로드 실패');
+
+  const contentLength = Number(res.headers.get('Content-Length')) || 0;
+  let loaded = 0;
+
+  const reader = res.body.getReader();
+  const chunks = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.length;
+    if (contentLength > 0) {
+      onProgress({
+        percent: Math.min(99, Math.round((loaded / contentLength) * 100)),
+        loaded,
+        total: contentLength,
+        status: `압축 파일 수신 중 (${(loaded / (1024 * 1024)).toFixed(1)}MB / ${(contentLength / (1024 * 1024)).toFixed(1)}MB)...`,
+      });
+    } else {
+      onProgress({
+        percent: 50,
+        status: `압축 파일 수신 중 (${(loaded / (1024 * 1024)).toFixed(1)}MB)...`,
+      });
+    }
+  }
+
+  onProgress({ percent: 100, status: '압축 파일 저장 중...' });
+
+  const finalBlob = new Blob(chunks, { type: 'application/zip' });
+  const blobUrl = URL.createObjectURL(finalBlob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = `${folderName || 'folder'}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
+/**
+ * Download multiple files and folders as a single ZIP archive
+ */
+export async function batchDownloadFiles({
+  workspaceId,
+  fileIds = [],
+  folderIds = [],
+  archiveName = 'download_archive.zip',
+  onProgress = () => {},
+  signal = null,
+}) {
+  onProgress({ percent: 10, status: '선택 항목 압축 준비 중...' });
+
+  const res = await fetchWithRetry(`${API_BASE}/files/batch-download`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      file_ids: fileIds,
+      folder_ids: folderIds,
+      archive_name: archiveName,
+    }),
+    signal,
+  }, 3);
+
+  if (!res.ok) throw new Error('일괄 ZIP 다운로드 실패');
+
+  const contentLength = Number(res.headers.get('Content-Length')) || 0;
+  let loaded = 0;
+
+  const reader = res.body.getReader();
+  const chunks = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.length;
+    if (contentLength > 0) {
+      onProgress({
+        percent: Math.min(99, Math.round((loaded / contentLength) * 100)),
+        loaded,
+        total: contentLength,
+        status: `압축 파일 수신 중 (${(loaded / (1024 * 1024)).toFixed(1)}MB / ${(contentLength / (1024 * 1024)).toFixed(1)}MB)...`,
+      });
+    } else {
+      onProgress({
+        percent: 50,
+        status: `압축 파일 수신 중 (${(loaded / (1024 * 1024)).toFixed(1)}MB)...`,
+      });
+    }
+  }
+
+  onProgress({ percent: 100, status: '압축 파일 저장 중...' });
+
+  const finalBlob = new Blob(chunks, { type: 'application/zip' });
+  const blobUrl = URL.createObjectURL(finalBlob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = archiveName.endsWith('.zip') ? archiveName : `${archiveName}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
 
 /**

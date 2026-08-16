@@ -42,3 +42,13 @@ class PagedFolderResponse(BaseModel):
     page_size: int
     total_pages: int
 
+class EnsurePathRequest(BaseModel):
+    workspace_id: uuid.UUID
+    relative_path: str
+    parent_id: Optional[uuid.UUID] = None
+
+class EnsurePathResponse(BaseModel):
+    folder_id: Optional[uuid.UUID] = None
+    folder_name: str
+    relative_path: str
+

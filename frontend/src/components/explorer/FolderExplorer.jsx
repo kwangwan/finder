@@ -23,7 +23,11 @@ import {
   Home,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  FileImage,
+  MoreVertical,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { downloadFileChunked, getThumbnailUrl } from '../../api';
 import { useDialog } from '../../context/DialogContext';
@@ -45,6 +49,8 @@ export default function FolderExplorer({
   onFolderContextMenu,
   onFileContextMenu,
   onBackgroundContextMenu,
+  onDownloadFolder,
+  onDownloadFile,
   sortBy = 'updated_at',
   onSortByChange,
   sortOrder = 'desc',
@@ -104,9 +110,13 @@ export default function FolderExplorer({
     return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
   };
 
-  // Chunked Range Download
+  // Resilient Range Download
   const handleDownload = async (file, e) => {
     e.stopPropagation();
+    if (onDownloadFile) {
+      onDownloadFile(file, e);
+      return;
+    }
     try {
       if (file.s3_key) {
         setDownloadProgress({ fileId: file.id, percent: 10, status: '다운로드 준비 중...' });
@@ -178,10 +188,13 @@ export default function FolderExplorer({
     } else if (sortBy === 'created_at') {
       const diff = new Date(a.created_at || 0) - new Date(b.created_at || 0);
       return sortOrder === 'asc' ? diff : -diff;
-    } else {
-      const diff = new Date(a.updated_at || a.created_at || 0) - new Date(b.updated_at || b.created_at || 0);
+    } else if (sortBy === 'updated_at') {
+      const diff = new Date(a.updated_at || 0) - new Date(b.updated_at || 0);
       return sortOrder === 'asc' ? diff : -diff;
+    } else if (sortBy === 'size_bytes') {
+      return sortOrder === 'asc' ? (a.file_count || 0) - (b.file_count || 0) : (b.file_count || 0) - (a.file_count || 0);
     }
+    return 0;
   });
 
   const getPageNumbers = (current, total) => {
@@ -203,16 +216,15 @@ export default function FolderExplorer({
 
   return (
     <div 
-      className={`explorer-container ${isDragOver ? 'drag-over' : ''}`}
+      className={`folder-explorer ${isDragOver ? 'drag-over' : ''}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onContextMenu={(e) => {
-        if (e.target === e.currentTarget || e.target.classList.contains('explorer-container') || e.target.classList.contains('grid-cards') || e.target.classList.contains('grid-folders')) {
-          e.preventDefault();
-          if (onBackgroundContextMenu) onBackgroundContextMenu(e);
-        }
+        if (e.target.closest('.file-card') || e.target.closest('.folder-card')) return;
+        e.preventDefault();
+        if (onBackgroundContextMenu) onBackgroundContextMenu(e);
       }}
     >
       {/* Download Progress Banner */}
@@ -254,15 +266,17 @@ export default function FolderExplorer({
         </div>
       )}
 
-      {/* Drag & Drop Overlay */}
+      {/* Drag & Drop Visual Overlay */}
       {isDragOver && (
         <div className="drag-overlay">
-          <UploadCloud size={48} color="var(--accent-primary)" />
-          <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: 8 }}>
-            파일을 여기에 놓아 업로드
-          </div>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            문서 및 미디어 파일을 안전하게 저장소에 업로드합니다.
+          <div className="drag-overlay-box">
+            <UploadCloud size={48} color="var(--accent-primary)" />
+            <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '1rem' }}>
+              파일 또는 폴더를 여기에 놓아 업로드
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
+              폴더 통째로 드래그 시 하위 계층 구조가 그대로 유지되어 자동 생성됩니다.
+            </div>
           </div>
         </div>
       )}
@@ -345,9 +359,19 @@ export default function FolderExplorer({
 
         {/* Action Buttons */}
         <div className="explorer-actions">
-          <button className="btn-secondary explorer-btn" onClick={onOpenUpload} title="파일 업로드">
+          {currentFolder && (
+            <button 
+              className="btn-secondary explorer-btn" 
+              onClick={() => onDownloadFolder && onDownloadFolder(currentFolder)} 
+              title="현재 폴더 전체를 ZIP으로 다운로드"
+            >
+              <FileArchive size={15} />
+              <span className="hide-mobile">ZIP 다운로드</span>
+            </button>
+          )}
+          <button className="btn-secondary explorer-btn" onClick={onOpenUpload} title="파일 및 폴더 업로드">
             <UploadCloud size={15} />
-            <span className="hide-mobile">파일 업로드</span>
+            <span className="hide-mobile">파일/폴더 업로드</span>
           </button>
           <button className="btn-secondary explorer-btn" onClick={() => onNewFolder(currentFolder?.id)} title="새 하위 폴더">
             <FolderPlus size={15} />
@@ -420,9 +444,23 @@ export default function FolderExplorer({
                 <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sub.name}
                 </span>
-                {sub.file_count > 0 && (
-                  <span className="menu-badge">{sub.file_count}</span>
-                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {sub.file_count > 0 && (
+                    <span className="menu-badge">{sub.file_count}</span>
+                  )}
+                  <button
+                    className="btn-icon"
+                    style={{ padding: '3px', opacity: 0.7 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDownloadFolder && onDownloadFolder(sub);
+                    }}
+                    title="폴더를 ZIP으로 다운로드"
+                  >
+                    <FileArchive size={14} color="var(--text-muted)" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

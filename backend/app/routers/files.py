@@ -5,13 +5,19 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, desc, asc, func
+import io
+import zipfile
+import urllib.parse
+from fastapi.responses import StreamingResponse
 from app.core.database import get_db
 from app.models import FileItem, Folder, User, WorkspaceMember
 from app.core.security import get_current_approved_user
 from app.schemas.file import (
     NoteCreate, NoteUpdate, FileMetadataCreate, FileMoveRequest,
-    FileRenameRequest, FileResponse, FileDetailResponse, PagedFileResponse
+    FileRenameRequest, FileResponse, FileDetailResponse, PagedFileResponse,
+    BatchDownloadRequest
 )
+from app.routers.folders import _collect_folder_files_recursive
 from app.services.s3_service import s3_service
 from app.services.document_service import document_service
 from app.services.access_service import access_service
@@ -478,3 +484,75 @@ async def delete_file(
     await db.delete(file_item)
     await db.commit()
     return None
+
+
+@router.post("/batch-download")
+async def batch_download_files(
+    req: BatchDownloadRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Download multiple files and/or folders as a single ZIP archive.
+    """
+    if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
+        raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        # 1. Direct files
+        if req.file_ids:
+            files_q = select(FileItem).where(
+                and_(
+                    FileItem.id.in_(req.file_ids),
+                    FileItem.workspace_id == req.workspace_id,
+                    FileItem.is_trashed == False
+                )
+            )
+            files_res = await db.execute(files_q)
+            for f in files_res.scalars().all():
+                file_bytes = None
+                if f.is_markdown and f.content:
+                    file_bytes = f.content.encode("utf-8")
+                elif f.s3_key:
+                    file_bytes = s3_service.get_object_content(f.s3_key)
+                if file_bytes is not None:
+                    zip_file.writestr(f.name, file_bytes)
+
+        # 2. Folders
+        if req.folder_ids:
+            for fid in req.folder_ids:
+                folder = await db.get(Folder, fid)
+                if folder and folder.workspace_id == req.workspace_id and not folder.is_trashed:
+                    files_with_paths = await _collect_folder_files_recursive(db, folder.id, "")
+                    if not files_with_paths:
+                        zip_file.writestr(f"{folder.name}/.keep", b"")
+                    for file_item, rel_path in files_with_paths:
+                        full_rel_path = f"{folder.name}/{rel_path}"
+                        file_bytes = None
+                        if file_item.is_markdown and file_item.content:
+                            file_bytes = file_item.content.encode("utf-8")
+                        elif file_item.s3_key:
+                            file_bytes = s3_service.get_object_content(file_item.s3_key)
+                        if file_bytes is not None:
+                            zip_file.writestr(full_rel_path, file_bytes)
+
+    zip_buffer.seek(0)
+    zip_size = zip_buffer.getbuffer().nbytes
+    archive_name = req.archive_name or "download_archive.zip"
+    if not archive_name.lower().endswith(".zip"):
+        archive_name += ".zip"
+    safe_filename = urllib.parse.quote(archive_name)
+
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
+        "Content-Length": str(zip_size),
+        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length"
+    }
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers=headers
+    )
+
