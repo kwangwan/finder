@@ -37,11 +37,11 @@ export async function getAuthConfig() {
 /**
  * Authentication API
  */
-export async function loginWithGoogle(idToken) {
+export async function loginWithGoogle(idToken, inviteToken = null) {
   const res = await fetch(`${API_BASE}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id_token: idToken }),
+    body: JSON.stringify({ id_token: idToken, invite_token: inviteToken }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

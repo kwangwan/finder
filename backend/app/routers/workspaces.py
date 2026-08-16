@@ -89,6 +89,39 @@ async def list_my_workspaces(
     current_user: User = Depends(get_current_approved_user)
 ):
     """List all workspaces the current user owns or is a member of."""
+    # 1. Auto-resolve any pending invitations matching user email
+    from app.models import Invitation
+    inv_res = await db.execute(
+        select(Invitation).where(
+            func.lower(Invitation.email) == current_user.email.lower().strip(),
+            Invitation.status == "pending"
+        )
+    )
+    pending_invs = inv_res.scalars().all()
+    changed = False
+    for inv in pending_invs:
+        if not inv.is_expired and inv.workspace_id:
+            m_res = await db.execute(
+                select(WorkspaceMember).where(
+                    WorkspaceMember.workspace_id == inv.workspace_id,
+                    WorkspaceMember.user_id == current_user.id
+                )
+            )
+            if not m_res.scalar_one_or_none():
+                new_m = WorkspaceMember(
+                    workspace_id=inv.workspace_id,
+                    user_id=current_user.id,
+                    role=inv.role or "member"
+                )
+                db.add(new_m)
+                changed = True
+        inv.status = "accepted"
+        changed = True
+    
+    if changed:
+        await db.commit()
+
+    # 2. Query all workspaces user belongs to
     stmt = select(Workspace).options(
         selectinload(Workspace.owner),
         selectinload(Workspace.members)

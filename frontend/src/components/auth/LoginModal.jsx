@@ -102,7 +102,7 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
     setIsLoading(true);
     setError('');
     try {
-      const data = await loginWithGoogle(response.credential);
+      const data = await loginWithGoogle(response.credential, inviteToken);
       onLoginSuccess(data.user);
     } catch (err) {
       setError(err.message || '구글 로그인 실패');
