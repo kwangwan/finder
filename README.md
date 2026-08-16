@@ -72,7 +72,24 @@ pm2 startup
 
 ---
 
-### 4) 테스트 실행 (Backend Test Suite)
+### 4) 코드 수정 후 운영 반영 (Deploy Workflow)
+소스 코드 수정과 운영 환경이 분리되어 있으므로, 코드 변경 후 운영에 반영할 때는 아래 명령을 실행합니다:
+
+```bash
+# 프론트엔드 변경 시: 프로덕션 빌드 후 PM2 재시작
+cd /Users/ori/Projects/knowledge-base/frontend && npm run build
+pm2 restart finder-frontend
+
+# 백엔드 변경 시: PM2 재시작
+pm2 restart finder-backend
+
+# 전체 변경 시 일괄 재시작
+pm2 restart all
+```
+
+---
+
+### 5) 테스트 실행 (Backend Test Suite)
 ```bash
 cd /Users/ori/Projects/knowledge-base/backend
 uv run pytest
