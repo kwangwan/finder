@@ -129,15 +129,16 @@ export default function App() {
 
   // Sync theme
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('kb_theme', theme);
+    const validThemes = ['dark', 'light', 'matrix'];
+    const activeTheme = validThemes.includes(theme) ? theme : 'dark';
+    document.documentElement.setAttribute('data-theme', activeTheme);
+    localStorage.setItem('kb_theme', activeTheme);
   }, [theme]);
 
   const toggleTheme = () => {
     setTheme(prev => {
       if (prev === 'dark') return 'light';
-      if (prev === 'light') return 'cyberpunk';
-      if (prev === 'cyberpunk') return 'matrix';
+      if (prev === 'light') return 'matrix';
       return 'dark';
     });
   };

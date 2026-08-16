@@ -13,7 +13,8 @@ import {
   Folder,
   User as UserIcon,
   HardDrive,
-  Palette
+  Palette,
+  Terminal
 } from 'lucide-react';
 
 const formatBytes = (bytes) => {
@@ -191,16 +192,16 @@ export default function TopBar({
 
                 <div style={{ padding: '0.6rem 0.85rem 0.35rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Palette size={13} />
-                  <span>테마 스타일 설정</span>
+                  <span>테마 설정</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: '0.2rem 0.75rem 0.6rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, padding: '0.2rem 0.75rem 0.6rem' }}>
                   {[
-                    { id: 'dark', label: '다크', icon: '🌙', activeColor: '#3b82f6' },
-                    { id: 'light', label: '라이트', icon: '☀️', activeColor: '#f59e0b' },
-                    { id: 'cyberpunk', label: '사이버펑크', icon: '⚡', activeColor: '#ff007f' },
-                    { id: 'matrix', label: '매트릭스', icon: '🟢', activeColor: '#22c55e' }
+                    { id: 'dark', label: '다크', Icon: Moon },
+                    { id: 'light', label: '라이트', Icon: Sun },
+                    { id: 'matrix', label: '매트릭스', Icon: Terminal }
                   ].map(t => {
                     const isActive = theme === t.id;
+                    const IconComponent = t.Icon;
                     return (
                       <button
                         key={t.id}
@@ -211,11 +212,10 @@ export default function TopBar({
                         }}
                         style={{
                           height: 34,
-                          padding: '0 0.5rem',
-                          background: isActive ? 'var(--bg-tertiary)' : 'transparent',
-                          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                          border: isActive ? `1.5px solid ${t.activeColor}` : '1px solid var(--border-subtle)',
-                          boxShadow: isActive ? `0 0 8px ${t.activeColor}33` : 'none',
+                          padding: '0 0.4rem',
+                          background: isActive ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                          color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                          border: isActive ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
                           borderRadius: 'var(--radius-md)',
                           fontSize: '0.78rem',
                           fontWeight: isActive ? 700 : 500,
@@ -223,11 +223,11 @@ export default function TopBar({
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: 6,
+                          gap: 5,
                           transition: 'all 0.15s ease'
                         }}
                       >
-                        <span>{t.icon}</span>
+                        <IconComponent size={13} />
                         <span>{t.label}</span>
                       </button>
                     );
