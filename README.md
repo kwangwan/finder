@@ -45,7 +45,30 @@ npm run build
 
 ---
 
-### 3) 테스트 실행 (Backend Test Suite)
+### 3) PM2 백그라운드 상시 구동 및 자동 재시작 (운영 권장)
+프로세스 비정상 종료 시 자동 복구 및 백그라운드 상시 유지를 위해 **PM2** 프로세스 매니저 설정을 제공합니다:
+
+```bash
+# PM2로 백엔드 & 프론트엔드 일괄 실행
+pm2 start ecosystem.config.cjs
+
+# 서비스 상태 확인
+pm2 status
+
+# 실시간 로그 확인
+pm2 logs
+
+# 서비스 전체 재시작 / 중지
+pm2 restart all
+pm2 stop all
+
+# 현재 실행 상태 저장 (재부팅 대비)
+pm2 save
+```
+
+---
+
+### 4) 테스트 실행 (Backend Test Suite)
 ```bash
 cd /Users/ori/Projects/knowledge-base/backend
 uv run pytest
