@@ -13,7 +13,8 @@ import {
   Clock,
   Info,
   ExternalLink,
-  Calendar
+  Calendar,
+  Lock
 } from 'lucide-react';
 import { listTrash, deletePermanentFile, deletePermanentFolder, emptyTrash, restoreFile, restoreFolder, getThumbnailUrl } from '../../api';
 import { useDialog } from '../../context/DialogContext';
@@ -384,6 +385,23 @@ export default function TrashExplorer({
                             내가 생성함
                           </span>
                         )}
+                        {!canPurgeFolder && (
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 600,
+                            color: 'var(--text-muted)',
+                            background: 'var(--bg-card)',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3
+                          }}>
+                            <Lock size={10} />
+                            <span>영구 삭제 불가 (관리자/생성자 전용)</span>
+                          </span>
+                        )}
                         <span>• {formatDate(folder.trashed_at)}</span>
                       </div>
                     </div>
@@ -398,7 +416,7 @@ export default function TrashExplorer({
                     >
                       <RotateCcw size={15} color="var(--accent-emerald)" />
                     </button>
-                    {canPurgeFolder && (
+                    {canPurgeFolder ? (
                       <button 
                         className="btn-icon" 
                         onClick={() => handleDeletePermanentFolder(folder)}
@@ -406,6 +424,15 @@ export default function TrashExplorer({
                         disabled={actionLoadingId === folder.id}
                       >
                         <Trash2 size={15} color="var(--accent-rose)" />
+                      </button>
+                    ) : (
+                      <button 
+                        className="btn-icon" 
+                        disabled
+                        title="영구 삭제 권한 없음 (소유자/관리자 또는 생성자만 가능)"
+                        style={{ opacity: 0.35, cursor: 'not-allowed', background: 'transparent' }}
+                      >
+                        <Trash2 size={15} color="var(--text-muted)" />
                       </button>
                     )}
                   </div>
@@ -461,6 +488,23 @@ export default function TrashExplorer({
                             내가 올림
                           </span>
                         )}
+                        {!canPurgeFile && (
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 600,
+                            color: 'var(--text-muted)',
+                            background: 'var(--bg-card)',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3
+                          }}>
+                            <Lock size={10} />
+                            <span>영구 삭제 불가 (관리자/작성자 전용)</span>
+                          </span>
+                        )}
                         <span>{formatBytes(file.size_bytes)}</span>
                         {file.folder_name && <span>• 폴더: {file.folder_name}</span>}
                         <span>• {formatDate(file.trashed_at)}</span>
@@ -477,7 +521,7 @@ export default function TrashExplorer({
                     >
                       <RotateCcw size={15} color="var(--accent-emerald)" />
                     </button>
-                    {canPurgeFile && (
+                    {canPurgeFile ? (
                       <button 
                         className="btn-icon" 
                         onClick={() => handleDeletePermanentFile(file)}
@@ -485,6 +529,15 @@ export default function TrashExplorer({
                         disabled={actionLoadingId === file.id}
                       >
                         <Trash2 size={15} color="var(--accent-rose)" />
+                      </button>
+                    ) : (
+                      <button 
+                        className="btn-icon" 
+                        disabled
+                        title="영구 삭제 권한 없음 (소유자/관리자 또는 작성자만 가능)"
+                        style={{ opacity: 0.35, cursor: 'not-allowed', background: 'transparent' }}
+                      >
+                        <Trash2 size={15} color="var(--text-muted)" />
                       </button>
                     )}
                   </div>
