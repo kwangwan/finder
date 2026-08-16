@@ -1,9 +1,24 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import init_db, AsyncSessionLocal
 from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash
+from app.routers.trash import _auto_purge_expired
+
+async def _periodic_trash_cleanup():
+    """Periodically purge trashed items older than 30 days every 12 hours."""
+    while True:
+        try:
+            await asyncio.sleep(43200) # 12 hours
+            async with AsyncSessionLocal() as db:
+                await _auto_purge_expired(db)
+                print(f"[{settings.APP_NAME}] Periodic 30-day trash cleanup completed.")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[{settings.APP_NAME} Warning] Trash cleanup error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,7 +28,12 @@ async def lifespan(app: FastAPI):
         print(f"[{settings.APP_NAME}] PostgreSQL & pgvector initialized successfully.")
     except Exception as e:
         print(f"[{settings.APP_NAME} Error] DB initialization error: {e}")
+    
+    cleanup_task = asyncio.create_task(_periodic_trash_cleanup())
+    
     yield
+    
+    cleanup_task.cancel()
     print(f"[{settings.APP_NAME}] Shutting down...")
 
 app = FastAPI(
