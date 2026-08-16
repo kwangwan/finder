@@ -41,6 +41,7 @@ class EmailService:
         invite_token: str,
         inviter_name: str,
         workspace_name: Optional[str] = None,
+        role: str = "member",
         is_admin_invite: bool = False
     ) -> bool:
         """
@@ -49,7 +50,7 @@ class EmailService:
         invite_url = f"{self.app_url}?invite_token={invite_token}"
         
         target_description = f"'{workspace_name}' 워크스페이스" if workspace_name else "Project Run : Finder"
-        role_description = "관리자 승인이 완료된 정식 멤버" if is_admin_invite else "팀 멤버"
+        role_label = "관리자 (Admin)" if role == "admin" else "멤버 (Member)"
 
         subject = f"[Project Run : Finder] {inviter_name}님이 {target_description}에 초대하셨습니다"
         
@@ -59,13 +60,16 @@ class EmailService:
         <head>
           <meta charset="utf-8">
           <style>
-            body {{ font-family: 'Segoe UI', AppleSDGothicNeo, sans-serif; background-color: #f8fafc; margin: 0; padding: 40px 20px; }}
-            .card {{ max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }}
-            .header {{ font-size: 20px; font-weight: 800; color: #0f172a; margin-bottom: 16px; }}
-            .content {{ font-size: 15px; color: #334155; line-height: 1.6; margin-bottom: 24px; }}
-            .btn {{ display: inline-block; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #ffffff !important; padding: 12px 24px; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 15px; }}
-            .footer {{ font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }}
-            .link-box {{ background: #f1f5f9; padding: 10px 14px; border-radius: 6px; font-family: monospace; font-size: 12px; word-break: break-all; margin-top: 12px; color: #2563eb; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', AppleSDGothicNeo, sans-serif; background-color: #f8fafc; margin: 0; padding: 40px 20px; }}
+            .card {{ max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 14px; padding: 36px 32px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }}
+            .header {{ font-size: 20px; font-weight: 800; color: #0f172a; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }}
+            .content {{ font-size: 15px; color: #334155; line-height: 1.65; margin-bottom: 24px; }}
+            .info-box {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 18px 0; font-size: 14px; color: #475569; }}
+            .info-row {{ margin-bottom: 6px; }}
+            .info-row:last-child {{ margin-bottom: 0; }}
+            .btn {{ display: inline-block; background: linear-gradient(135deg, #3b82f6, #6366f1); color: #ffffff !important; padding: 13px 28px; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 15px; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25); }}
+            .footer {{ font-size: 12px; color: #94a3b8; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 18px; line-height: 1.5; }}
+            .link-box {{ background: #f1f5f9; padding: 10px 14px; border-radius: 6px; font-family: monospace; font-size: 12px; word-break: break-all; margin-top: 10px; color: #2563eb; }}
           </style>
         </head>
         <body>
@@ -73,14 +77,22 @@ class EmailService:
             <div class="header">Project Run : Finder 초대장</div>
             <div class="content">
               안녕하세요,<br><br>
-              <strong>{inviter_name}</strong>님이 회원님을 <strong>{target_description}</strong>의 {role_description}로 초대하셨습니다.<br>
-              초대 링크는 발송일로부터 <strong>7일간 유효</strong>합니다.
+              <strong>{inviter_name}</strong>님이 회원님을 <strong>{target_description}</strong>에 초대하셨습니다.<br>
+              초대를 수락하시면 별도의 대기 없이 즉시 참여하여 워크스페이스의 문서와 지식을 공유하고 협업하실 수 있습니다.
             </div>
-            <div style="text-align: center; margin: 28px 0;">
+
+            <div class="info-box">
+              <div class="info-row"><strong>• 초대 워크스페이스:</strong> {target_description}</div>
+              <div class="info-row"><strong>• 부여 역할:</strong> {role_label}</div>
+              <div class="info-row"><strong>• 링크 유효기간:</strong> 발송일로부터 7일간 유효</div>
+            </div>
+
+            <div style="text-align: center; margin: 30px 0 20px;">
               <a href="{invite_url}" class="btn" target="_blank">초대 수락 및 참여하기</a>
             </div>
+
             <div class="footer">
-              버튼이 클릭되지 않는 경우 아래 링크를 브라우저에 직접 붙여넣으세요:
+              초대 링크가 클릭되지 않는 경우 아래 주소를 복사하여 브라우저 주소창에 직접 입력해주세요:
               <div class="link-box">{invite_url}</div>
             </div>
           </div>

@@ -137,6 +137,7 @@ async def create_invitation(
             invite_token=token,
             inviter_name=current_user.name or current_user.email.split("@")[0],
             workspace_name=workspace_name,
+            role=invitation.role,
             is_admin_invite=current_user.is_admin
         )
     except Exception as e:

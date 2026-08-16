@@ -411,7 +411,7 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
           wordBreak: 'keep-all',
         }}>
           <Shield size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
-          <span>신규 가입자는 관리자 승인 또는 초대장을 통해 접속할 수 있습니다.</span>
+          <span>초대 링크 또는 계정 가입을 통해 즉시 워크스페이스에 참여할 수 있습니다.</span>
         </div>
       </div>
     </div>
