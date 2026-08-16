@@ -67,19 +67,33 @@ async def ensure_user_default_workspace(db: AsyncSession, user: User):
             )
         await db.commit()
 
-async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token: str | None):
-    """If a valid invitation token is provided, apply workspace membership and admin auto-approval."""
-    if not invite_token:
-        return
+async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token: str | None = None):
+    """If a valid invitation token is provided OR if there are pending invitations for this user's email,
+    apply workspace membership, mark invitation accepted, and auto-approve if invited by admin."""
+    invitations_to_process = []
     
-    inv_res = await db.execute(select(Invitation).where(Invitation.token == invite_token))
-    inv = inv_res.scalar_one_or_none()
-    if inv and inv.status == "pending" and not inv.is_expired:
+    if invite_token:
+        inv_res = await db.execute(select(Invitation).where(Invitation.token == invite_token))
+        inv = inv_res.scalar_one_or_none()
+        if inv and inv.status == "pending" and not inv.is_expired:
+            invitations_to_process.append(inv)
+    
+    # Also find any pending valid invitations matching user's email
+    email_inv_res = await db.execute(
+        select(Invitation).where(
+            func.lower(Invitation.email) == user.email.lower().strip(),
+            Invitation.status == "pending"
+        )
+    )
+    for inv in email_inv_res.scalars().all():
+        if not inv.is_expired and inv not in invitations_to_process:
+            invitations_to_process.append(inv)
+            
+    for inv in invitations_to_process:
         # 1. If invited by super admin -> auto approve user
         if inv.is_admin_invite:
             user.is_approved = True
-            await db.commit()
-            print(f"[Invitation] User {user.email} auto-approved via admin invite token {invite_token}")
+            print(f"[Invitation] User {user.email} auto-approved via admin invite")
 
         # 2. If assigned to a workspace -> add membership
         if inv.workspace_id:
@@ -99,6 +113,8 @@ async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token
         
         # Mark accepted
         inv.status = "accepted"
+    
+    if invitations_to_process:
         await db.commit()
         await db.refresh(user)
 
