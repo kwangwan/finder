@@ -23,7 +23,7 @@ module.exports = {
       name: 'finder-frontend',
       cwd: path.join(__dirname, 'frontend'),
       script: 'npm',
-      args: 'run dev -- --host 0.0.0.0 --port 5173',
+      args: 'run preview -- --host 0.0.0.0 --port 5173',
       autorestart: true,
       watch: false,
       max_restarts: 20,
