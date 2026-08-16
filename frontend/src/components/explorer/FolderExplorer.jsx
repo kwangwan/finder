@@ -38,6 +38,7 @@ import { useDialog } from '../../context/DialogContext';
 
 export default function FolderExplorer({
   workspaceName = '내 워크스페이스',
+  isLoading = false,
   currentFolder,
   subfolders = [],
   files = [],
@@ -306,10 +307,10 @@ export default function FolderExplorer({
           <span 
             className={`breadcrumb-item ${!currentFolder ? 'active' : ''}`}
             onClick={() => onSelectFolder(null)}
-            title={workspaceName}
+            title="홈"
           >
             <Home size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-            <span>{workspaceName}</span>
+            <span>홈</span>
           </span>
 
           {folderPath.length <= 3 ? (
@@ -458,12 +459,36 @@ export default function FolderExplorer({
         </div>
       </div>
 
-      {/* 1. Subfolders Section */}
-      {sortedSubfolders.length > 0 && (
-        <div style={{ marginBottom: '2rem' }}>
-          <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-            폴더 ({sortedSubfolders.length})
+      {/* Loading Skeleton State */}
+      {isLoading ? (
+        <div style={{ marginTop: '1.25rem' }}>
+          {/* Subfolders Skeleton */}
+          <div style={{ marginBottom: '2rem' }}>
+            <div className="skeleton-box" style={{ width: 100, height: 16, marginBottom: '0.85rem' }} />
+            <div className="grid-folders">
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} className="skeleton-box" style={{ height: 48, borderRadius: 'var(--radius-md)' }} />
+              ))}
+            </div>
           </div>
+          {/* Files Skeleton */}
+          <div>
+            <div className="skeleton-box" style={{ width: 140, height: 16, marginBottom: '0.85rem' }} />
+            <div className="grid-cards">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="skeleton-box" style={{ height: 160, borderRadius: 'var(--radius-md)' }} />
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* 1. Subfolders Section */}
+          {sortedSubfolders.length > 0 && (
+            <div style={{ marginBottom: '2rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
+                폴더 ({sortedSubfolders.length})
+              </div>
           <div className="grid-folders">
             {sortedSubfolders.map(sub => (
               <div 
@@ -760,6 +785,8 @@ export default function FolderExplorer({
             <X size={16} />
           </button>
         </div>
+      )}
+      </>
       )}
 
       {/* 3. Pagination Controls */}

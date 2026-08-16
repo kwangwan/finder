@@ -1040,6 +1040,7 @@ export default function App() {
         ) : (
           <FolderExplorer
             workspaceName={activeWorkspace?.name || '내 워크스페이스'}
+            isLoading={isLoading}
             currentFolder={currentFolder}
             subfolders={currentSubfolders}
             files={files}
