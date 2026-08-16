@@ -12,7 +12,8 @@ import {
   MoreHorizontal,
   Folder,
   User as UserIcon,
-  HardDrive
+  HardDrive,
+  Palette
 } from 'lucide-react';
 
 const formatBytes = (bytes) => {
@@ -87,15 +88,6 @@ export default function TopBar({
           title="지식 검색 (⌘K)"
         >
           <Search size={17} />
-        </button>
-
-        {/* Theme Toggle Button */}
-        <button 
-          className="btn-icon hide-mobile" 
-          onClick={onToggleTheme} 
-          title={theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
-        >
-          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
         </button>
 
         {/* User Profile & More Actions Dropdown */}
@@ -197,86 +189,49 @@ export default function TopBar({
                   </button>
                 )}
 
-                <div style={{ padding: '0.4rem 0.65rem 0.2rem', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-                  테마 스타일
+                <div style={{ padding: '0.6rem 0.85rem 0.35rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Palette size={13} />
+                  <span>테마 스타일 설정</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: '0.2rem 0.4rem 0.4rem' }}>
-                  <button 
-                    type="button"
-                    onClick={() => { if (onSetTheme) onSetTheme('dark'); else onToggleTheme(); }}
-                    style={{
-                      padding: '0.35rem 0.4rem',
-                      background: theme === 'dark' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                      color: theme === 'dark' ? '#fff' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    <Moon size={12} /> 다크
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => { if (onSetTheme) onSetTheme('light'); else onToggleTheme(); }}
-                    style={{
-                      padding: '0.35rem 0.4rem',
-                      background: theme === 'light' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                      color: theme === 'light' ? '#fff' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    <Sun size={12} /> 라이트
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => { if (onSetTheme) onSetTheme('cyberpunk'); else onToggleTheme(); }}
-                    style={{
-                      padding: '0.35rem 0.4rem',
-                      background: theme === 'cyberpunk' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                      color: theme === 'cyberpunk' ? '#000' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    ⚡ 사이버펑크
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => { if (onSetTheme) onSetTheme('matrix'); else onToggleTheme(); }}
-                    style={{
-                      padding: '0.35rem 0.4rem',
-                      background: theme === 'matrix' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                      color: theme === 'matrix' ? '#000' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    🟢 매트릭스
-                  </button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: '0.2rem 0.75rem 0.6rem' }}>
+                  {[
+                    { id: 'dark', label: '다크', icon: '🌙', activeColor: '#3b82f6' },
+                    { id: 'light', label: '라이트', icon: '☀️', activeColor: '#f59e0b' },
+                    { id: 'cyberpunk', label: '사이버펑크', icon: '⚡', activeColor: '#ff007f' },
+                    { id: 'matrix', label: '매트릭스', icon: '🟢', activeColor: '#22c55e' }
+                  ].map(t => {
+                    const isActive = theme === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          if (onSetTheme) onSetTheme(t.id);
+                          else onToggleTheme();
+                        }}
+                        style={{
+                          height: 34,
+                          padding: '0 0.5rem',
+                          background: isActive ? 'var(--bg-tertiary)' : 'transparent',
+                          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          border: isActive ? `1.5px solid ${t.activeColor}` : '1px solid var(--border-subtle)',
+                          boxShadow: isActive ? `0 0 8px ${t.activeColor}33` : 'none',
+                          borderRadius: 'var(--radius-md)',
+                          fontSize: '0.78rem',
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <span>{t.icon}</span>
+                        <span>{t.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="dropdown-divider" />
