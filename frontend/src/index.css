@@ -588,11 +588,13 @@ body {
 }
 
 /* Breadcrumb & Explorer Header */
-.explorer-container {
+.explorer-container,
+.folder-explorer {
   flex: 1;
   padding: 1.5rem;
   overflow-y: auto;
   position: relative;
+  height: 100%;
 }
 
 .explorer-header {
@@ -1253,6 +1255,26 @@ body {
     width: 95vw !important;
     max-width: 95vw !important;
     margin: 10px;
+  }
+
+  .explorer-container,
+  .folder-explorer {
+    padding: 0.85rem !important;
+  }
+
+  .batch-floating-bar {
+    width: calc(100vw - 1.5rem) !important;
+    bottom: 1rem !important;
+    padding: 0.5rem 0.75rem !important;
+    gap: 0.4rem !important;
+    overflow-x: auto;
+  }
+
+  .transfer-manager-container {
+    bottom: 1rem !important;
+    right: 1rem !important;
+    width: calc(100vw - 2rem) !important;
+    max-width: calc(100vw - 2rem) !important;
   }
 }
 

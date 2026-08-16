@@ -64,7 +64,7 @@ import { useDialog } from './context/DialogContext';
 export default function App() {
   const { showAlert, showConfirm } = useDialog();
   const [theme, setTheme] = useState(() => localStorage.getItem('kb_theme') || 'dark');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   
   // Auth State
   const [currentUser, setCurrentUser] = useState(null);

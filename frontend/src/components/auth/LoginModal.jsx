@@ -76,12 +76,13 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
         });
 
         googleBtnRef.current.innerHTML = '';
+        const btnWidth = Math.min(320, Math.max(220, window.innerWidth - 80));
         window.google.accounts.id.renderButton(googleBtnRef.current, {
           theme: 'filled_blue',
           size: 'large',
           text: 'signin_with',
           shape: 'rectangular',
-          width: 320,
+          width: btnWidth,
           logo_alignment: 'left',
         });
       } else {
@@ -407,7 +408,7 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
           alignItems: 'center',
           justifyContent: 'center',
           gap: '0.45rem',
-          whiteSpace: 'nowrap'
+          wordBreak: 'keep-all',
         }}>
           <Shield size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
           <span>신규 가입자는 관리자 승인 또는 초대장을 통해 접속할 수 있습니다.</span>
