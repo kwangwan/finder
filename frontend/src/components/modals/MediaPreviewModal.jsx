@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { 
@@ -7,6 +7,8 @@ import {
   ZoomIn, 
   ZoomOut, 
   RotateCcw, 
+  RotateCw,
+  RefreshCw,
   Maximize2, 
   FileText, 
   Film, 
@@ -32,12 +34,18 @@ export default function MediaPreviewModal({
   const [isLoading, setIsLoading] = useState(false);
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
   const [bgMode, setBgMode] = useState('checkerboard'); // 'checkerboard' | 'light' | 'dark'
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (isOpen && file) {
       setZoomLevel(1);
+      setRotation(0);
+      setPan({ x: 0, y: 0 });
       setError('');
       setIsLoading(false);
       setIsImageLoaded(false);
@@ -60,6 +68,9 @@ export default function MediaPreviewModal({
       setMediaUrl(null);
       setFileDetail(null);
       setIsImageLoaded(false);
+      setZoomLevel(1);
+      setRotation(0);
+      setPan({ x: 0, y: 0 });
     }
   }, [isOpen, file?.id]);
 
@@ -172,7 +183,7 @@ export default function MediaPreviewModal({
             {isImage && (
               <>
                 {/* Background Mode Toggle */}
-                <div className="hide-mobile" style={{ display: 'flex', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 2, marginRight: '0.3rem', border: '1px solid var(--border-subtle)' }}>
+                <div className="hide-mobile" style={{ display: 'flex', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 2, marginRight: '0.2rem', border: '1px solid var(--border-subtle)' }}>
                   <button 
                     className="btn-icon" 
                     onClick={() => setBgMode('checkerboard')}
@@ -214,27 +225,64 @@ export default function MediaPreviewModal({
                   </button>
                 </div>
 
-                <button 
-                  className="btn-icon hide-mobile" 
-                  onClick={() => setZoomLevel(prev => Math.min(prev + 0.25, 3))}
-                  title="확대"
-                >
-                  <ZoomIn size={16} />
-                </button>
-                <button 
-                  className="btn-icon hide-mobile" 
-                  onClick={() => setZoomLevel(prev => Math.max(prev - 0.25, 0.5))}
-                  title="축소"
-                >
-                  <ZoomOut size={16} />
-                </button>
-                <button 
-                  className="btn-icon hide-mobile" 
-                  onClick={() => setZoomLevel(1)}
-                  title="원래 크기"
-                >
-                  <RotateCcw size={15} />
-                </button>
+                {/* Rotation Controls */}
+                <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 2, border: '1px solid var(--border-subtle)' }}>
+                  <button 
+                    className="btn-icon" 
+                    onClick={() => setRotation(r => (r - 90 + 360) % 360)}
+                    title="반시계 방향 90° 회전"
+                    style={{ padding: 4 }}
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                  <button 
+                    className="btn-icon" 
+                    onClick={() => setRotation(r => (r + 90) % 360)}
+                    title="시계 방향 90° 회전"
+                    style={{ padding: 4 }}
+                  >
+                    <RotateCw size={14} />
+                  </button>
+                </div>
+
+                {/* Zoom Controls */}
+                <div className="hide-mobile" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: '2px 4px', border: '1px solid var(--border-subtle)', gap: '2px' }}>
+                  <button 
+                    className="btn-icon" 
+                    onClick={() => setZoomLevel(prev => Math.max(Number((prev - 0.25).toFixed(2)), 0.25))}
+                    title="축소 (마우스 휠 가능)"
+                    style={{ padding: 3 }}
+                  >
+                    <ZoomOut size={14} />
+                  </button>
+                  <span style={{ fontSize: '0.74rem', minWidth: 38, textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', userSelect: 'none' }}>
+                    {Math.round(zoomLevel * 100)}%
+                  </span>
+                  <button 
+                    className="btn-icon" 
+                    onClick={() => setZoomLevel(prev => Math.min(Number((prev + 0.25).toFixed(2)), 4.0))}
+                    title="확대 (마우스 휠 가능)"
+                    style={{ padding: 3 }}
+                  >
+                    <ZoomIn size={14} />
+                  </button>
+                </div>
+
+                {/* Reset Zoom/Rotate */}
+                {(zoomLevel !== 1 || rotation !== 0 || pan.x !== 0 || pan.y !== 0) && (
+                  <button 
+                    className="btn-icon hide-mobile" 
+                    onClick={() => {
+                      setZoomLevel(1);
+                      setRotation(0);
+                      setPan({ x: 0, y: 0 });
+                    }}
+                    title="배율 및 회전 초기화"
+                    style={{ color: 'var(--accent-primary)', padding: 4 }}
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                )}
               </>
             )}
 
@@ -255,20 +303,46 @@ export default function MediaPreviewModal({
         </div>
 
         {/* Media Content Body */}
-        <div style={{
-          flex: 1,
-          minHeight: 440,
-          height: isImage ? '75vh' : 'auto',
-          maxHeight: 'calc(92vh - 80px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'auto',
-          position: 'relative',
-          padding: (isPdf || isVideo) ? 0 : '1.5rem',
-          transition: 'background-color 0.25s ease',
-          ...getContainerBgStyle()
-        }}>
+        <div 
+          onMouseDown={(e) => {
+            if (isImage && (zoomLevel > 1 || rotation !== 0)) {
+              setIsDragging(true);
+              dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+            }
+          }}
+          onMouseMove={(e) => {
+            if (isDragging) {
+              setPan({
+                x: e.clientX - dragStartRef.current.x,
+                y: e.clientY - dragStartRef.current.y
+              });
+            }
+          }}
+          onMouseUp={() => setIsDragging(false)}
+          onMouseLeave={() => setIsDragging(false)}
+          onWheel={(e) => {
+            if (isImage) {
+              e.preventDefault();
+              const delta = e.deltaY < 0 ? 0.15 : -0.15;
+              setZoomLevel(prev => Math.min(Math.max(Number((prev + delta).toFixed(2)), 0.25), 4));
+            }
+          }}
+          style={{
+            flex: 1,
+            minHeight: 440,
+            height: isImage ? '75vh' : 'auto',
+            maxHeight: 'calc(92vh - 80px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            position: 'relative',
+            padding: (isPdf || isVideo) ? 0 : '1.5rem',
+            transition: 'background-color 0.25s ease',
+            userSelect: isDragging ? 'none' : 'auto',
+            ...getContainerBgStyle()
+          }}
+        >
           {isLoading && (
             <div style={{ color: 'var(--accent-primary)', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Loader2 size={18} className="spin" /> 문서 불러오는 중...
@@ -345,22 +419,25 @@ export default function MediaPreviewModal({
                   <img
                     src={mediaUrl}
                     alt={file.name}
+                    draggable={false}
                     onLoad={() => setIsImageLoaded(true)}
                     onError={() => {
                       setIsImageLoaded(true);
                       setError('이미지를 불러오지 못했습니다.');
                     }}
                     style={{
-                      maxWidth: zoomLevel === 1 ? '100%' : 'none',
-                      maxHeight: zoomLevel === 1 ? '72vh' : 'none',
-                      transform: `scale(${isImageLoaded ? zoomLevel : 0.94})`,
+                      maxWidth: '90%',
+                      maxHeight: '70vh',
+                      transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${isImageLoaded ? zoomLevel : 0.94})`,
                       transformOrigin: 'center center',
                       opacity: isImageLoaded ? 1 : 0,
-                      transition: 'opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                      transition: isDragging ? 'none' : 'opacity 0.35s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
                       objectFit: 'contain',
                       borderRadius: 'var(--radius-sm)',
                       boxShadow: isImageLoaded ? '0 10px 30px rgba(0, 0, 0, 0.35)' : 'none',
-                      pointerEvents: isImageLoaded ? 'auto' : 'none'
+                      pointerEvents: isImageLoaded ? 'auto' : 'none',
+                      cursor: (zoomLevel > 1 || rotation !== 0) ? (isDragging ? 'grabbing' : 'grab') : 'default',
+                      userSelect: 'none'
                     }}
                   />
                 </>
