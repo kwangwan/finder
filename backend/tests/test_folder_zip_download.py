@@ -113,3 +113,30 @@ async def test_ensure_folder_path_and_zip_download(db_session):
         print("Batch Zip entries:", names)
         assert "cover.md" in names
         assert "summer/trip_note.md" in names
+
+    # 5. Test Batch Move
+    from app.routers.files import batch_move_files
+    from app.schemas.file import BatchMoveRequest
+    
+    move_req = BatchMoveRequest(
+        workspace_id=ws.id,
+        file_ids=[file2.id],
+        folder_id=summer_folder_id
+    )
+    move_res = await batch_move_files(move_req, db=db_session, current_user=user)
+    assert move_res["moved_count"] == 1
+
+    await db_session.refresh(file2)
+    assert file2.folder_id == summer_folder_id
+
+    # Move back to root (folder_id = None)
+    move_req_root = BatchMoveRequest(
+        workspace_id=ws.id,
+        file_ids=[file2.id],
+        folder_id=None
+    )
+    move_res_root = await batch_move_files(move_req_root, db=db_session, current_user=user)
+    assert move_res_root["moved_count"] == 1
+    await db_session.refresh(file2)
+    assert file2.folder_id is None
+

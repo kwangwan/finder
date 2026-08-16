@@ -15,7 +15,7 @@ from app.core.security import get_current_approved_user
 from app.schemas.file import (
     NoteCreate, NoteUpdate, FileMetadataCreate, FileMoveRequest,
     FileRenameRequest, FileResponse, FileDetailResponse, PagedFileResponse,
-    BatchDownloadRequest
+    BatchDownloadRequest, BatchMoveRequest
 )
 from app.routers.folders import _collect_folder_files_recursive
 from app.services.s3_service import s3_service
@@ -555,4 +555,45 @@ async def batch_download_files(
         media_type="application/zip",
         headers=headers
     )
+
+
+@router.post("/batch-move")
+async def batch_move_files(
+    req: BatchMoveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Move multiple files at once to a target folder (or root if folder_id is None).
+    """
+    if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
+        raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
+
+    if req.folder_id:
+        target_folder = await db.get(Folder, req.folder_id)
+        if not target_folder or target_folder.workspace_id != req.workspace_id or target_folder.is_trashed:
+            raise HTTPException(status_code=404, detail="대상 폴더를 찾을 수 없거나 이동할 수 없습니다.")
+
+    if not req.file_ids:
+        return {"moved_count": 0, "folder_id": req.folder_id}
+
+    files_q = select(FileItem).where(
+        and_(
+            FileItem.id.in_(req.file_ids),
+            FileItem.workspace_id == req.workspace_id,
+            FileItem.is_trashed == False
+        )
+    )
+    files_res = await db.execute(files_q)
+    files_to_move = files_res.scalars().all()
+
+    moved_count = 0
+    for f in files_to_move:
+        if await access_service.can_access_file(db, current_user, f.id):
+            f.folder_id = req.folder_id
+            moved_count += 1
+
+    await db.commit()
+    return {"moved_count": moved_count, "folder_id": req.folder_id}
+
 

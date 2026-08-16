@@ -33,6 +33,11 @@ class FileMetadataCreate(BaseModel):
 class FileMoveRequest(BaseModel):
     folder_id: Optional[uuid.UUID] = None
 
+class BatchMoveRequest(BaseModel):
+    workspace_id: uuid.UUID
+    file_ids: List[uuid.UUID]
+    folder_id: Optional[uuid.UUID] = None
+
 class FileRenameRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
 

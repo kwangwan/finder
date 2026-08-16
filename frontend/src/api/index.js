@@ -892,6 +892,23 @@ export async function batchDownloadFiles({
 }
 
 /**
+ * Move multiple files at once to target folder (or root if targetFolderId is null)
+ */
+export async function batchMoveFiles(workspaceId, fileIds, targetFolderId = null) {
+  const res = await fetchWithRetry(`${API_BASE}/files/batch-move`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      file_ids: fileIds,
+      folder_id: targetFolderId || null,
+    }),
+  });
+  if (!res.ok) throw new Error('파일 일괄 이동 실패');
+  return res.json();
+}
+
+/**
  * Semantic & Hybrid Search API (with Advanced Filtering)
  */
 export async function searchDocuments({

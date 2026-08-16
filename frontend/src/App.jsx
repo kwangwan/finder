@@ -15,6 +15,7 @@ import InvitationManagerModal from './components/admin/InvitationManagerModal';
 import TrashExplorer from './components/trash/TrashExplorer';
 import ContextMenu from './components/common/ContextMenu';
 import RenameModal from './components/modals/RenameModal';
+import MoveFilesModal from './components/modals/MoveFilesModal';
 import TransferManager from './components/transfer/TransferManager';
 import { 
   Folder as FolderIcon,
@@ -29,7 +30,8 @@ import {
   Star,
   Download,
   Eye,
-  FileArchive
+  FileArchive,
+  FolderInput
 } from 'lucide-react';
 import { 
   getMe,
@@ -54,7 +56,8 @@ import {
   getFileDownloadUrl,
   downloadFileChunked,
   downloadFolderAsZip,
-  batchDownloadFiles
+  batchDownloadFiles,
+  batchMoveFiles
 } from './api';
 import { useDialog } from './context/DialogContext';
 
@@ -260,6 +263,118 @@ export default function App() {
       startDownloadFile(item.rawFile);
     } else if (item.rawFolder) {
       startDownloadFolder(item.rawFolder);
+    }
+  };
+
+  const [moveFilesModal, setMoveFilesModal] = useState({ isOpen: false, fileIds: [] });
+
+  const handleOpenMoveModal = (fileIds) => {
+    if (!fileIds || fileIds.length === 0) return;
+    setMoveFilesModal({ isOpen: true, fileIds });
+  };
+
+  const handleConfirmMoveFiles = async (targetFolderId) => {
+    if (!activeWorkspace?.id || !moveFilesModal.fileIds.length) return;
+    try {
+      const res = await batchMoveFiles(activeWorkspace.id, moveFilesModal.fileIds, targetFolderId);
+      await refreshFiles();
+      await refreshFoldersAndStats();
+      await showAlert({
+        title: '파일 이동 완료',
+        message: `${res.moved_count}개의 파일이 성공적으로 이동되었습니다.`,
+        type: 'success',
+      });
+    } catch (err) {
+      await showAlert({
+        title: '이동 실패',
+        message: '파일 이동 중 오류가 발생했습니다: ' + err.message,
+        type: 'error',
+      });
+    }
+  };
+
+  const handleDirectMoveFiles = async (fileIds, targetFolderId) => {
+    if (!activeWorkspace?.id || !fileIds.length) return;
+    try {
+      const res = await batchMoveFiles(activeWorkspace.id, fileIds, targetFolderId);
+      await refreshFiles();
+      await refreshFoldersAndStats();
+      await showAlert({
+        title: '파일 이동 완료',
+        message: `${res.moved_count}개의 파일이 지정한 폴더로 이동되었습니다.`,
+        type: 'success',
+      });
+    } catch (err) {
+      await showAlert({
+        title: '이동 실패',
+        message: '파일 이동 중 오류가 발생했습니다: ' + err.message,
+        type: 'error',
+      });
+    }
+  };
+
+  const handleBatchTrashFiles = async (fileIds) => {
+    if (!fileIds || fileIds.length === 0) return;
+    const confirmed = await showConfirm({
+      title: '파일 일괄 삭제',
+      message: `선택한 ${fileIds.length}개 파일을 휴지통으로 이동하시겠습니까?`,
+      confirmText: '삭제',
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    for (const fid of fileIds) {
+      try {
+        await moveToTrashFile(fid);
+      } catch (e) {
+        console.error('Trash error:', e);
+      }
+    }
+    await refreshFiles();
+    await refreshFoldersAndStats();
+  };
+
+  const handleBatchDownloadFiles = async (fileIds) => {
+    if (!fileIds || fileIds.length === 0 || !activeWorkspace?.id) return;
+    const archiveName = `download_files_${fileIds.length}.zip`;
+    const transferId = `batch-${Date.now()}`;
+    const controller = new AbortController();
+    abortControllersRef.current.set(transferId, controller);
+
+    addTransfer({
+      id: transferId,
+      type: 'zip_download',
+      name: archiveName,
+      percent: 10,
+      status: 'running',
+      statusText: `${fileIds.length}개 파일 압축 준비 중...`,
+    });
+
+    try {
+      await batchDownloadFiles({
+        workspaceId: activeWorkspace.id,
+        fileIds,
+        folderIds: [],
+        archiveName,
+        onProgress: ({ percent, status }) => {
+          updateTransfer(transferId, { percent, statusText: status });
+        },
+        signal: controller.signal,
+      });
+      updateTransfer(transferId, { percent: 100, status: 'completed', statusText: 'ZIP 다운로드 완료' });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        handleCancelTransfer(transferId);
+        return;
+      }
+      console.error('Batch download error:', err);
+      updateTransfer(transferId, {
+        status: 'error',
+        statusText: `실패: ${err.message}`,
+        retryFn: () => handleBatchDownloadFiles(fileIds),
+      });
+    } finally {
+      abortControllersRef.current.delete(transferId);
     }
   };
 
@@ -693,6 +808,11 @@ export default function App() {
           icon: Download,
           onClick: () => startDownloadFile(file),
         },
+        {
+          label: '다른 폴더로 이동',
+          icon: FolderInput,
+          onClick: () => handleOpenMoveModal([file.id]),
+        },
         { divider: true },
         {
           label: '이름 변경',
@@ -927,6 +1047,10 @@ export default function App() {
             onBackgroundContextMenu={handleBackgroundContextMenu}
             onDownloadFolder={startDownloadFolder}
             onDownloadFile={startDownloadFile}
+            onOpenMoveModal={handleOpenMoveModal}
+            onBatchDownload={handleBatchDownloadFiles}
+            onBatchDelete={handleBatchTrashFiles}
+            onDirectMoveFiles={handleDirectMoveFiles}
             sortBy={sortBy}
             onSortByChange={(newSort) => {
               setSortBy(newSort);
@@ -1035,6 +1159,16 @@ export default function App() {
         item={renameModal.item}
         onClose={() => setRenameModal({ isOpen: false, item: null })}
         onRename={handleRenameItem}
+      />
+
+      {/* Move Files Modal */}
+      <MoveFilesModal
+        isOpen={moveFilesModal.isOpen}
+        fileIds={moveFilesModal.fileIds}
+        folders={folders}
+        currentFolderId={activeFolderId}
+        onClose={() => setMoveFilesModal({ isOpen: false, fileIds: [] })}
+        onConfirmMove={handleConfirmMoveFiles}
       />
 
       {/* Google Drive-style Resilient Transfer Manager */}

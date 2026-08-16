@@ -27,7 +27,11 @@ import {
   FileImage,
   MoreVertical,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  CheckSquare,
+  Square,
+  FolderInput,
+  X
 } from 'lucide-react';
 import { downloadFileChunked, getThumbnailUrl } from '../../api';
 import { useDialog } from '../../context/DialogContext';
@@ -51,6 +55,10 @@ export default function FolderExplorer({
   onBackgroundContextMenu,
   onDownloadFolder,
   onDownloadFile,
+  onOpenMoveModal,
+  onBatchDownload,
+  onBatchDelete,
+  onDirectMoveFiles,
   sortBy = 'updated_at',
   onSortByChange,
   sortOrder = 'desc',
@@ -63,9 +71,15 @@ export default function FolderExplorer({
 }) {
   const { showAlert } = useDialog();
   const [isDragOver, setIsDragOver] = useState(false);
+  const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [downloadProgress, setDownloadProgress] = useState(null); // { fileId, percent, status }
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
   const breadcrumbRef = useRef(null);
+
+  // Clear selection when folder changes
+  useEffect(() => {
+    setSelectedFileIds([]);
+  }, [currentFolder?.id]);
 
   // Close breadcrumb dropdown on outside click
   useEffect(() => {
@@ -77,6 +91,13 @@ export default function FolderExplorer({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const toggleFileSelection = (fileId, e) => {
+    if (e) e.stopPropagation();
+    setSelectedFileIds(prev =>
+      prev.includes(fileId) ? prev.filter(id => id !== fileId) : [...prev, fileId]
+    );
+  };
 
   const isMediaFile = (file) => {
     return file.file_type === 'image' || 
@@ -174,7 +195,11 @@ export default function FolderExplorer({
     }
   };
 
-  const handleCardClick = (file) => {
+  const handleCardClick = (file, e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      toggleFileSelection(file.id, e);
+      return;
+    }
     if (isMediaFile(file) && onOpenMediaPreview) {
       onOpenMediaPreview(file);
     } else {
@@ -197,22 +222,15 @@ export default function FolderExplorer({
     return 0;
   });
 
+  const totalPages = paginationMeta?.total_pages || Math.ceil((paginationMeta?.total_items || files.length) / pageSize) || 1;
+  const totalItemCount = paginationMeta?.total_items ?? (files.length + subfolders.length);
+
   const getPageNumbers = (current, total) => {
-    if (!total || total <= 1) return [1];
-    if (total <= 7) {
-      return Array.from({ length: total }, (_, i) => i + 1);
-    }
-    if (current <= 4) {
-      return [1, 2, 3, 4, 5, '...', total];
-    }
-    if (current >= total - 3) {
-      return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
-    }
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
+    if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
     return [1, '...', current - 1, current, current + 1, '...', total];
   };
-
-  const totalItemCount = paginationMeta?.total_count ?? files.length;
-  const totalPages = paginationMeta?.total_pages ?? 1;
 
   return (
     <div 
@@ -390,6 +408,23 @@ export default function FolderExplorer({
           <span className="explorer-item-count">
             전체 <strong>{totalItemCount}</strong>개 항목
           </span>
+          {files.length > 0 && (
+            <button
+              type="button"
+              className="btn-icon"
+              style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', marginLeft: '0.5rem', padding: '3px 6px' }}
+              onClick={() => {
+                if (selectedFileIds.length === files.length) {
+                  setSelectedFileIds([]);
+                } else {
+                  setSelectedFileIds(files.map(f => f.id));
+                }
+              }}
+            >
+              {selectedFileIds.length === files.length ? <CheckSquare size={14} color="var(--accent-primary)" /> : <Square size={14} />}
+              <span>{selectedFileIds.length === files.length ? '전체 해제' : '다중 선택'}</span>
+            </button>
+          )}
         </div>
 
         <div className="explorer-toolbar-right">
@@ -438,6 +473,26 @@ export default function FolderExplorer({
                   e.preventDefault();
                   e.stopPropagation();
                   if (onFolderContextMenu) onFolderContextMenu(e, sub);
+                }}
+                onDragOver={(e) => {
+                  if (e.dataTransfer.types.includes('application/json')) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }
+                }}
+                onDrop={(e) => {
+                  const dataStr = e.dataTransfer.getData('application/json');
+                  if (dataStr) {
+                    try {
+                      const parsed = JSON.parse(dataStr);
+                      if (parsed.type === 'kb_files' && parsed.fileIds && parsed.fileIds.length > 0) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDirectMoveFiles && onDirectMoveFiles(parsed.fileIds, sub.id);
+                        setSelectedFileIds([]);
+                      }
+                    } catch (err) {}
+                  }
                 }}
               >
                 <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
@@ -503,20 +558,43 @@ export default function FolderExplorer({
           <div className="grid-cards">
             {files.map(file => {
               const hasMedia = isMediaFile(file);
+              const isSelected = selectedFileIds.includes(file.id);
 
               return (
                 <div 
                   key={file.id} 
-                  className="file-card"
-                  onClick={() => handleCardClick(file)}
+                  className={`file-card ${isSelected ? 'selected' : ''}`}
+                  draggable={true}
+                  onDragStart={(e) => {
+                    const ids = selectedFileIds.includes(file.id) ? selectedFileIds : [file.id];
+                    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'kb_files', fileIds: ids }));
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onClick={(e) => handleCardClick(file, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     if (onFileContextMenu) onFileContextMenu(e, file);
                   }}
+                  style={{
+                    outline: isSelected ? '2px solid var(--accent-primary)' : undefined,
+                    background: isSelected ? 'rgba(59, 130, 246, 0.08)' : undefined,
+                  }}
                 >
                   <div className="file-card-top">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                      <div 
+                        onClick={(e) => toggleFileSelection(file.id, e)}
+                        title="선택"
+                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                      >
+                        {isSelected ? (
+                          <CheckSquare size={16} color="var(--accent-primary)" />
+                        ) : (
+                          <Square size={16} color="var(--text-muted)" style={{ opacity: 0.5 }} />
+                        )}
+                      </div>
+
                       <div className="file-icon-wrap">
                         {getFileIcon(file)}
                       </div>
@@ -601,6 +679,87 @@ export default function FolderExplorer({
           </div>
         )}
       </div>
+
+      {/* Floating Batch Action Bar */}
+      {selectedFileIds.length > 0 && (
+        <div className="batch-floating-bar" style={{
+          position: 'fixed',
+          bottom: '2rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'var(--bg-secondary)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '0.65rem 1.25rem',
+          boxShadow: '0 14px 40px rgba(0, 0, 0, 0.45)',
+          border: '1px solid var(--border-subtle)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          zIndex: 9000,
+        }}>
+          <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+            <CheckSquare size={16} color="var(--accent-primary)" />
+            <span>{selectedFileIds.length}개 선택됨</span>
+          </div>
+
+          <div style={{ height: '18px', width: '1px', background: 'var(--border-subtle)' }} />
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              if (selectedFileIds.length === files.length) {
+                setSelectedFileIds([]);
+              } else {
+                setSelectedFileIds(files.map(f => f.id));
+              }
+            }}
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+          >
+            {selectedFileIds.length === files.length ? '선택 해제' : '전체 선택'}
+          </button>
+
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => onOpenMoveModal && onOpenMoveModal(selectedFileIds)}
+            style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+          >
+            <FolderInput size={15} />
+            <span>폴더로 이동</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => onBatchDownload && onBatchDownload(selectedFileIds)}
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+          >
+            <Download size={15} />
+            <span>ZIP 다운로드</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => onBatchDelete && onBatchDelete(selectedFileIds)}
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent-rose)', whiteSpace: 'nowrap' }}
+          >
+            <Trash2 size={15} />
+            <span>삭제</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => setSelectedFileIds([])}
+            title="선택 닫기"
+            style={{ padding: '4px', marginLeft: '4px' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* 3. Pagination Controls */}
       {paginationMeta && (totalPages > 1 || totalItemCount > 10) && (
