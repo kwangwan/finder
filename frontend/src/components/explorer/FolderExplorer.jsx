@@ -39,6 +39,8 @@ import { useDialog } from '../../context/DialogContext';
 export default function FolderExplorer({
   workspaceName = '내 워크스페이스',
   isLoading = false,
+  activeView = 'all',
+  onSelectView,
   currentFolder,
   subfolders = [],
   files = [],
@@ -64,7 +66,7 @@ export default function FolderExplorer({
   sortBy = 'updated_at',
   onSortByChange,
   sortOrder = 'desc',
-  onToggleSortOrder,
+  onSortOrderChange,
   currentPage = 1,
   onPageChange,
   pageSize = 20,
@@ -81,7 +83,7 @@ export default function FolderExplorer({
   // Clear selection when folder changes
   useEffect(() => {
     setSelectedFileIds([]);
-  }, [currentFolder?.id]);
+  }, [currentFolder?.id, activeView]);
 
   // Close breadcrumb dropdown on outside click
   useEffect(() => {
@@ -151,17 +153,18 @@ export default function FolderExplorer({
 
   // Resilient Range Download
   const handleDownload = async (file, e) => {
-    e.stopPropagation();
-    if (onDownloadFile) {
-      onDownloadFile(file, e);
-      return;
-    }
+    if (e) e.stopPropagation();
     try {
       if (file.s3_key) {
-        setDownloadProgress({ fileId: file.id, percent: 10, status: '다운로드 준비 중...' });
-        await downloadFileChunked(file.id, file.name, file.size_bytes, ({ percent, status }) => {
-          setDownloadProgress({ fileId: file.id, percent, status });
-        });
+        setDownloadProgress({ fileId: file.id, percent: 5, status: '다운로드 준비 중...' });
+        await downloadFileChunked(
+          file.id,
+          file.name,
+          file.size_bytes,
+          ({ percent, status }) => {
+            setDownloadProgress({ fileId: file.id, percent, status });
+          }
+        );
         setTimeout(() => setDownloadProgress(null), 1500);
       } else if (file.content) {
         const blob = new Blob([file.content], { type: 'text/markdown' });
@@ -243,13 +246,6 @@ export default function FolderExplorer({
   const totalPages = paginationMeta?.total_pages || Math.ceil((paginationMeta?.total_items || files.length) / pageSize) || 1;
   const totalItemCount = paginationMeta?.total_items ?? (files.length + subfolders.length);
 
-  const getPageNumbers = (current, total) => {
-    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-    if (current <= 4) return [1, 2, 3, 4, 5, '...', total];
-    if (current >= total - 3) return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
-    return [1, '...', current - 1, current, current + 1, '...', total];
-  };
-
   return (
     <div 
       className={`folder-explorer ${isDragOver ? 'drag-over' : ''}`}
@@ -257,11 +253,6 @@ export default function FolderExplorer({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onContextMenu={(e) => {
-        if (e.target.closest('.file-card') || e.target.closest('.folder-card')) return;
-        e.preventDefault();
-        if (onBackgroundContextMenu) onBackgroundContextMenu(e);
-      }}
     >
       {/* Download Floating Progress Bar */}
       {downloadProgress && (
@@ -284,15 +275,34 @@ export default function FolderExplorer({
       <div className="explorer-header">
         <div className="breadcrumb-nav">
           <span 
-            className={`breadcrumb-item ${!currentFolder ? 'active' : ''}`}
-            onClick={() => onSelectFolder(null)}
+            className={`breadcrumb-item ${(!currentFolder && activeView === 'all') ? 'active' : ''}`}
+            onClick={() => {
+              if (onSelectView) onSelectView('all');
+              else if (onSelectFolder) onSelectFolder(null);
+            }}
             title="홈"
           >
             <Home size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
             <span>홈</span>
           </span>
 
-          {folderPath.length <= 3 ? (
+          {activeView === 'notes' ? (
+            <>
+              <ChevronRight size={13} className="breadcrumb-sep" />
+              <span className="breadcrumb-item active" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <FileText size={14} color="var(--accent-primary)" />
+                <span>마크다운 노트</span>
+              </span>
+            </>
+          ) : activeView === 'favorites' ? (
+            <>
+              <ChevronRight size={13} className="breadcrumb-sep" />
+              <span className="breadcrumb-item active" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <Star size={14} color="var(--accent-amber)" fill="var(--accent-amber)" />
+                <span>즐겨찾기</span>
+              </span>
+            </>
+          ) : folderPath.length <= 3 ? (
             folderPath.map(f => (
               <React.Fragment key={f.id}>
                 <ChevronRight size={13} className="breadcrumb-sep" />
@@ -331,7 +341,7 @@ export default function FolderExplorer({
                           onSelectFolder(f.id);
                         }}
                       >
-                        <FileText size={14} color="var(--accent-primary)" />
+                        <FolderIcon size={14} color="var(--accent-primary)" />
                         <span>{f.name}</span>
                       </div>
                     ))}
@@ -358,28 +368,49 @@ export default function FolderExplorer({
 
         {/* Action Buttons */}
         <div className="explorer-actions">
-          {currentFolder && (
+          {activeView === 'notes' ? (
+            <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 지식 노트 작성">
+              <Plus size={15} />
+              <span>새 노트</span>
+            </button>
+          ) : activeView === 'favorites' ? (
             <button 
               className="btn-secondary explorer-btn" 
-              onClick={() => onDownloadFolder && onDownloadFolder(currentFolder)} 
-              title="현재 폴더 전체를 ZIP으로 다운로드"
+              onClick={() => {
+                if (onSelectView) onSelectView('all');
+                else if (onSelectFolder) onSelectFolder(null);
+              }} 
+              title="모든 파일 탐색"
             >
-              <FileArchive size={15} />
-              <span className="hide-mobile">ZIP 다운로드</span>
+              <Home size={15} />
+              <span>모든 파일 둘러보기</span>
             </button>
+          ) : (
+            <>
+              {currentFolder && (
+                <button 
+                  className="btn-secondary explorer-btn" 
+                  onClick={() => onDownloadFolder && onDownloadFolder(currentFolder)} 
+                  title="현재 폴더 전체를 ZIP으로 다운로드"
+                >
+                  <FileArchive size={15} />
+                  <span className="hide-mobile">ZIP 다운로드</span>
+                </button>
+              )}
+              <button className="btn-secondary explorer-btn" onClick={onOpenUpload} title="파일 및 폴더 업로드">
+                <UploadCloud size={15} />
+                <span className="hide-mobile">업로드</span>
+              </button>
+              <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} title="현재 경로에 새 폴더 생성">
+                <FolderPlus size={15} />
+                <span className="hide-mobile">새 폴더</span>
+              </button>
+              <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 지식 노트 작성">
+                <Plus size={15} />
+                <span className="hide-mobile">새 노트</span>
+              </button>
+            </>
           )}
-          <button className="btn-secondary explorer-btn" onClick={onOpenUpload} title="파일 및 폴더 업로드">
-            <UploadCloud size={15} />
-            <span className="hide-mobile">업로드</span>
-          </button>
-          <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} title="현재 경로에 새 폴더 생성">
-            <FolderPlus size={15} />
-            <span className="hide-mobile">새 폴더</span>
-          </button>
-          <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 지식 노트 작성">
-            <Plus size={15} />
-            <span className="hide-mobile">새 노트</span>
-          </button>
         </div>
       </div>
 
@@ -461,8 +492,8 @@ export default function FolderExplorer({
         </div>
       ) : (
         <>
-          {/* 1. Subfolders Section */}
-          {sortedSubfolders.length > 0 && (
+          {/* 1. Subfolders Section (Only in all/folder view) */}
+          {activeView !== 'notes' && activeView !== 'favorites' && sortedSubfolders.length > 0 && (
             <div style={{ marginBottom: '2rem' }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
                 폴더 ({sortedSubfolders.length})
@@ -499,7 +530,7 @@ export default function FolderExplorer({
                   }
                 }}
               >
-                <FileText size={20} color={sub.color || 'var(--accent-primary)'} />
+                <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
                 <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sub.name}
                 </span>
@@ -529,35 +560,121 @@ export default function FolderExplorer({
       {/* 2. Files Grid Section */}
       <div>
         <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-          문서 및 파일 ({files.length})
+          {activeView === 'notes' ? `마크다운 노트 (${files.length})` : activeView === 'favorites' ? `즐겨찾기 항목 (${files.length})` : `문서 및 파일 (${files.length})`}
         </div>
 
-        {files.length === 0 && sortedSubfolders.length === 0 ? (
-          <div style={{
-            padding: '4rem 2rem',
-            textAlign: 'center',
-            background: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px dashed var(--border-medium)'
-          }}>
-            <FileText size={44} color="var(--text-muted)" style={{ margin: '0 auto 1rem', display: 'block' }} />
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              저장된 항목이 없습니다
-            </h3>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 400, margin: '0.5rem auto 1.5rem' }}>
-              새 마크다운 문서를 작성하거나 이미지/동영상/문서 파일을 드래그하여 업로드하세요.
-            </p>
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-              <button className="btn-primary" onClick={onNewNote}>
+        {files.length === 0 && (activeView === 'notes' || activeView === 'favorites' || sortedSubfolders.length === 0) ? (
+          activeView === 'notes' ? (
+            <div style={{
+              padding: '4rem 2rem',
+              textAlign: 'center',
+              background: 'var(--bg-card)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px dashed var(--border-medium)',
+              margin: '0.5rem 0'
+            }}>
+              <div style={{
+                width: 56,
+                height: 56,
+                borderRadius: '50%',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem'
+              }}>
+                <FileText size={28} color="var(--accent-primary)" />
+              </div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                작성된 마크다운 노트가 없습니다
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
+                아이디어, 메모, 지식 노트를 마크다운 서식으로 작성하고 AI 검색으로 빠르게 찾아보세요.
+              </p>
+              <button className="btn-primary" onClick={onNewNote} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
                 <Plus size={16} />
-                <span>새 노트 작성</span>
-              </button>
-              <button className="btn-secondary" onClick={onOpenUpload}>
-                <UploadCloud size={16} />
-                <span>파일 업로드</span>
+                <span>새 마크다운 노트 작성</span>
               </button>
             </div>
-          </div>
+          ) : activeView === 'favorites' ? (
+            <div style={{
+              padding: '4rem 2rem',
+              textAlign: 'center',
+              background: 'var(--bg-card)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px dashed var(--border-medium)',
+              margin: '0.5rem 0'
+            }}>
+              <div style={{
+                width: 56,
+                height: 56,
+                borderRadius: '50%',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem'
+              }}>
+                <Star size={28} color="var(--accent-amber)" fill="var(--accent-amber)" />
+              </div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                즐겨찾기한 항목이 없습니다
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
+                자주 확인하는 중요한 문서나 폴더 카드의 별표(★) 아이콘을 클릭하여 즐겨찾기에 추가해보세요.
+              </p>
+              <button 
+                className="btn-secondary" 
+                onClick={() => {
+                  if (onSelectView) onSelectView('all');
+                  else if (onSelectFolder) onSelectFolder(null);
+                }} 
+                style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}
+              >
+                <Home size={15} />
+                <span>모든 파일 둘러보기</span>
+              </button>
+            </div>
+          ) : (
+            <div style={{
+              padding: '4rem 2rem',
+              textAlign: 'center',
+              background: 'var(--bg-card)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px dashed var(--border-medium)',
+              margin: '0.5rem 0'
+            }}>
+              <div style={{
+                width: 56,
+                height: 56,
+                borderRadius: '50%',
+                backgroundColor: 'var(--bg-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem',
+                border: '1px solid var(--border-subtle)'
+              }}>
+                <FolderPlus size={28} color="var(--text-muted)" />
+              </div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                {currentFolder ? `'${currentFolder.name}' 폴더가 비어 있습니다` : '저장된 항목이 없습니다'}
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
+                새 노트를 작성하거나 문서/미디어 파일을 드래그하여 업로드하세요.
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                <button className="btn-primary" onClick={onNewNote} style={{ padding: '0.6rem 1.25rem' }}>
+                  <Plus size={16} />
+                  <span>새 노트 작성</span>
+                </button>
+                <button className="btn-secondary" onClick={onOpenUpload} style={{ padding: '0.6rem 1.25rem' }}>
+                  <UploadCloud size={16} />
+                  <span>파일 업로드</span>
+                </button>
+              </div>
+            </div>
+          )
         ) : (
           <div className="grid-cards">
             {files.map(file => {

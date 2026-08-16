@@ -1058,6 +1058,8 @@ export default function App() {
           <FolderExplorer
             workspaceName={activeWorkspace?.name || '내 워크스페이스'}
             isLoading={isLoading || !isWorkspacesLoaded || isAuthLoading}
+            activeView={activeView}
+            onSelectView={handleSelectView}
             currentFolder={currentFolder}
             subfolders={currentSubfolders}
             files={files}
