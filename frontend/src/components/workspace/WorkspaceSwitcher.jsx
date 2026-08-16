@@ -80,17 +80,18 @@ export default function WorkspaceSwitcher({
           }}>
             <ActiveIcon size={16} />
           </div>
-          <div style={{ textAlign: 'left', overflow: 'hidden' }}>
+          <div style={{ textAlign: 'left', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <div style={{
               fontSize: '0.875rem',
               fontWeight: 700,
               whiteSpace: 'nowrap',
               textOverflow: 'ellipsis',
-              overflow: 'hidden'
+              overflow: 'hidden',
+              lineHeight: 1.25
             }}>
               {activeWorkspace?.name || '워크스페이스 선택'}
             </div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.2 }}>
               멤버 {activeWorkspace?.member_count || 1}명
             </div>
           </div>
