@@ -418,7 +418,9 @@ export default function FolderExplorer({
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span className="explorer-item-count">
-            전체 <strong>{totalItemCount}</strong>개 항목
+            <span>전체</span>
+            <strong className="item-count-number">{totalItemCount}개</strong>
+            <span>항목</span>
           </span>
           {files.length > 0 && (
             <button

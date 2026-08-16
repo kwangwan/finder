@@ -821,14 +821,14 @@ body {
 .explorer-item-count {
   font-size: 0.85rem;
   color: var(--text-muted);
-  line-height: 1.5;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 4px;
 }
+.explorer-item-count .item-count-number,
 .explorer-item-count strong {
   color: var(--text-primary);
   font-weight: 700;
-  margin: 0 3px;
   font-variant-numeric: tabular-nums;
 }
 
