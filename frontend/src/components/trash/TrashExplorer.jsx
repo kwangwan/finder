@@ -222,18 +222,18 @@ export default function TrashExplorer({
   return (
     <div className="explorer-container">
       {/* 30-Day Auto Purge Notification Banner */}
-      {/* 30-Day Auto Purge Notification Banner */}
       <div className="trash-notice-banner">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div className="trash-notice-icon">
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+          <div className="trash-notice-icon" style={{ marginTop: 2 }}>
             <Clock size={20} color="var(--accent-amber)" />
           </div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 2 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
               휴지통 보관 및 영구 삭제 정책 안내
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              휴지통 항목은 <strong>30일 후 자동 영구 삭제</strong>되며 누구나 복구할 수 있습니다. 어뷰징 방지를 위해 <strong>즉시 영구 삭제 및 휴지통 비우기는 소유자 및 관리자만 가능</strong>합니다.
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+              • <strong>자동 정리</strong>: 휴지통 항목은 30일 후 자동 영구 삭제되며, 기간 내에는 누구나 원래 위치로 복구할 수 있습니다.<br />
+              • <strong>영구 삭제 권한</strong>: 자신이 올린 파일은 작성자가 언제든 직접 영구 삭제할 수 있으며, 타인이 올린 파일의 영구 삭제 및 휴지통 전체 비우기는 워크스페이스 소유자/관리자만 가능합니다.
             </div>
           </div>
         </div>
@@ -355,45 +355,63 @@ export default function TrashExplorer({
             삭제된 폴더 ({filteredFolders.length})
           </div>
           <div className="trash-list">
-            {filteredFolders.map(folder => (
-              <div key={folder.id} className="trash-list-item">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <FolderIcon size={20} color={folder.color || 'var(--accent-primary)'} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {folder.name}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                      <span className="badge-days">{folder.days_remaining}일 후 자동 삭제</span>
-                      <span>• {formatDate(folder.trashed_at)}</span>
-                    </div>
-                  </div>
-                </div>
+            {filteredFolders.map(folder => {
+              const isMyFolder = folder.created_by && folder.created_by === currentUser?.id;
+              const canPurgeFolder = isOwnerOrAdmin || isMyFolder;
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <button 
-                    className="btn-icon" 
-                    onClick={() => handleRestoreFolder(folder)}
-                    title="원래 위치로 복구"
-                    disabled={actionLoadingId === folder.id}
-                  >
-                    <RotateCcw size={15} color="var(--accent-emerald)" />
-                  </button>
-                  {isOwnerOrAdmin && (
+              return (
+                <div key={folder.id} className="trash-list-item">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <FolderIcon size={20} color={folder.color || 'var(--accent-primary)'} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {folder.name}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2, flexWrap: 'wrap' }}>
+                        <span className="badge-days">{folder.days_remaining}일 후 자동 삭제</span>
+                        {isMyFolder && (
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(59, 130, 246, 0.12)',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            border: '1px solid rgba(59, 130, 246, 0.25)'
+                          }}>
+                            내가 생성함
+                          </span>
+                        )}
+                        <span>• {formatDate(folder.trashed_at)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                     <button 
                       className="btn-icon" 
-                      onClick={() => handleDeletePermanentFolder(folder)}
-                      title="영구 삭제 (소유자/관리자 전용)"
+                      onClick={() => handleRestoreFolder(folder)}
+                      title="원래 위치로 복구"
                       disabled={actionLoadingId === folder.id}
                     >
-                      <Trash2 size={15} color="var(--accent-rose)" />
+                      <RotateCcw size={15} color="var(--accent-emerald)" />
                     </button>
-                  )}
+                    {canPurgeFolder && (
+                      <button 
+                        className="btn-icon" 
+                        onClick={() => handleDeletePermanentFolder(folder)}
+                        title={isMyFolder ? "영구 삭제 (내가 생성한 폴더)" : "영구 삭제 (소유자/관리자)"}
+                        disabled={actionLoadingId === folder.id}
+                      >
+                        <Trash2 size={15} color="var(--accent-rose)" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -405,56 +423,74 @@ export default function TrashExplorer({
             삭제된 파일 & 문서 ({filteredFiles.length})
           </div>
           <div className="trash-list">
-            {filteredFiles.map(file => (
-              <div key={file.id} className="trash-list-item">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
-                  {file.thumbnail_url ? (
-                    <img 
-                      src={file.thumbnail_url} 
-                      alt="" 
-                      style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', objectFit: 'cover', background: 'var(--bg-tertiary)', flexShrink: 0 }}
-                    />
-                  ) : (
-                    <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {getFileIcon(file)}
-                    </div>
-                  )}
+            {filteredFiles.map(file => {
+              const isMyFile = file.created_by && file.created_by === currentUser?.id;
+              const canPurgeFile = isOwnerOrAdmin || isMyFile;
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>
-                      {file.name}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2, flexWrap: 'wrap' }}>
-                      <span className="badge-days">{file.days_remaining}일 후 자동 삭제</span>
-                      <span>{formatBytes(file.size_bytes)}</span>
-                      {file.folder_name && <span>• 폴더: {file.folder_name}</span>}
-                      <span>• {formatDate(file.trashed_at)}</span>
+              return (
+                <div key={file.id} className="trash-list-item">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                    {file.thumbnail_url ? (
+                      <img 
+                        src={file.thumbnail_url} 
+                        alt="" 
+                        style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', objectFit: 'cover', background: 'var(--bg-tertiary)', flexShrink: 0 }}
+                      />
+                    ) : (
+                      <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {getFileIcon(file)}
+                      </div>
+                    )}
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>
+                        {file.name}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2, flexWrap: 'wrap' }}>
+                        <span className="badge-days">{file.days_remaining}일 후 자동 삭제</span>
+                        {isMyFile && (
+                          <span style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(59, 130, 246, 0.12)',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            border: '1px solid rgba(59, 130, 246, 0.25)'
+                          }}>
+                            내가 올림
+                          </span>
+                        )}
+                        <span>{formatBytes(file.size_bytes)}</span>
+                        {file.folder_name && <span>• 폴더: {file.folder_name}</span>}
+                        <span>• {formatDate(file.trashed_at)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <button 
-                    className="btn-icon" 
-                    onClick={() => handleRestoreFile(file)}
-                    title="원래 위치로 복구"
-                    disabled={actionLoadingId === file.id}
-                  >
-                    <RotateCcw size={15} color="var(--accent-emerald)" />
-                  </button>
-                  {isOwnerOrAdmin && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                     <button 
                       className="btn-icon" 
-                      onClick={() => handleDeletePermanentFile(file)}
-                      title="영구 삭제 (소유자/관리자 전용)"
+                      onClick={() => handleRestoreFile(file)}
+                      title="원래 위치로 복구"
                       disabled={actionLoadingId === file.id}
                     >
-                      <Trash2 size={15} color="var(--accent-rose)" />
+                      <RotateCcw size={15} color="var(--accent-emerald)" />
                     </button>
-                  )}
+                    {canPurgeFile && (
+                      <button 
+                        className="btn-icon" 
+                        onClick={() => handleDeletePermanentFile(file)}
+                        title={isMyFile ? "영구 삭제 (내가 올린 파일)" : "영구 삭제 (소유자/관리자)"}
+                        disabled={actionLoadingId === file.id}
+                      >
+                        <Trash2 size={15} color="var(--accent-rose)" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -21,6 +21,7 @@ class TrashFolderItem(BaseModel):
     name: str
     parent_id: Optional[uuid.UUID] = None
     workspace_id: Optional[uuid.UUID] = None
+    created_by: Optional[uuid.UUID] = None
     color: Optional[str] = None
     trashed_at: Optional[datetime] = None
     days_remaining: int = 30
@@ -33,6 +34,7 @@ class TrashFileItem(BaseModel):
     folder_id: Optional[uuid.UUID] = None
     folder_name: Optional[str] = None
     workspace_id: Optional[uuid.UUID] = None
+    created_by: Optional[uuid.UUID] = None
     file_type: str
     size_bytes: int
     thumbnail_url: Optional[str] = None
@@ -171,6 +173,7 @@ async def get_trash(
             name=f.name,
             parent_id=f.parent_id,
             workspace_id=f.workspace_id,
+            created_by=f.created_by,
             color=f.color,
             trashed_at=f.trashed_at,
             days_remaining=days_rem,
@@ -202,6 +205,7 @@ async def get_trash(
             folder_id=f.folder_id,
             folder_name=folder_name,
             workspace_id=f.workspace_id,
+            created_by=f.created_by,
             file_type=f.file_type,
             size_bytes=f.size_bytes,
             thumbnail_url=f"/api/storage/thumbnail/{f.id}" if f.thumbnail_s3_key else None,
@@ -223,16 +227,21 @@ async def purge_file_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Permanently delete a file from trash (workspace owner/admin or superadmin only)."""
+    """Permanently delete a file from trash (author, workspace owner/admin, or superadmin)."""
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
 
+    is_creator = file_item.created_by == current_user.id
+    is_owner_or_admin = False
     if file_item.workspace_id:
-        if not await access_service.is_workspace_admin_or_owner(db, current_user, file_item.workspace_id):
-            raise HTTPException(status_code=403, detail="휴지통의 파일을 영구 삭제할 권한이 없습니다. (소유자 및 관리자만 영구 삭제 가능)")
-    elif not current_user.is_admin and file_item.created_by != current_user.id:
-        raise HTTPException(status_code=403, detail="파일을 삭제할 권한이 없습니다.")
+        is_owner_or_admin = await access_service.is_workspace_admin_or_owner(db, current_user, file_item.workspace_id)
+
+    if not (is_creator or is_owner_or_admin or current_user.is_admin):
+        raise HTTPException(
+            status_code=403, 
+            detail="휴지통의 파일을 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
+        )
 
     await _purge_file(db, file_item)
     await db.commit()
@@ -245,16 +254,21 @@ async def purge_folder_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Permanently delete a folder and all its contents from trash (workspace owner/admin or superadmin only)."""
+    """Permanently delete a folder and all its contents from trash (author, workspace owner/admin, or superadmin)."""
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
 
+    is_creator = folder.created_by == current_user.id
+    is_owner_or_admin = False
     if folder.workspace_id:
-        if not await access_service.is_workspace_admin_or_owner(db, current_user, folder.workspace_id):
-            raise HTTPException(status_code=403, detail="휴지통의 폴더를 영구 삭제할 권한이 없습니다. (소유자 및 관리자만 영구 삭제 가능)")
-    elif not current_user.is_admin and folder.created_by != current_user.id:
-        raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
+        is_owner_or_admin = await access_service.is_workspace_admin_or_owner(db, current_user, folder.workspace_id)
+
+    if not (is_creator or is_owner_or_admin or current_user.is_admin):
+        raise HTTPException(
+            status_code=403, 
+            detail="휴지통의 폴더를 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
+        )
 
     await _purge_folder_recursive(db, folder)
     await db.commit()
