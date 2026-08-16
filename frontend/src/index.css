@@ -1515,6 +1515,12 @@ body {
     width: 95vw !important;
     max-width: 95vw !important;
     margin: 10px;
+    padding: 1.25rem !important;
+  }
+
+  .invitation-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
   }
 
   .explorer-container,

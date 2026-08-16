@@ -156,10 +156,17 @@ export default function InvitationManagerModal({
               <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
                 {currentUser?.is_admin ? '초대 관리 & 멤버 승인' : '워크스페이스 멤버 초대'}
               </h2>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+              <p style={{ 
+                fontSize: '0.82rem', 
+                color: 'var(--text-muted)', 
+                marginTop: '4px', 
+                lineHeight: 1.45,
+                wordBreak: 'keep-all',
+                overflowWrap: 'break-word'
+              }}>
                 {currentUser?.is_admin 
-                  ? '초대 링크는 7일 동안 유효하며, 최고 관리자 초대는 가입 즉시 자동 승인됩니다.'
-                  : '초대 링크는 7일 동안 유효하며, 초대된 사용자는 가입 후 최고 관리자의 승인을 받아야 서비스를 이용할 수 있습니다.'}
+                  ? '초대 링크는 7일간 유효하며, 가입 즉시 자동 승인됩니다.'
+                  : '초대 링크는 7일간 유효하며, 가입 후 관리자 승인이 필요합니다.'}
               </p>
             </div>
           </div>
@@ -176,17 +183,16 @@ export default function InvitationManagerModal({
         {/* Message Banner */}
         {message.text && (
           <div style={{
-            padding: '0.75rem 1rem',
-            background: message.type === 'error' ? 'rgba(244, 63, 94, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-            border: `1px solid ${message.type === 'error' ? 'rgba(244, 63, 94, 0.25)' : 'rgba(16, 185, 129, 0.25)'}`,
+            padding: '0.65rem 0.9rem',
             borderRadius: 'var(--radius-md)',
-            color: message.type === 'error' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
-            fontSize: '0.85rem',
-            marginBottom: '1.5rem',
+            marginBottom: '1.25rem',
+            fontSize: '0.82rem',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            fontWeight: 500
+            backgroundColor: message.type === 'error' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+            color: message.type === 'error' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+            border: `1px solid ${message.type === 'error' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)'}`
           }}>
             {message.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
             <span>{message.text}</span>
@@ -217,7 +223,7 @@ export default function InvitationManagerModal({
             <span>새 멤버 초대장 발송</span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.1fr 100px', gap: '0.75rem', marginBottom: '0.85rem' }}>
+          <div className="invitation-grid" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.1fr 100px', gap: '0.75rem', marginBottom: '0.85rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
                 초대할 이메일 주소
