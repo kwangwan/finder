@@ -4,8 +4,8 @@ from sqlalchemy import Column, String, Boolean, DateTime, BigInteger
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 
-# 100 GB in bytes
-DEFAULT_STORAGE_QUOTA = 100 * 1024 * 1024 * 1024  # 107_374_182_400
+# Default storage quota for new regular users is 0 Bytes (Admin assigns quota)
+DEFAULT_STORAGE_QUOTA = 0
 
 class User(Base):
     __tablename__ = "kb_users"
@@ -17,7 +17,7 @@ class User(Base):
     google_id = Column(String(255), nullable=True, index=True)
     hashed_password = Column(String(255), nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
-    is_approved = Column(Boolean, default=False, nullable=False)
+    is_approved = Column(Boolean, default=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     storage_quota_bytes = Column(BigInteger, default=DEFAULT_STORAGE_QUOTA, nullable=False)
     storage_used_bytes = Column(BigInteger, default=0, nullable=False)
@@ -32,7 +32,7 @@ class User(Base):
     @property
     def storage_usage_percent(self) -> float:
         if self.storage_quota_bytes == 0:
-            return 100.0
+            return 0.0 if self.storage_used_bytes == 0 else 100.0
         return round((self.storage_used_bytes / self.storage_quota_bytes) * 100, 1)
 
     def to_dict(self):

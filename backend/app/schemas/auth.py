@@ -35,7 +35,7 @@ class UserResponse(BaseModel):
     is_admin: bool
     is_approved: bool
     is_active: bool
-    storage_quota_bytes: int = 107374182400  # 100GB default
+    storage_quota_bytes: int = 0  # 0B default (Admin assigns quota)
     storage_used_bytes: int = 0
     created_at: datetime
     last_login_at: datetime

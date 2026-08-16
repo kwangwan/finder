@@ -71,9 +71,7 @@ export default function InvitationManagerModal({
       setEmail('');
       setMessage({ 
         type: 'success', 
-        text: currentUser?.is_admin 
-          ? `'${email}' 님에게 7일 유효 초대장이 발송되었습니다. (가입 시 즉시 자동 승인)` 
-          : `'${email}' 님에게 7일 유효 초대장이 발송되었습니다. (가입 후 최고 관리자 승인 필요)` 
+        text: `'${email}' 님에게 7일 유효 초대장이 성공적으로 발송되었습니다.` 
       });
       await loadInvitations();
     } catch (err) {
@@ -154,7 +152,7 @@ export default function InvitationManagerModal({
             </div>
             <div>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
-                {currentUser?.is_admin ? '초대 관리 & 멤버 승인' : '워크스페이스 멤버 초대'}
+                {currentUser?.is_admin ? '초대 및 멤버 관리' : '워크스페이스 멤버 초대'}
               </h2>
               <p style={{ 
                 fontSize: '0.82rem', 
@@ -164,9 +162,7 @@ export default function InvitationManagerModal({
                 wordBreak: 'keep-all',
                 overflowWrap: 'break-word'
               }}>
-                {currentUser?.is_admin 
-                  ? '초대 링크는 7일간 유효하며, 가입 즉시 자동 승인됩니다.'
-                  : '초대 링크는 7일간 유효하며, 가입 후 관리자 승인이 필요합니다.'}
+                초대 링크는 7일간 유효하며, 초대된 사용자는 즉시 워크스페이스에 참여할 수 있습니다.
               </p>
             </div>
           </div>
@@ -402,31 +398,6 @@ export default function InvitationManagerModal({
                         }}>
                           {isAccepted ? '수락 완료' : isPending ? '대기 중 (7일 유효)' : isExpired ? '만료됨' : '취소됨'}
                         </span>
-                        {inv.is_admin_invite ? (
-                          <span style={{ 
-                            fontSize: '0.7rem', 
-                            color: 'var(--accent-amber)', 
-                            fontWeight: 700,
-                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                            padding: '0.1rem 0.45rem',
-                            borderRadius: 4,
-                            border: '1px solid rgba(245, 158, 11, 0.25)'
-                          }}>
-                            자동 승인 대상
-                          </span>
-                        ) : (
-                          <span style={{ 
-                            fontSize: '0.7rem', 
-                            color: 'var(--text-muted)', 
-                            fontWeight: 600,
-                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                            padding: '0.1rem 0.45rem',
-                            borderRadius: 4,
-                            border: '1px solid var(--border-subtle)'
-                          }}>
-                            관리자 승인 필요
-                          </span>
-                        )}
                       </div>
 
                       <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

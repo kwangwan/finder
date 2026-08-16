@@ -164,7 +164,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
 
   const handleQuotaEdit = (user) => {
     setEditingQuotaUserId(user.id);
-    setQuotaInputGb(String(bytesToGb(user.storage_quota_bytes || gbToBytes(100))));
+    setQuotaInputGb(String(bytesToGb(user.storage_quota_bytes ?? 0)));
   };
 
   const handleQuotaSave = async (user) => {

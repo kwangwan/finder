@@ -150,8 +150,9 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         hashed_password=hash_password(req.password),
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
         is_admin=is_first_user,
-        is_approved=is_first_user,
+        is_approved=True,
         is_active=True,
+        storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
         last_login_at=datetime.utcnow()
     )
     db.add(user)
@@ -240,8 +241,9 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             picture=google_profile.get("picture"),
             google_id=google_profile.get("google_id"),
             is_admin=is_first_user,
-            is_approved=is_first_user,
+            is_approved=True,
             is_active=True,
+            storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
             last_login_at=datetime.utcnow()
         )
         db.add(user)
