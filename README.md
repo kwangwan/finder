@@ -64,6 +64,10 @@ pm2 stop all
 
 # 현재 실행 상태 저장 (재부팅 대비)
 pm2 save
+
+# [선택] Mac/서버 부팅 시 자동 시작 등록
+pm2 startup
+# (출력되는 sudo env PATH=... 명령어를 터미널에 1회 복사/실행)
 ```
 
 ---

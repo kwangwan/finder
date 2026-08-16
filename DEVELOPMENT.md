@@ -142,3 +142,8 @@ knowledge-base/
 3. **Nginx / Reverse Proxy 설정**:
    - `/api/` 경로는 `http://localhost:8001`로 프록시 전달.
    - 나머지 경로는 `frontend/dist/`의 `index.html`로 SPA 라우팅 지원.
+4. **PM2 프로세스 매니저 상시 가동 (`ecosystem.config.cjs`)**:
+   - 백엔드(`finder-backend`) 및 프론트엔드(`finder-frontend`)를 단일 설정으로 관리합니다.
+   - 장애 발생 시 자동 복구(`autorestart: true`, `restart_delay: 2000`)를 지원합니다.
+   - 부팅 시 자동 실행 등록: `pm2 startup` 후 생성된 명령어를 터미널에서 1회 실행하고 `pm2 save`로 저장합니다.
+
