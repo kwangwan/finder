@@ -20,7 +20,7 @@ export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
     }
   };
 
-  const sqlQuery = `UPDATE kb_users SET is_admin = true, is_approved = true WHERE email = '${user?.email}';`;
+  const sqlQuery = `UPDATE kb_users SET is_approved = true WHERE email = '${user?.email}';`;
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(sqlQuery);
@@ -106,7 +106,7 @@ export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
             <span style={{ color: 'var(--accent-cyan)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Terminal size={14} /> 직접 DB 쿼리로 관리자/승인 처리하기:
+              <Terminal size={14} /> 관리자용 계정 승인 DB 쿼리:
             </span>
             <button 
               className="btn-icon" 
@@ -128,6 +128,9 @@ export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
           }}>
             {sqlQuery}
           </code>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+            * 최고 관리자는 웹 UI의 <strong>[관리자 콘솔 &gt; 사용자 관리]</strong>에서도 원클릭으로 승인할 수 있습니다.
+          </div>
         </div>
 
         {/* Buttons */}
