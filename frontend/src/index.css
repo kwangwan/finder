@@ -1083,11 +1083,13 @@ body {
   color: #7c3aed;
   background: rgba(124, 58, 237, 0.12);
   border: 1px solid rgba(124, 58, 237, 0.25);
-  padding: 0.1rem 0.4rem;
+  padding: 0.1rem 0.45rem;
   border-radius: var(--radius-full);
   letter-spacing: -0.2px;
   height: 20px;
   line-height: 1;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
   transition: all 0.2s ease;
 }
 

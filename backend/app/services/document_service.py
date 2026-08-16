@@ -48,23 +48,13 @@ class DocumentService:
         if not content_to_index and file_item.content:
             content_to_index = file_item.content
 
-        # If the file is an image, video, or archive without extractable text, do NOT embed
-        if file_item.file_type in ["image", "video", "archive"] and not content_to_index.strip():
+        # If there is no extractable text content (e.g. image-only PDF, empty note, raw media), do not embed
+        if not content_to_index or not content_to_index.strip():
             await db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_item.id))
             file_item.is_embedded = False
             file_item.embedded_chunks_count = 0
             await db.commit()
             return 0
-
-        # Fallback for text documents with empty content
-        if not content_to_index or not content_to_index.strip():
-            if file_item.file_type not in ["markdown", "pdf", "docx", "word", "xlsx", "excel", "text", "code"]:
-                await db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_item.id))
-                file_item.is_embedded = False
-                file_item.embedded_chunks_count = 0
-                await db.commit()
-                return 0
-            content_to_index = f"# {file_item.name}\n\n(No extractable content)"
 
         # 2. Chunk content
         if file_item.is_markdown or file_name_lower.endswith(".md"):
@@ -73,7 +63,11 @@ class DocumentService:
             chunks = chunking_service.chunk_plain_text(content_to_index)
 
         if not chunks:
-            chunks = [{"chunk_index": 0, "content": file_item.name}]
+            await db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_item.id))
+            file_item.is_embedded = False
+            file_item.embedded_chunks_count = 0
+            await db.commit()
+            return 0
 
         # 3. Delete existing chunks for this file
         await db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_item.id))

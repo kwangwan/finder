@@ -587,11 +587,11 @@ export default function FolderExplorer({
                   }}
                 >
                   <div className="file-card-top">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minHeight: 30 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minHeight: 30, minWidth: 0, flexShrink: 1, flexWrap: 'nowrap' }}>
                       <div 
                         onClick={(e) => toggleFileSelection(file.id, e)}
                         title="선택"
-                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22 }}
+                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, flexShrink: 0 }}
                       >
                         {isSelected ? (
                           <CheckSquare size={16} color="var(--accent-primary)" />
@@ -600,13 +600,14 @@ export default function FolderExplorer({
                         )}
                       </div>
 
-                      <div className="file-icon-wrap">
+                      <div className="file-icon-wrap" style={{ flexShrink: 0 }}>
                         {getFileIcon(file)}
                       </div>
                       {file.is_embedded && (
                         <span 
                           className="badge-embedded" 
                           title="AI 지식 검색 연동 완료"
+                          style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
                         >
                           <Sparkles size={11} />
                           <span>임베딩됨</span>
