@@ -1721,26 +1721,40 @@ h1, h2, h3, h4, h5, h6,
 
   /* Admin Dashboard Mobile Overrides */
   .admin-dashboard-container {
-    height: 100vh !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100% !important;
     height: 100dvh !important;
     box-sizing: border-box !important;
-    padding: 0.85rem 0.75rem !important;
+    padding: 0.75rem 0.65rem !important;
     padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 0.85rem)) !important;
-    padding-bottom: max(1.5rem, env(safe-area-inset-bottom)) !important;
+    padding-bottom: max(2rem, calc(env(safe-area-inset-bottom) + 1rem)) !important;
     overflow-y: auto !important;
+    overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch !important;
+    z-index: 1000 !important;
   }
 
   .admin-dashboard-header {
-    margin-bottom: 1rem !important;
-    padding-bottom: 0.75rem !important;
+    position: sticky !important;
+    top: 0 !important;
+    background: var(--bg-primary) !important;
+    z-index: 50 !important;
+    margin-bottom: 0.85rem !important;
+    padding-top: 0.25rem !important;
+    padding-bottom: 0.65rem !important;
     gap: 0.5rem !important;
   }
 
   .admin-back-btn {
-    width: 36px !important;
-    height: 36px !important;
-    min-width: 36px !important;
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+    touch-action: manipulation !important;
   }
 
   .admin-shield-icon {
@@ -1821,16 +1835,23 @@ h1, h2, h3, h4, h5, h6,
    Admin Dashboard & Workspace Modal Base Styles
    ========================================================================== */
 .admin-dashboard-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
   height: 100vh;
   height: 100dvh;
-  width: 100vw;
   box-sizing: border-box;
   background-color: var(--bg-primary);
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 2rem 2rem;
   padding-top: max(1.75rem, env(safe-area-inset-top));
   padding-bottom: max(2rem, env(safe-area-inset-bottom));
   -webkit-overflow-scrolling: touch;
+  z-index: 1000;
 }
 
 .admin-dashboard-header {
@@ -1865,6 +1886,7 @@ h1, h2, h3, h4, h5, h6,
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s ease;
+  touch-action: manipulation;
 }
 
 .admin-back-btn:hover {

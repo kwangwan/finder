@@ -234,10 +234,13 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
             <button 
               type="button"
               className="btn-icon admin-back-btn" 
-              onClick={onBackToApp} 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onBackToApp) onBackToApp();
+              }} 
               title="Finder로 돌아가기"
             >
-              <ArrowLeft size={19} />
+              <ArrowLeft size={20} />
             </button>
             <div className="admin-header-brand-wrap">
               <div className="admin-shield-icon">
