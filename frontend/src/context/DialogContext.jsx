@@ -102,6 +102,78 @@ export function DialogProvider({ children }) {
     }
   };
 
+  const renderMessageContent = (rawMessage) => {
+    if (!rawMessage) return null;
+    const lines = rawMessage.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length === 0) return null;
+
+    const mainPrompt = lines[0];
+    const subNotes = lines.slice(1);
+
+    const renderFormattedText = (text) => {
+      const parts = text.split(/(['"][^'"]+['"])/g);
+      return parts.map((part, index) => {
+        if ((part.startsWith("'") && part.endsWith("'")) || (part.startsWith('"') && part.endsWith('"'))) {
+          const cleanName = part.slice(1, -1);
+          return (
+            <strong 
+              key={index}
+              style={{ 
+                color: 'var(--text-primary)',
+                backgroundColor: 'var(--bg-tertiary)',
+                padding: '0.15rem 0.45rem',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                wordBreak: 'break-all',
+                fontWeight: 600,
+                display: 'inline',
+                margin: '0 2px'
+              }}
+            >
+              {cleanName}
+            </strong>
+          );
+        }
+        return <span key={index}>{part}</span>;
+      });
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.2rem' }}>
+        <div style={{ 
+          fontSize: '0.925rem', 
+          color: 'var(--text-secondary)', 
+          lineHeight: 1.6,
+          wordBreak: 'break-word'
+        }}>
+          {renderFormattedText(mainPrompt)}
+        </div>
+
+        {subNotes.length > 0 && (
+          <div style={{
+            padding: '0.75rem 0.95rem',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'var(--bg-tertiary)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: '0.8rem',
+            color: 'var(--text-muted)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.55rem',
+            lineHeight: 1.55
+          }}>
+            <Info size={15} style={{ marginTop: 2, flexShrink: 0, color: 'var(--text-muted)' }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              {subNotes.map((note, idx) => (
+                <div key={idx}>{renderFormattedText(note)}</div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <DialogContext.Provider value={{ showAlert, showConfirm }}>
       {children}
@@ -113,16 +185,18 @@ export function DialogProvider({ children }) {
             className="modal-content" 
             onClick={e => e.stopPropagation()}
             style={{ 
-              maxWidth: 420, 
+              maxWidth: 480, 
+              width: '92vw',
               padding: 0,
               overflow: 'hidden',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)'
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-medium)'
             }}
           >
-            <div style={{ padding: '1.25rem 1.25rem 0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem' }}>
+            <div style={{ padding: '1.5rem 1.5rem 1.15rem' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
                 <div style={{
-                  padding: '0.5rem',
+                  padding: '0.65rem',
                   borderRadius: 'var(--radius-md)',
                   backgroundColor: dialogState.type === 'danger' || dialogState.type === 'error'
                     ? 'rgba(239, 68, 68, 0.12)'
@@ -131,55 +205,53 @@ export function DialogProvider({ children }) {
                     : dialogState.type === 'success'
                     ? 'rgba(16, 185, 129, 0.12)'
                     : 'rgba(59, 130, 246, 0.12)',
-                  flexShrink: 0
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}>
                   {getIcon()}
                 </div>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <h3 style={{ 
-                    fontSize: '1.05rem', 
-                    fontWeight: 700, 
-                    color: 'var(--text-primary)',
-                    marginBottom: '0.4rem'
-                  }}>
-                    {dialogState.title}
-                  </h3>
-                  <div style={{ 
-                    fontSize: '0.875rem', 
-                    color: 'var(--text-secondary)', 
-                    lineHeight: 1.5,
-                    whiteSpace: 'pre-line' 
-                  }}>
-                    {dialogState.message}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
+                    <h3 style={{ 
+                      fontSize: '1.1rem', 
+                      fontWeight: 700, 
+                      color: 'var(--text-primary)',
+                      margin: 0
+                    }}>
+                      {dialogState.title}
+                    </h3>
+                    <button 
+                      className="btn-icon" 
+                      onClick={handleCancel}
+                      style={{ padding: '0.25rem', color: 'var(--text-muted)' }}
+                      title="닫기 (ESC)"
+                    >
+                      <X size={16} />
+                    </button>
                   </div>
-                </div>
 
-                <button 
-                  className="btn-icon" 
-                  onClick={handleCancel}
-                  style={{ padding: '0.2rem', color: 'var(--text-muted)' }}
-                  title="닫기 (ESC)"
-                >
-                  <X size={16} />
-                </button>
+                  {renderMessageContent(dialogState.message)}
+                </div>
               </div>
             </div>
 
             <div style={{ 
-              padding: '0.85rem 1.25rem', 
+              padding: '0.95rem 1.5rem', 
               backgroundColor: 'var(--bg-tertiary)', 
               borderTop: '1px solid var(--border-subtle)',
               display: 'flex', 
               justifyContent: 'flex-end', 
-              gap: '0.5rem' 
+              gap: '0.65rem' 
             }}>
               {dialogState.mode === 'confirm' && (
                 <button 
                   type="button" 
                   className="btn-secondary" 
                   onClick={handleCancel}
-                  style={{ minWidth: 72 }}
+                  style={{ minWidth: 78, padding: '0.55rem 1rem' }}
                 >
                   {dialogState.cancelText || '취소'}
                 </button>
@@ -190,14 +262,14 @@ export function DialogProvider({ children }) {
                 onClick={handleConfirm}
                 autoFocus
                 style={{ 
-                  minWidth: 72,
+                  minWidth: 84,
+                  padding: '0.55rem 1.15rem',
+                  fontWeight: 600,
                   ...(dialogState.type === 'danger' ? {
                     backgroundColor: 'var(--accent-rose)',
                     color: '#fff',
                     border: 'none',
-                    padding: '0.5rem 1rem',
                     borderRadius: 'var(--radius-md)',
-                    fontWeight: 600,
                     cursor: 'pointer'
                   } : {})
                 }}
