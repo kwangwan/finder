@@ -34,6 +34,7 @@ export default function TopBar({
   currentFile,
   theme,
   onToggleTheme,
+  onSetTheme,
   onNavigateHome,
   onOpenAdmin,
   onLogout
@@ -196,16 +197,87 @@ export default function TopBar({
                   </button>
                 )}
 
-                <button 
-                  className="dropdown-item" 
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    onToggleTheme();
-                  }}
-                >
-                  {theme === 'dark' ? <Sun size={15} color="var(--accent-amber)" /> : <Moon size={15} color="var(--accent-purple)" />}
-                  <span>{theme === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}</span>
-                </button>
+                <div style={{ padding: '0.4rem 0.65rem 0.2rem', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                  테마 스타일
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: '0.2rem 0.4rem 0.4rem' }}>
+                  <button 
+                    type="button"
+                    onClick={() => { if (onSetTheme) onSetTheme('dark'); else onToggleTheme(); }}
+                    style={{
+                      padding: '0.35rem 0.4rem',
+                      background: theme === 'dark' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: theme === 'dark' ? '#fff' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <Moon size={12} /> 다크
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => { if (onSetTheme) onSetTheme('light'); else onToggleTheme(); }}
+                    style={{
+                      padding: '0.35rem 0.4rem',
+                      background: theme === 'light' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: theme === 'light' ? '#fff' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <Sun size={12} /> 라이트
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => { if (onSetTheme) onSetTheme('cyberpunk'); else onToggleTheme(); }}
+                    style={{
+                      padding: '0.35rem 0.4rem',
+                      background: theme === 'cyberpunk' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: theme === 'cyberpunk' ? '#000' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    ⚡ 사이버펑크
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => { if (onSetTheme) onSetTheme('matrix'); else onToggleTheme(); }}
+                    style={{
+                      padding: '0.35rem 0.4rem',
+                      background: theme === 'matrix' ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
+                      color: theme === 'matrix' ? '#000' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    🟢 매트릭스
+                  </button>
+                </div>
 
                 <div className="dropdown-divider" />
 

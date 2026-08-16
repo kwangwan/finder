@@ -37,6 +37,7 @@ import { downloadFileChunked, getThumbnailUrl } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 export default function FolderExplorer({
+  workspaceName = '내 워크스페이스',
   currentFolder,
   subfolders = [],
   files = [],
@@ -305,10 +306,10 @@ export default function FolderExplorer({
           <span 
             className={`breadcrumb-item ${!currentFolder ? 'active' : ''}`}
             onClick={() => onSelectFolder(null)}
-            title="최상위 루트 저장소"
+            title={workspaceName}
           >
-            <Home size={14} style={{ marginRight: 3, verticalAlign: 'middle' }} />
-            <span>루트</span>
+            <Home size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+            <span>{workspaceName}</span>
           </span>
 
           {folderPath.length <= 3 ? (
@@ -389,13 +390,13 @@ export default function FolderExplorer({
           )}
           <button className="btn-secondary explorer-btn" onClick={onOpenUpload} title="파일 및 폴더 업로드">
             <UploadCloud size={15} />
-            <span className="hide-mobile">파일/폴더 업로드</span>
+            <span className="hide-mobile">업로드</span>
           </button>
-          <button className="btn-secondary explorer-btn" onClick={() => onNewFolder(currentFolder?.id)} title="새 하위 폴더">
+          <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} title="현재 경로에 새 폴더 생성">
             <FolderPlus size={15} />
             <span className="hide-mobile">새 폴더</span>
           </button>
-          <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 마크다운 노트 작성">
+          <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 지식 노트 작성">
             <Plus size={15} />
             <span className="hide-mobile">새 노트</span>
           </button>
@@ -403,16 +404,16 @@ export default function FolderExplorer({
       </div>
 
       {/* Explorer Secondary Toolbar: Sort & Count Controls */}
-      <div className="explorer-toolbar">
-        <div className="explorer-toolbar-left">
-          <span className="explorer-item-count">
-            전체 <strong>{totalItemCount}</strong>개 항목
+      <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <span className="explorer-item-count" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem' }}>
+            <span>전체</span> <strong>{totalItemCount}</strong><span>개 항목</span>
           </span>
           {files.length > 0 && (
             <button
               type="button"
               className="btn-icon"
-              style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', marginLeft: '0.5rem', padding: '3px 6px' }}
+              style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', padding: '3px 8px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}
               onClick={() => {
                 if (selectedFileIds.length === files.length) {
                   setSelectedFileIds([]);

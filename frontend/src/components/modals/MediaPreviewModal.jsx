@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { 
   X, 
   Download, 
@@ -10,14 +12,15 @@ import {
   Film, 
   Image as ImageIcon,
   ExternalLink,
-  Calendar,
-  User,
-  HardDrive,
+  Table,
+  FileCode,
+  File,
   Sun,
   Moon,
-  Grid
+  Grid,
+  Loader2
 } from 'lucide-react';
-import { getMediaPreviewUrl, downloadFileChunked } from '../../api';
+import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 
 export default function MediaPreviewModal({
   isOpen,
@@ -25,6 +28,7 @@ export default function MediaPreviewModal({
   file
 }) {
   const [mediaUrl, setMediaUrl] = useState(null);
+  const [fileDetail, setFileDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [bgMode, setBgMode] = useState('checkerboard'); // 'checkerboard' | 'light' | 'dark'
@@ -37,15 +41,34 @@ export default function MediaPreviewModal({
       setIsLoading(false);
       const url = getMediaPreviewUrl(file.id);
       setMediaUrl(url);
+
+      const isDocType = file.file_type === 'docx' || file.file_type === 'xlsx' || file.file_type === 'text' || 
+                        file.name.match(/\.(docx|doc|xlsx|xls|csv|txt|json|py|js|html|css|md)$/i);
+      
+      if (isDocType && !file.content) {
+        setIsLoading(true);
+        getFileDetail(file.id)
+          .then(detail => setFileDetail(detail))
+          .catch(err => console.error('Failed to load file text detail:', err))
+          .finally(() => setIsLoading(false));
+      } else {
+        setFileDetail(file);
+      }
     } else {
       setMediaUrl(null);
+      setFileDetail(null);
     }
   }, [isOpen, file?.id]);
 
   if (!isOpen || !file) return null;
 
-  const isVideo = file.file_type === 'video' || file.name.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/i);
-  const isImage = file.file_type === 'image' || file.name.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i);
+  const fileNameLower = file.name.toLowerCase();
+  const isVideo = file.file_type === 'video' || fileNameLower.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/i);
+  const isImage = file.file_type === 'image' || fileNameLower.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i);
+  const isPdf = file.file_type === 'pdf' || fileNameLower.endsWith('.pdf');
+  const isExcel = file.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i);
+  const isDocx = file.file_type === 'docx' || fileNameLower.match(/\.(docx|doc)$/i);
+  const isTextOrCode = file.file_type === 'text' || file.file_type === 'code' || file.file_type === 'markdown' || fileNameLower.match(/\.(txt|json|py|js|html|css|md|yaml|yml|ts|jsx|tsx)$/i);
 
   const formatFileSize = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -60,7 +83,8 @@ export default function MediaPreviewModal({
   };
 
   const getContainerBgStyle = () => {
-    if (isVideo) return { backgroundColor: '#000000' };
+    if (isVideo || isPdf) return { backgroundColor: '#05080f' };
+    if (!isImage) return { backgroundColor: 'var(--bg-primary)' };
     if (bgMode === 'light') return { backgroundColor: '#ffffff' };
     if (bgMode === 'dark') return { backgroundColor: '#0f141c' };
     // Checkerboard pattern for transparent PNG / SVG / GIF
@@ -77,13 +101,24 @@ export default function MediaPreviewModal({
     };
   };
 
+  const getHeaderIcon = () => {
+    if (isVideo) return <Film size={20} color="var(--accent-primary)" />;
+    if (isImage) return <ImageIcon size={20} color="var(--accent-emerald)" />;
+    if (isPdf) return <FileText size={20} color="var(--accent-rose)" />;
+    if (isExcel) return <Table size={20} color="var(--accent-emerald)" />;
+    if (isDocx) return <FileText size={20} color="#2563eb" />;
+    return <File size={20} color="var(--text-secondary)" />;
+  };
+
+  const displayContent = fileDetail?.content || file.content;
+
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100, backgroundColor: 'rgba(0, 0, 0, 0.85)' }}>
       <div 
         className="modal-content" 
         onClick={e => e.stopPropagation()} 
         style={{ 
-          maxWidth: isVideo ? 920 : 860, 
+          maxWidth: isVideo || isPdf ? 960 : 880, 
           width: '95vw', 
           maxHeight: '92vh', 
           padding: 0,
@@ -100,32 +135,41 @@ export default function MediaPreviewModal({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0.85rem 1.25rem',
+          padding: '0.75rem 1.25rem',
           borderBottom: '1px solid var(--border-subtle)',
-          backgroundColor: 'var(--bg-tertiary)'
+          backgroundColor: 'var(--bg-tertiary)',
+          gap: '0.75rem'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', overflow: 'hidden' }}>
-            {isVideo ? (
-              <Film size={20} color="var(--accent-primary)" />
-            ) : (
-              <ImageIcon size={20} color="var(--accent-emerald)" />
-            )}
-            <div style={{ overflow: 'hidden' }}>
-              <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+          {/* Left Title & Meta */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0, flex: 1, overflow: 'hidden' }}>
+            <div style={{ flexShrink: 0 }}>
+              {getHeaderIcon()}
+            </div>
+            <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+              <div style={{ 
+                fontSize: '0.92rem', 
+                fontWeight: 700, 
+                color: 'var(--text-primary)', 
+                whiteSpace: 'nowrap', 
+                textOverflow: 'ellipsis', 
+                overflow: 'hidden',
+                lineHeight: 1.3
+              }}>
                 {file.name}
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', gap: '0.75rem' }}>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', gap: '0.75rem', whiteSpace: 'nowrap' }}>
                 <span>{formatFileSize(file.size_bytes)}</span>
-                <span>{new Date(file.created_at || file.updated_at).toLocaleDateString()}</span>
+                <span>{new Date(file.created_at || file.updated_at || Date.now()).toLocaleDateString()}</span>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          {/* Right Action Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
             {isImage && (
               <>
                 {/* Background Mode Toggle */}
-                <div style={{ display: 'flex', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 2, marginRight: '0.4rem', border: '1px solid var(--border-subtle)' }}>
+                <div className="hide-mobile" style={{ display: 'flex', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 2, marginRight: '0.3rem', border: '1px solid var(--border-subtle)' }}>
                   <button 
                     className="btn-icon" 
                     onClick={() => setBgMode('checkerboard')}
@@ -168,21 +212,21 @@ export default function MediaPreviewModal({
                 </div>
 
                 <button 
-                  className="btn-icon" 
+                  className="btn-icon hide-mobile" 
                   onClick={() => setZoomLevel(prev => Math.min(prev + 0.25, 3))}
                   title="확대"
                 >
                   <ZoomIn size={16} />
                 </button>
                 <button 
-                  className="btn-icon" 
+                  className="btn-icon hide-mobile" 
                   onClick={() => setZoomLevel(prev => Math.max(prev - 0.25, 0.5))}
                   title="축소"
                 >
                   <ZoomOut size={16} />
                 </button>
                 <button 
-                  className="btn-icon" 
+                  className="btn-icon hide-mobile" 
                   onClick={() => setZoomLevel(1)}
                   title="원래 크기"
                 >
@@ -198,10 +242,10 @@ export default function MediaPreviewModal({
               title="파일 다운로드"
             >
               <Download size={14} />
-              <span>다운로드</span>
+              <span className="hide-mobile">다운로드</span>
             </button>
 
-            <button className="btn-icon" onClick={onClose} title="닫기">
+            <button className="btn-icon" onClick={onClose} title="닫기 (ESC)">
               <X size={18} />
             </button>
           </div>
@@ -211,18 +255,18 @@ export default function MediaPreviewModal({
         <div style={{
           flex: 1,
           minHeight: 360,
-          maxHeight: 'calc(92vh - 120px)',
+          maxHeight: 'calc(92vh - 80px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'auto',
           position: 'relative',
-          padding: '1.5rem',
+          padding: (isPdf || isVideo) ? 0 : '1.5rem',
           ...getContainerBgStyle()
         }}>
           {isLoading && (
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              미디어 로딩 중...
+            <div style={{ color: 'var(--accent-primary)', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Loader2 size={18} className="spin" /> 문서 불러오는 중...
             </div>
           )}
 
@@ -232,7 +276,7 @@ export default function MediaPreviewModal({
             </div>
           )}
 
-          {!isLoading && !error && mediaUrl && (
+          {!isLoading && !error && (
             <>
               {isVideo ? (
                 <video
@@ -240,15 +284,26 @@ export default function MediaPreviewModal({
                   autoPlay
                   playsInline
                   style={{
-                    maxWidth: '100%',
-                    maxHeight: '70vh',
-                    borderRadius: 'var(--radius-sm)',
-                    outline: 'none'
+                    width: '100%',
+                    maxHeight: '75vh',
+                    outline: 'none',
+                    backgroundColor: '#000'
                   }}
                   src={mediaUrl}
                 >
-                  브라우저가 비디오 재생을 지원하지 않습니다.
+                  브라우저가 비디오 스트리밍을 지원하지 않습니다.
                 </video>
+              ) : isPdf ? (
+                <iframe
+                  src={mediaUrl}
+                  title={file.name}
+                  style={{
+                    width: '100%',
+                    height: '75vh',
+                    border: 'none',
+                    backgroundColor: '#fff'
+                  }}
+                />
               ) : isImage ? (
                 <img
                   src={mediaUrl}
@@ -263,9 +318,37 @@ export default function MediaPreviewModal({
                     borderRadius: 'var(--radius-sm)'
                   }}
                 />
+              ) : (isDocx || isExcel || isTextOrCode) && displayContent ? (
+                <div style={{
+                  width: '100%',
+                  height: '100%',
+                  maxHeight: '72vh',
+                  overflowY: 'auto',
+                  padding: '1.5rem 2rem',
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  textAlign: 'left'
+                }}>
+                  <div className="markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {displayContent}
+                    </ReactMarkdown>
+                  </div>
+                </div>
               ) : (
-                <div style={{ color: 'var(--text-muted)' }}>
-                  미리보기를 지원하지 않는 형식입니다.
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                  <FileText size={48} style={{ opacity: 0.4, margin: '0 auto 1rem' }} />
+                  <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+                    미리보기를 직접 지원하지 않는 형식입니다.
+                  </div>
+                  <p style={{ fontSize: '0.82rem', marginBottom: '1.25rem' }}>
+                    상단의 <strong>[다운로드]</strong> 버튼을 눌러 원본 파일을 확인하실 수 있습니다.
+                  </p>
+                  <button className="btn-primary" onClick={handleDownload} style={{ margin: '0 auto' }}>
+                    <Download size={15} />
+                    <span>파일 다운로드</span>
+                  </button>
                 </div>
               )}
             </>
@@ -275,3 +358,4 @@ export default function MediaPreviewModal({
     </div>
   );
 }
+

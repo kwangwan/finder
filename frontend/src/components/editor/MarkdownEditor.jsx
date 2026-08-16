@@ -26,10 +26,12 @@ import {
   Paperclip,
   Video,
   Folder,
-  ExternalLink
+  ExternalLink,
+  Image as ImageIcon,
+  Loader2
 } from 'lucide-react';
 import InsertFileModal from './InsertFileModal';
-import { getPresignedDownloadUrl } from '../../api';
+import { getPresignedDownloadUrl, uploadNoteImage } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 // Helper to extract YouTube Video ID
@@ -42,6 +44,7 @@ function extractYouTubeId(url) {
 
 export default function MarkdownEditor({
   file,
+  activeWorkspaceId,
   onSave,
   onBack,
   onDelete,
@@ -55,9 +58,11 @@ export default function MarkdownEditor({
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'saving' | 'unsaved'
   const [viewMode, setViewMode] = useState('split'); // 'split' | 'edit' | 'preview'
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   const textareaRef = useRef(null);
   const saveTimeoutRef = useRef(null);
+  const imageInputRef = useRef(null);
 
   useEffect(() => {
     if (file) {
@@ -116,6 +121,53 @@ export default function MarkdownEditor({
       textarea.focus();
       textarea.setSelectionRange(start + before.length, start + before.length + selectedText.length);
     }, 0);
+  };
+
+  const handleUploadImageFile = async (imgFile) => {
+    if (!imgFile) return;
+    setIsUploadingImage(true);
+    try {
+      const res = await uploadNoteImage(imgFile, activeWorkspaceId, file?.folder_id);
+      const imgMarkdown = `\n![${imgFile.name}](${res.previewUrl})\n`;
+      insertFormatting(imgMarkdown, '', '');
+    } catch (err) {
+      await showAlert({
+        title: '이미지 업로드 실패',
+        message: '이미지를 업로드하지 못했습니다: ' + err.message,
+        type: 'error'
+      });
+    } finally {
+      setIsUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  };
+
+  const handlePaste = async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const blob = items[i].getAsFile();
+        if (blob) {
+          e.preventDefault();
+          const ext = blob.type.split('/')[1] || 'png';
+          const fileObj = new File([blob], `image_${Date.now()}.${ext}`, { type: blob.type });
+          await handleUploadImageFile(fileObj);
+          return;
+        }
+      }
+    }
+  };
+
+  const handleDrop = async (e) => {
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      const dropped = e.dataTransfer.files[0];
+      if (dropped && dropped.type.startsWith('image/')) {
+        e.preventDefault();
+        e.stopPropagation();
+        await handleUploadImageFile(dropped);
+      }
+    }
   };
 
   const handleInsertFromModal = (snippet) => {
@@ -258,35 +310,32 @@ export default function MarkdownEditor({
 
   return (
     <div className="editor-layout">
-      {/* Top Header */}
-      <div className="editor-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+      {/* 1. Top Header Actions */}
+      <div className="editor-header" style={{ padding: '0.65rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           <button className="btn-icon" onClick={onBack} title="목록으로 돌아가기">
             <ArrowLeft size={18} />
           </button>
           
-          <input 
-            type="text" 
-            className="editor-title-input" 
-            value={title} 
-            onChange={handleTitleChange}
-            placeholder="문서 제목을 입력하세요..."
-          />
-        </div>
-
-        {/* Action status & controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ 
             fontSize: '0.75rem', 
             color: saveStatus === 'saved' ? 'var(--accent-emerald)' : 'var(--accent-amber)',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.3rem',
-            marginRight: '0.5rem'
+            gap: '0.3rem'
           }}>
             {saveStatus === 'saved' ? '● 자동 저장됨' : (saveStatus === 'saving' ? '⟳ 저장 중...' : '○ 미저장')}
           </span>
 
+          {isUploadingImage && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Loader2 size={13} className="spin" /> 이미지 업로드 중...
+            </span>
+          )}
+        </div>
+
+        {/* Action controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ display: 'flex', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: 2 }}>
             <button 
               className={`btn-icon ${viewMode === 'edit' ? 'active' : ''}`}
@@ -343,6 +392,18 @@ export default function MarkdownEditor({
         </div>
       </div>
 
+      {/* 2. Dedicated Full-Width Title Row */}
+      <div className="editor-title-row" style={{ padding: '0.65rem 1.25rem', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+        <input 
+          type="text" 
+          className="editor-title-input" 
+          value={title} 
+          onChange={handleTitleChange}
+          placeholder="문서 제목을 입력하세요..."
+          style={{ width: '100%', fontSize: '1.2rem', fontWeight: 700, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary)', padding: '0.2rem 0' }}
+        />
+      </div>
+
       {/* Formatting Toolbar */}
       {viewMode !== 'preview' && (
         <div className="editor-toolbar">
@@ -397,7 +458,30 @@ export default function MarkdownEditor({
 
           <div className="toolbar-divider" />
 
-          {/* New Attachments Toolbar Buttons */}
+          {/* Direct Image Upload Button */}
+          <input 
+            type="file" 
+            ref={imageInputRef} 
+            accept="image/*" 
+            style={{ display: 'none' }} 
+            onChange={e => {
+              if (e.target.files && e.target.files[0]) {
+                handleUploadImageFile(e.target.files[0]);
+              }
+            }}
+          />
+          <button 
+            className="toolbar-btn" 
+            onClick={() => imageInputRef.current?.click()} 
+            title="이미지 업로드 및 삽입 (클립보드 붙여넣기/드래그 지원)"
+            style={{ color: 'var(--accent-emerald)', fontWeight: 600, gap: 4 }}
+            disabled={isUploadingImage}
+          >
+            <ImageIcon size={14} />
+            <span>이미지 삽입</span>
+          </button>
+
+          {/* Attachments Toolbar Buttons */}
           <button 
             className="toolbar-btn" 
             onClick={() => setIsInsertModalOpen(true)} 
@@ -405,7 +489,7 @@ export default function MarkdownEditor({
             style={{ color: 'var(--accent-primary)', fontWeight: 600, gap: 4 }}
           >
             <Paperclip size={14} />
-            <span>파일/영상 삽입</span>
+            <span>파일/영상 첨부</span>
           </button>
         </div>
       )}
@@ -419,7 +503,9 @@ export default function MarkdownEditor({
               className="editor-textarea"
               value={content}
               onChange={handleContentChange}
-              placeholder="마크다운 문법으로 지식을 자유롭게 기록하세요..."
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              placeholder="마크다운 문법으로 지식을 자유롭게 기록하세요... (이미지 붙여넣기 및 드래그 지원)"
               spellCheck="false"
             />
           </div>

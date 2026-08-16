@@ -43,6 +43,7 @@ def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, dow
 async def list_files(
     workspace_id: Optional[uuid.UUID] = None,
     folder_id: Optional[uuid.UUID] = None,
+    root_only: Optional[bool] = Query(False, description="Filter only files located directly in workspace root"),
     file_type: Optional[str] = None,
     is_favorite: Optional[bool] = None,
     tag: Optional[str] = None,
@@ -72,7 +73,9 @@ async def list_files(
         else:
             conditions.append(and_(FileItem.workspace_id.is_(None), FileItem.created_by == current_user.id))
 
-    if folder_id is not None:
+    if root_only:
+        conditions.append(FileItem.folder_id.is_(None))
+    elif folder_id is not None:
         conditions.append(FileItem.folder_id == folder_id)
     if file_type is not None:
         conditions.append(FileItem.file_type == file_type)

@@ -462,6 +462,7 @@ export async function listFolders({
 export async function listFiles({
   workspace_id = null,
   folder_id = null,
+  root_only = false,
   file_type = null,
   is_favorite = null,
   search = '',
@@ -473,7 +474,8 @@ export async function listFiles({
 } = {}) {
   const params = new URLSearchParams();
   if (workspace_id) params.append('workspace_id', workspace_id);
-  if (folder_id) params.append('folder_id', folder_id);
+  if (root_only) params.append('root_only', 'true');
+  else if (folder_id) params.append('folder_id', folder_id);
   if (file_type) params.append('file_type', file_type);
   if (is_favorite !== null && is_favorite !== undefined) params.append('is_favorite', is_favorite);
   if (search) params.append('search', search);
@@ -1073,3 +1075,13 @@ async function directUploadFallback(file, folderId, workspaceId, onProgress) {
   onProgress({ percent: 100, status: '완료!' });
   return res.json();
 }
+
+export async function uploadNoteImage(file, workspaceId = null, folderId = null) {
+  const item = await directUploadFallback(file, folderId, workspaceId, () => {});
+  const previewUrl = getMediaPreviewUrl(item.id);
+  return {
+    ...item,
+    previewUrl
+  };
+}
+

@@ -115,7 +115,16 @@ export default function App() {
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    setTheme(prev => {
+      if (prev === 'dark') return 'light';
+      if (prev === 'light') return 'cyberpunk';
+      if (prev === 'cyberpunk') return 'matrix';
+      return 'dark';
+    });
+  };
+
+  const handleSetTheme = (newTheme) => {
+    setTheme(newTheme);
   };
 
   // Check initial authentication
@@ -469,6 +478,8 @@ export default function App() {
       };
       if (activeView === 'folder' && activeFolderId) {
         params.folder_id = activeFolderId;
+      } else if (activeView === 'all' || (activeView === 'folder' && !activeFolderId)) {
+        params.root_only = true;
       } else if (activeView === 'notes') {
         params.file_type = 'markdown';
       } else if (activeView === 'favorites') {
@@ -549,12 +560,12 @@ export default function App() {
 
   const currentFolder = activeFolderId ? findFolderById(folders, activeFolderId) : null;
   const currentFolderPath = activeFolderId ? buildFolderPath(folders, activeFolderId) : [];
-  const currentSubfolders = currentFolder ? (currentFolder.children || []) : (activeView === 'all' ? folders : []);
+  const currentSubfolders = currentFolder ? (currentFolder.children || []) : (activeView === 'all' || activeView === 'folder' ? folders : []);
 
   // Folder navigation
   const handleSelectFolder = (folderId) => {
     setActiveFolderId(folderId);
-    setActiveView('folder');
+    setActiveView(folderId ? 'folder' : 'all');
     setActiveFile(null);
     setCurrentPage(1);
     if (window.innerWidth <= 768) {
@@ -588,10 +599,10 @@ export default function App() {
   const handleNewNote = async () => {
     try {
       const newNote = await createMarkdownNote({
-        name: '새 문서',
+        name: '제목 없는 문서',
         workspace_id: activeWorkspace?.id || null,
         folder_id: activeFolderId,
-        content: '# 새 문서\n\n여기에 지식을 작성하세요.',
+        content: '',
         tags: []
       });
       await refreshFiles();
@@ -703,9 +714,9 @@ export default function App() {
     }
   };
 
-  const handleRenameItem = async (id, newName, type) => {
+  const handleRenameItem = async (id, newName, type, color) => {
     if (type === 'folder') {
-      await renameFolder(id, newName);
+      await updateFolder(id, { name: newName, color });
     } else {
       await renameFile(id, newName);
     }
@@ -741,10 +752,10 @@ export default function App() {
           onClick: async () => {
             try {
               const newNote = await createMarkdownNote({
-                name: '새 문서',
+                name: '제목 없는 문서',
                 workspace_id: activeWorkspace?.id || null,
                 folder_id: folder.id,
-                content: '# 새 문서\n\n여기에 지식을 작성하세요.',
+                content: '',
                 tags: []
               });
               await refreshFiles();
@@ -766,9 +777,9 @@ export default function App() {
         },
         { divider: true },
         {
-          label: '이름 변경',
+          label: '이름 및 색상 변경',
           icon: Edit3,
-          onClick: () => setRenameModal({ isOpen: true, item: { id: folder.id, name: folder.name, type: 'folder' } }),
+          onClick: () => setRenameModal({ isOpen: true, item: { id: folder.id, name: folder.name, color: folder.color, type: 'folder' } }),
         },
         {
           label: '휴지통으로 이동',
@@ -993,6 +1004,7 @@ export default function App() {
           currentFile={activeFile}
           theme={theme}
           onToggleTheme={toggleTheme}
+          onSetTheme={handleSetTheme}
           onNavigateHome={() => {
             setActiveFolderId(null);
             setActiveView('all');
@@ -1014,6 +1026,7 @@ export default function App() {
         ) : activeFile ? (
           <MarkdownEditor
             file={activeFile}
+            activeWorkspaceId={activeWorkspace?.id}
             onSave={handleSaveNote}
             onBack={() => setActiveFile(null)}
             onDelete={handleDeleteFile}
@@ -1026,6 +1039,7 @@ export default function App() {
           />
         ) : (
           <FolderExplorer
+            workspaceName={activeWorkspace?.name || '내 워크스페이스'}
             currentFolder={currentFolder}
             subfolders={currentSubfolders}
             files={files}
