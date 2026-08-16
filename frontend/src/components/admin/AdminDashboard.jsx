@@ -13,14 +13,18 @@ import {
   XCircle,
   Search,
   Save,
-  Edit3
+  Edit3,
+  Shield,
+  User as UserIcon,
+  Clock,
+  Database
 } from 'lucide-react';
 import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 /** Format bytes to human-readable string */
 function formatBytes(bytes) {
-  if (bytes === 0) return '0 B';
+  if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -136,9 +140,9 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
     
     const confirmed = await showConfirm({
       title: '사용자 계정 삭제',
-      message: `'${user.email}' 사용자를 정말 삭제하시겠습니까?\n해당 사용자의 모든 데이터와 권한이 영구 삭제됩니다.`,
+      message: `'${user.email}' 사용자를 정말 삭제하시겠습니까?\n해당 사용자의 개인 워크스페이스, 파일, 임베딩 데이터가 영구 삭제됩니다.`,
       type: 'danger',
-      confirmText: '계정 삭제',
+      confirmText: '계정 영구 삭제',
       cancelText: '취소'
     });
     if (!confirmed) return;
@@ -204,7 +208,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
       width: '100vw',
       backgroundColor: 'var(--bg-primary)',
       overflowY: 'auto',
-      padding: '2rem'
+      padding: '2.5rem 2rem'
     }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         {/* Header */}
@@ -214,72 +218,128 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
           justifyContent: 'space-between',
           marginBottom: '2rem',
           borderBottom: '1px solid var(--border-subtle)',
-          paddingBottom: '1.25rem'
+          paddingBottom: '1.5rem'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <button className="btn-icon" onClick={onBackToApp} title="Finder로 돌아가기">
+            <button 
+              className="btn-icon" 
+              onClick={onBackToApp} 
+              title="Finder로 돌아가기"
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-primary)'
+              }}
+            >
               <ArrowLeft size={20} />
             </button>
-            <div>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <ShieldCheck size={24} color="var(--accent-primary)" />
-                관리자 대시보드
-              </h1>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                사용자 승인 · 권한 · 저장용량 관리
-              </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+              <div style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--accent-primary)',
+                flexShrink: 0
+              }}>
+                <ShieldCheck size={24} />
+              </div>
+              <div>
+                <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.2 }}>
+                  최고 관리자 대시보드
+                </h1>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  전체 사용자 계정 승인 · 권한 부여 · 스토리지 할당량 관리
+                </p>
+              </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button className="btn-secondary" onClick={loadData} disabled={isLoading}>
-              <RefreshCw size={15} />
-              <span>새로고침</span>
-            </button>
-            <button className="btn-primary" onClick={onBackToApp}>
-              <span>Finder 메인</span>
-            </button>
-          </div>
+          <button 
+            className="btn-secondary" 
+            onClick={loadData} 
+            disabled={isLoading}
+            style={{ height: 38, padding: '0 1.1rem', fontSize: '0.85rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <RefreshCw size={14} className={isLoading ? 'spin-anim' : ''} />
+            <span>새로고침</span>
+          </button>
         </div>
 
         {/* Stats Grid */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: '1rem',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '1.25rem',
           marginBottom: '2rem'
         }}>
           {[
-            { label: '전체 회원', value: `${users.length}명`, color: 'var(--text-primary)', borderColor: 'var(--border-subtle)' },
-            { label: '승인 대기', value: `${pendingCount}명`, color: 'var(--accent-amber)', borderColor: 'rgba(245,158,11,0.3)' },
-            { label: '승인 완료', value: `${approvedCount}명`, color: 'var(--accent-emerald)', borderColor: 'rgba(16,185,129,0.3)' },
-            { label: '관리자', value: `${adminCount}명`, color: 'var(--accent-primary)', borderColor: 'rgba(59,130,246,0.3)' },
-          ].map((stat, i) => (
-            <div key={i} style={{
-              background: 'var(--bg-secondary)',
-              border: `1px solid ${stat.borderColor}`,
-              borderRadius: 'var(--radius-lg)',
-              padding: '1.1rem 1.25rem',
-              boxShadow: 'var(--shadow-sm)'
-            }}>
-              <div style={{ fontSize: '0.78rem', color: stat.color, marginBottom: 4, fontWeight: 600, opacity: 0.8 }}>
-                {stat.label}
+            { label: '전체 등록 회원', value: `${users.length}명`, icon: Users, color: 'var(--text-primary)', bg: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)' },
+            { label: '가입 승인 대기', value: `${pendingCount}명`, icon: Clock, color: 'var(--accent-amber)', bg: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.3)' },
+            { label: '승인 완료 회원', value: `${approvedCount}명`, icon: CheckCircle2, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.05)', borderColor: 'rgba(16, 185, 129, 0.3)' },
+            { label: '최고 관리자', value: `${adminCount}명`, icon: Shield, color: 'var(--accent-primary)', bg: 'rgba(59, 130, 246, 0.05)', borderColor: 'rgba(59, 130, 246, 0.3)' },
+          ].map((stat, i) => {
+            const IconComponent = stat.icon;
+            return (
+              <div 
+                key={i} 
+                style={{
+                  background: stat.bg,
+                  border: `1px solid ${stat.borderColor}`,
+                  borderRadius: 'var(--radius-xl)',
+                  padding: '1.25rem 1.4rem',
+                  boxShadow: 'var(--shadow-sm)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>
+                    {stat.label}
+                  </div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: stat.color }}>
+                    {stat.value}
+                  </div>
+                </div>
+                <div style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: stat.color
+                }}>
+                  <IconComponent size={20} />
+                </div>
               </div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: stat.color }}>{stat.value}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* User Management Table */}
+        {/* User Management Table Card */}
         <div style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-lg)',
+          borderRadius: 'var(--radius-xl)',
           overflow: 'hidden',
-          boxShadow: 'var(--shadow-md)'
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.25)'
         }}>
           <div style={{
-            padding: '1rem 1.25rem',
+            padding: '1.25rem 1.5rem',
             borderBottom: '1px solid var(--border-subtle)',
             display: 'flex',
             alignItems: 'center',
@@ -287,25 +347,31 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
             gap: '1rem',
             flexWrap: 'wrap'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Users size={18} color="var(--accent-primary)" />
-              <h2 style={{ fontSize: '1rem', fontWeight: 700 }}>사용자 관리</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Users size={20} color="var(--accent-primary)" />
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                사용자 계정 목록
+              </h2>
+              <span className="menu-badge" style={{ fontSize: '0.75rem', padding: '2px 8px' }}>
+                {filteredUsers.length}명
+              </span>
             </div>
 
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
+              gap: '0.6rem',
               background: 'var(--bg-tertiary)',
               border: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-md)',
-              padding: '0.35rem 0.75rem',
-              width: 240
+              padding: '0 0.85rem',
+              height: 38,
+              width: 280
             }}>
-              <Search size={14} color="var(--text-muted)" />
+              <Search size={15} color="var(--text-muted)" />
               <input
                 type="text"
-                placeholder="이메일 또는 이름 검색..."
+                placeholder="이메일 또는 이름으로 검색..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 style={{
@@ -324,22 +390,23 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '0.75rem 1rem' }}>사용자</th>
-                  <th style={{ padding: '0.75rem 0.75rem' }}>역할</th>
-                  <th style={{ padding: '0.75rem 0.75rem' }}>승인</th>
-                  <th style={{ padding: '0.75rem 0.75rem' }}>
+                  <th style={{ padding: '0.9rem 1.5rem', fontWeight: 600, fontSize: '0.78rem' }}>사용자 정보</th>
+                  <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>시스템 권한</th>
+                  <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>가입 승인</th>
+                  <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <HardDrive size={13} /> 저장용량
+                      <HardDrive size={13} /> 저장용량 할당
                     </div>
                   </th>
-                  <th style={{ padding: '0.75rem 0.75rem' }}>가입일</th>
-                  <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>액션</th>
+                  <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>가입일시</th>
+                  <th style={{ padding: '0.9rem 1.5rem', textAlign: 'right', fontWeight: 600, fontSize: '0.78rem' }}>계정 관리</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={6} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <Users size={32} style={{ margin: '0 auto 0.6rem', display: 'block', opacity: 0.5 }} />
                       일치하는 사용자가 없습니다.
                     </td>
                   </tr>
@@ -352,110 +419,176 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                     const usagePercent = quotaBytes > 0 ? Math.min(100, (usedBytes / quotaBytes) * 100) : 0;
 
                     return (
-                      <tr key={user.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <tr key={user.id} style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background-color 0.15s ease' }}>
                         {/* User Info */}
-                        <td style={{ padding: '0.75rem 1rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                        <td style={{ padding: '1rem 1.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                             <img
                               src={user.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.email}`}
                               alt={user.name}
-                              style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--bg-tertiary)', flexShrink: 0 }}
+                              style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', flexShrink: 0 }}
                             />
                             <div style={{ minWidth: 0 }}>
-                              <div style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>
-                                {user.name || user.email.split('@')[0]}
+                              <div style={{ fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>{user.name || user.email.split('@')[0]}</span>
                                 {isSelf && (
-                                  <span style={{ marginLeft: 4, fontSize: '0.65rem', color: 'var(--accent-primary)', background: 'rgba(59,130,246,0.12)', padding: '0.1rem 0.35rem', borderRadius: 'var(--radius-full)' }}>
-                                    나
+                                  <span style={{ 
+                                    fontSize: '0.68rem', 
+                                    color: 'var(--accent-primary)', 
+                                    background: 'rgba(59,130,246,0.12)', 
+                                    border: '1px solid rgba(59,130,246,0.25)',
+                                    padding: '0.1rem 0.4rem', 
+                                    borderRadius: 'var(--radius-full)' 
+                                  }}>
+                                    본인
                                   </span>
                                 )}
                               </div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>{user.email}</div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 200, marginTop: 2 }}>
+                                {user.email}
+                              </div>
                             </div>
                           </div>
                         </td>
 
                         {/* Role Badge */}
-                        <td style={{ padding: '0.75rem 0.75rem' }}>
+                        <td style={{ padding: '1rem 1rem' }}>
                           {user.is_admin ? (
                             <span style={{
-                              fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-primary)',
-                              background: 'rgba(59,130,246,0.12)', padding: '0.15rem 0.4rem',
-                              borderRadius: 'var(--radius-full)', border: '1px solid rgba(59,130,246,0.25)'
-                            }}>관리자</span>
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: '0.75rem', 
+                              fontWeight: 700, 
+                              color: 'var(--accent-primary)',
+                              background: 'rgba(59,130,246,0.12)', 
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: 'var(--radius-full)', 
+                              border: '1px solid rgba(59,130,246,0.3)'
+                            }}>
+                              <ShieldCheck size={13} /> 최고 관리자
+                            </span>
                           ) : (
                             <span style={{
-                              fontSize: '0.72rem', color: 'var(--text-secondary)',
-                              background: 'var(--bg-tertiary)', padding: '0.15rem 0.4rem',
-                              borderRadius: 'var(--radius-full)'
-                            }}>일반</span>
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              fontSize: '0.75rem', 
+                              fontWeight: 600,
+                              color: 'var(--text-secondary)',
+                              background: 'var(--bg-tertiary)', 
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: 'var(--radius-full)',
+                              border: '1px solid var(--border-subtle)'
+                            }}>
+                              <UserIcon size={13} /> 일반 멤버
+                            </span>
                           )}
                         </td>
 
                         {/* Approval */}
-                        <td style={{ padding: '0.75rem 0.75rem' }}>
+                        <td style={{ padding: '1rem 1rem' }}>
                           {isApproved ? (
                             <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 3,
-                              fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-emerald)',
-                              background: 'rgba(16,185,129,0.12)', padding: '0.15rem 0.4rem',
-                              borderRadius: 'var(--radius-full)'
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: 4,
+                              fontSize: '0.75rem', 
+                              fontWeight: 700, 
+                              color: 'var(--accent-emerald)',
+                              background: 'rgba(16,185,129,0.12)', 
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: 'var(--radius-full)',
+                              border: '1px solid rgba(16,185,129,0.3)'
                             }}>
-                              <CheckCircle2 size={12} /> 승인
+                              <CheckCircle2 size={13} /> 승인 완료
                             </span>
                           ) : (
                             <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 3,
-                              fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-amber)',
-                              background: 'rgba(245,158,11,0.12)', padding: '0.15rem 0.4rem',
-                              borderRadius: 'var(--radius-full)'
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: 4,
+                              fontSize: '0.75rem', 
+                              fontWeight: 700, 
+                              color: 'var(--accent-amber)',
+                              background: 'rgba(245,158,11,0.12)', 
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: 'var(--radius-full)',
+                              border: '1px solid rgba(245,158,11,0.3)'
                             }}>
-                              <ShieldAlert size={12} /> 대기
+                              <Clock size={13} /> 승인 대기
                             </span>
                           )}
                         </td>
 
                         {/* Storage Quota */}
-                        <td style={{ padding: '0.75rem 0.75rem' }}>
+                        <td style={{ padding: '1rem 1rem' }}>
                           {editingQuotaUserId === user.id ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <input
                                 type="number"
                                 value={quotaInputGb}
                                 onChange={e => setQuotaInputGb(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') handleQuotaSave(user); if (e.key === 'Escape') setEditingQuotaUserId(null); }}
                                 style={{
-                                  width: 60, padding: '0.2rem 0.35rem', fontSize: '0.8rem',
-                                  border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-                                  background: 'var(--bg-primary)', color: 'var(--text-primary)', outline: 'none'
+                                  width: 68, 
+                                  height: 32,
+                                  padding: '0 0.5rem', 
+                                  fontSize: '0.85rem',
+                                  border: '1px solid var(--accent-primary)', 
+                                  borderRadius: 'var(--radius-sm)',
+                                  background: 'var(--bg-tertiary)', 
+                                  color: 'var(--text-primary)', 
+                                  outline: 'none'
                                 }}
                                 autoFocus
                                 min="0"
                                 step="1"
                               />
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>GB</span>
-                              <button className="btn-icon" onClick={() => handleQuotaSave(user)} title="저장" style={{ padding: 2 }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>GB</span>
+                              <button 
+                                className="btn-icon" 
+                                onClick={() => handleQuotaSave(user)} 
+                                title="저장" 
+                                style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(16,185,129,0.12)' }}
+                              >
                                 <Save size={14} color="var(--accent-emerald)" />
                               </button>
-                              <button className="btn-icon" onClick={() => setEditingQuotaUserId(null)} title="취소" style={{ padding: 2 }}>
+                              <button 
+                                className="btn-icon" 
+                                onClick={() => setEditingQuotaUserId(null)} 
+                                title="취소" 
+                                style={{ width: 28, height: 28, borderRadius: 6 }}
+                              >
                                 <XCircle size={14} color="var(--text-muted)" />
                               </button>
                             </div>
                           ) : (
-                            <div style={{ minWidth: 120 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            <div style={{ minWidth: 140 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
                                   {formatBytes(usedBytes)} / {formatBytes(quotaBytes)}
                                 </span>
-                                <button className="btn-icon" onClick={() => handleQuotaEdit(user)} title="용량 변경" style={{ padding: 1, opacity: 0.6 }}>
-                                  <Edit3 size={11} />
+                                <button 
+                                  className="btn-icon" 
+                                  onClick={() => handleQuotaEdit(user)} 
+                                  title="용량 수정" 
+                                  style={{ width: 22, height: 22, padding: 0 }}
+                                >
+                                  <Edit3 size={12} />
                                 </button>
                               </div>
                               <div style={{
-                                height: 4, borderRadius: 2, background: 'var(--bg-tertiary)', overflow: 'hidden', width: 100
+                                height: 5, 
+                                borderRadius: 3, 
+                                background: 'var(--bg-tertiary)', 
+                                overflow: 'hidden', 
+                                width: 120
                               }}>
                                 <div style={{
-                                  height: '100%', borderRadius: 2, width: `${usagePercent}%`,
+                                  height: '100%', 
+                                  borderRadius: 3, 
+                                  width: `${usagePercent}%`,
                                   background: usagePercent > 90 ? 'var(--accent-rose)' : usagePercent > 70 ? 'var(--accent-amber)' : 'var(--accent-primary)',
                                   transition: 'width 0.3s'
                                 }} />
@@ -465,25 +598,30 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                         </td>
 
                         {/* Registered Date */}
-                        <td style={{ padding: '0.75rem 0.75rem', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                          {user.created_at ? new Date(user.created_at).toLocaleDateString('ko-KR') : '-'}
+                        <td style={{ padding: '1rem 1rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                          {user.created_at ? new Date(user.created_at).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '-'}
                         </td>
 
                         {/* Action Buttons */}
-                        <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end' }}>
+                        <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
                             {!user.is_admin && (
                               <button
                                 className="btn-secondary"
                                 onClick={() => handleToggleApprove(user)}
                                 disabled={actionLoadingId === user.id}
                                 style={{
-                                  fontSize: '0.72rem', padding: '0.25rem 0.5rem',
-                                  color: isApproved ? 'var(--accent-rose)' : 'var(--accent-emerald)'
+                                  height: 32,
+                                  fontSize: '0.78rem', 
+                                  padding: '0 0.65rem',
+                                  color: isApproved ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4
                                 }}
                               >
-                                {isApproved ? <UserX size={12} /> : <UserCheck size={12} />}
-                                <span>{isApproved ? '해제' : '승인'}</span>
+                                {isApproved ? <UserX size={13} /> : <UserCheck size={13} />}
+                                <span>{isApproved ? '승인 취소' : '승인'}</span>
                               </button>
                             )}
 
@@ -492,10 +630,17 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 className="btn-secondary"
                                 onClick={() => handleToggleAdmin(user)}
                                 disabled={actionLoadingId === user.id}
-                                style={{ fontSize: '0.72rem', padding: '0.25rem 0.5rem' }}
+                                style={{ 
+                                  height: 32,
+                                  fontSize: '0.78rem', 
+                                  padding: '0 0.65rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
                               >
-                                <ShieldCheck size={12} />
-                                <span>{user.is_admin ? '해제' : '관리자'}</span>
+                                <ShieldCheck size={13} />
+                                <span>{user.is_admin ? '관리자 해제' : '관리자 지정'}</span>
                               </button>
                             )}
 
@@ -504,9 +649,18 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 className="btn-icon"
                                 onClick={() => handleDeleteUser(user)}
                                 disabled={actionLoadingId === user.id}
-                                title="삭제"
+                                title="계정 삭제"
+                                style={{ 
+                                  width: 32, 
+                                  height: 32, 
+                                  borderRadius: 6,
+                                  color: 'var(--accent-rose)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
                               >
-                                <Trash2 size={14} color="var(--accent-rose)" />
+                                <Trash2 size={14} />
                               </button>
                             )}
                           </div>

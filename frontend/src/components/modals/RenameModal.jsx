@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Edit3, Palette, X, Check } from 'lucide-react';
+import { Edit3, Palette, X, Check, Folder, FileText } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
 
 const FOLDER_COLORS = [
@@ -81,22 +81,63 @@ export default function RenameModal({
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420, padding: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <Edit3 size={20} color="var(--accent-primary)" />
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {isFolder ? '폴더 정보 수정' : '파일 이름 변경'}
-            </h3>
+      <div 
+        className="modal-content" 
+        onClick={e => e.stopPropagation()} 
+        style={{ 
+          maxWidth: 480, 
+          padding: '2rem',
+          borderRadius: 'var(--radius-xl)',
+          boxShadow: '0 24px 56px rgba(0, 0, 0, 0.5)',
+          background: 'var(--bg-secondary)'
+        }}
+      >
+        {/* Header */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'flex-start', 
+          justifyContent: 'space-between', 
+          marginBottom: '1.5rem', 
+          borderBottom: '1px solid var(--border-subtle)', 
+          paddingBottom: '1.25rem' 
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: isFolder ? `${color}20` : 'rgba(59, 130, 246, 0.12)',
+              border: `1px solid ${isFolder ? `${color}50` : 'rgba(59, 130, 246, 0.25)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isFolder ? color : 'var(--accent-primary)',
+              flexShrink: 0
+            }}>
+              {isFolder ? <Folder size={22} /> : <FileText size={22} />}
+            </div>
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                {isFolder ? '폴더 정보 및 색상 변경' : '파일 이름 변경'}
+              </h3>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                {isFolder ? '폴더의 이름과 표시 색상을 변경합니다.' : '파일의 새로운 이름을 입력하세요.'}
+              </p>
+            </div>
           </div>
-          <button className="btn-icon" onClick={onClose} title="닫기 (ESC)">
+          <button 
+            className="btn-icon" 
+            onClick={onClose} 
+            title="닫기 (ESC)"
+            style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
             <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.45rem' }}>
               {isFolder ? '폴더 이름' : '파일 이름'}
             </label>
             <input
@@ -112,12 +153,20 @@ export default function RenameModal({
           </div>
 
           {isFolder && (
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.45rem' }}>
-                <Palette size={14} />
-                <span>폴더 색상</span>
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
+                <Palette size={15} color="var(--accent-primary)" />
+                <span>폴더 테마 색상 선택</span>
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div style={{ 
+                display: 'flex', 
+                gap: '0.65rem', 
+                flexWrap: 'wrap',
+                background: 'var(--bg-tertiary)',
+                padding: '0.85rem 1rem',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--border-subtle)'
+              }}>
                 {FOLDER_COLORS.map(c => (
                   <button
                     key={c.value}
@@ -125,32 +174,44 @@ export default function RenameModal({
                     onClick={() => setColor(c.value)}
                     title={c.label}
                     style={{
-                      width: 28,
-                      height: 28,
+                      width: 32,
+                      height: 32,
                       borderRadius: '50%',
                       backgroundColor: c.value,
-                      border: color === c.value ? '2px solid #fff' : '2px solid transparent',
-                      boxShadow: color === c.value ? '0 0 8px ' + c.value : 'none',
+                      border: color === c.value ? '2px solid #ffffff' : '2px solid transparent',
+                      boxShadow: color === c.value ? `0 0 10px ${c.value}cc, 0 0 0 2px ${c.value}` : 'none',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       cursor: 'pointer',
-                      transition: 'all 0.15s ease'
+                      transition: 'all 0.2s ease',
+                      transform: color === c.value ? 'scale(1.1)' : 'scale(1)'
                     }}
                   >
-                    {color === c.value && <Check size={14} color="#fff" />}
+                    {color === c.value && <Check size={16} color="#fff" strokeWidth={3} />}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-            <button type="button" className="btn-secondary" onClick={onClose} disabled={isSubmitting}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', marginTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '1.25rem' }}>
+            <button 
+              type="button" 
+              className="btn-secondary" 
+              onClick={onClose} 
+              disabled={isSubmitting}
+              style={{ height: 38, padding: '0 1.2rem', fontSize: '0.85rem' }}
+            >
               취소
             </button>
-            <button type="submit" className="btn-primary" disabled={isSubmitting}>
-              {isSubmitting ? '저장 중...' : '저장'}
+            <button 
+              type="submit" 
+              className="btn-primary" 
+              disabled={isSubmitting || !name.trim()}
+              style={{ height: 38, padding: '0 1.5rem', fontSize: '0.85rem', fontWeight: 700 }}
+            >
+              {isSubmitting ? '저장 중...' : '변경사항 저장'}
             </button>
           </div>
         </form>
@@ -158,4 +219,3 @@ export default function RenameModal({
     </div>
   );
 }
-
