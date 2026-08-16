@@ -394,26 +394,23 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
 
         {/* Security Info */}
         <div style={{
-          marginTop: '1.5rem',
-          padding: '0.75rem',
+          marginTop: '1.25rem',
+          padding: '0.65rem 0.85rem',
           background: 'var(--bg-tertiary)',
           borderRadius: 'var(--radius-md)',
           fontSize: '0.75rem',
-          color: 'var(--text-secondary)',
-          lineHeight: 1.5,
+          color: 'var(--text-muted)',
+          lineHeight: 1.4,
           border: '1px solid var(--border-subtle)',
-          textAlign: 'left',
+          textAlign: 'center',
           display: 'flex',
-          alignItems: 'flex-start',
-          gap: '0.5rem'
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.45rem',
+          whiteSpace: 'nowrap'
         }}>
-          <Shield size={15} color="var(--accent-primary)" style={{ flexShrink: 0, marginTop: 2 }} />
-          <div>
-            <strong>보안 및 관리자 승인 정책</strong>
-            <div style={{ marginTop: 2, color: 'var(--text-muted)' }}>
-              맨 처음 가입한 사용자는 최고 관리자이며, 이후 일반 가입자는 관리자 승인 또는 7일 초대장을 통해 접속할 수 있습니다.
-            </div>
-          </div>
+          <Shield size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+          <span>신규 가입자는 관리자 승인 또는 초대장을 통해 접속할 수 있습니다.</span>
         </div>
       </div>
     </div>
