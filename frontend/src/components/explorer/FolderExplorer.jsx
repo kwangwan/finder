@@ -37,7 +37,7 @@ import { downloadFileChunked, getThumbnailUrl } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 export default function FolderExplorer({
-  workspaceName = '내 워크스페이스',
+  workspaceName = '',
   isLoading = false,
   activeView = 'all',
   onSelectView,

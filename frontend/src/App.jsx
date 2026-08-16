@@ -72,9 +72,28 @@ export default function App() {
 
   // Workspaces State
   const [workspaces, setWorkspaces] = useState([]);
-  const [activeWorkspace, setActiveWorkspace] = useState(null);
+  const [activeWorkspace, setActiveWorkspace] = useState(() => {
+    try {
+      const cached = localStorage.getItem('kb_active_ws_data');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isCreateWorkspaceMode, setIsCreateWorkspaceMode] = useState(false);
+
+  const updateUrlWsParam = (wsId) => {
+    try {
+      const url = new URL(window.location.href);
+      if (wsId) {
+        url.searchParams.set('ws', wsId);
+      } else {
+        url.searchParams.delete('ws');
+      }
+      window.history.replaceState(null, '', url.toString());
+    } catch (e) {}
+  };
 
   // Navigation & View
   const [folders, setFolders] = useState([]);
@@ -394,16 +413,26 @@ export default function App() {
       const wsList = await listWorkspaces();
       setWorkspaces(wsList);
       
-      const savedWsId = localStorage.getItem('kb_active_ws_id');
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlWsId = urlParams.get('ws') || urlParams.get('workspace_id');
+      const savedWsId = urlWsId || localStorage.getItem('kb_active_ws_id');
       const matched = wsList.find(w => w.id === savedWsId);
 
       if (matched) {
         setActiveWorkspace(matched);
+        localStorage.setItem('kb_active_ws_id', matched.id);
+        localStorage.setItem('kb_active_ws_data', JSON.stringify(matched));
+        updateUrlWsParam(matched.id);
       } else if (wsList.length > 0) {
         setActiveWorkspace(wsList[0]);
         localStorage.setItem('kb_active_ws_id', wsList[0].id);
+        localStorage.setItem('kb_active_ws_data', JSON.stringify(wsList[0]));
+        updateUrlWsParam(wsList[0].id);
       } else {
         setActiveWorkspace(null);
+        localStorage.removeItem('kb_active_ws_id');
+        localStorage.removeItem('kb_active_ws_data');
+        updateUrlWsParam(null);
       }
     } catch (err) {
       console.error('Error loading workspaces:', err);
@@ -418,7 +447,11 @@ export default function App() {
 
   const handleSelectWorkspace = (ws) => {
     setActiveWorkspace(ws);
-    localStorage.setItem('kb_active_ws_id', ws.id);
+    if (ws) {
+      localStorage.setItem('kb_active_ws_id', ws.id);
+      localStorage.setItem('kb_active_ws_data', JSON.stringify(ws));
+      updateUrlWsParam(ws.id);
+    }
     setActiveFolderId(null);
     setActiveFile(null);
     setActiveView('all');
@@ -984,6 +1017,7 @@ export default function App() {
       <Sidebar
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
+        isWorkspacesLoaded={isWorkspacesLoaded}
         onSelectWorkspace={handleSelectWorkspace}
         onOpenCreateWorkspace={() => {
           setIsCreateWorkspaceMode(true);
@@ -1056,7 +1090,7 @@ export default function App() {
           />
         ) : (
           <FolderExplorer
-            workspaceName={activeWorkspace?.name || '내 워크스페이스'}
+            workspaceName={activeWorkspace?.name || ''}
             isLoading={isLoading || !isWorkspacesLoaded || isAuthLoading}
             activeView={activeView}
             onSelectView={handleSelectView}

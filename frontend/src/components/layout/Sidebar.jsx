@@ -20,6 +20,7 @@ import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 export default function Sidebar({
   workspaces = [],
   activeWorkspace,
+  isWorkspacesLoaded = true,
   onSelectWorkspace,
   onOpenCreateWorkspace,
   onOpenWorkspaceSettings,
@@ -216,6 +217,7 @@ export default function Sidebar({
         <WorkspaceSwitcher
           workspaces={workspaces}
           activeWorkspace={activeWorkspace}
+          isLoading={!isWorkspacesLoaded}
           onSelectWorkspace={onSelectWorkspace}
           onOpenCreateWorkspace={onOpenCreateWorkspace}
           onOpenWorkspaceSettings={onOpenWorkspaceSettings}

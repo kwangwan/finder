@@ -27,6 +27,7 @@ const ICON_MAP = {
 export default function WorkspaceSwitcher({
   workspaces = [],
   activeWorkspace,
+  isLoading = false,
   onSelectWorkspace,
   onOpenCreateWorkspace,
   onOpenWorkspaceSettings,
@@ -46,6 +47,28 @@ export default function WorkspaceSwitcher({
   }, []);
 
   const ActiveIcon = (activeWorkspace?.icon && ICON_MAP[activeWorkspace.icon]) || Briefcase;
+
+  if (isLoading && !activeWorkspace) {
+    return (
+      <div style={{
+        width: '100%',
+        height: 48,
+        borderRadius: 'var(--radius-md)',
+        backgroundColor: 'var(--bg-tertiary)',
+        border: '1px solid var(--border-subtle)',
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0.6rem 0.75rem',
+        gap: '0.6rem'
+      }}>
+        <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)' }} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div className="skeleton-box" style={{ width: '65%', height: 14 }} />
+          <div className="skeleton-box" style={{ width: '40%', height: 10 }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
