@@ -585,7 +585,7 @@ body {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 270px;
+  width: 280px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-lg);
@@ -662,7 +662,7 @@ body {
 .explorer-container,
 .folder-explorer {
   flex: 1;
-  padding: 1.5rem;
+  padding: 1.75rem 2rem 2rem 2rem;
   overflow-y: auto;
   position: relative;
   height: 100%;
@@ -672,9 +672,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
-  min-height: 38px;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  min-height: 40px;
 }
 
 .breadcrumb-nav {
@@ -686,7 +686,7 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
 }
 .breadcrumb-nav::-webkit-scrollbar {
   display: none;
@@ -702,9 +702,12 @@ body {
   max-width: 260px;
   display: inline-flex;
   align-items: center;
-  padding: 2px 6px;
+  height: 32px;
+  padding: 0 8px;
+  gap: 6px;
   border-radius: var(--radius-sm);
   flex-shrink: 1;
+  line-height: 1;
 }
 
 .breadcrumb-item:hover {
@@ -725,6 +728,8 @@ body {
 .breadcrumb-sep {
   color: var(--text-muted);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .breadcrumb-ellipsis-btn {
@@ -814,11 +819,17 @@ body {
 }
 
 .explorer-item-count {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
+  line-height: 1.5;
+  display: inline-flex;
+  align-items: baseline;
 }
 .explorer-item-count strong {
   color: var(--text-primary);
+  font-weight: 700;
+  margin: 0 3px;
+  font-variant-numeric: tabular-nums;
 }
 
 .explorer-toolbar-right {

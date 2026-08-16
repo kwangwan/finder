@@ -282,7 +282,7 @@ export default function FolderExplorer({
             }}
             title="홈"
           >
-            <Home size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+            <Home size={15} />
             <span>홈</span>
           </span>
 
@@ -417,8 +417,8 @@ export default function FolderExplorer({
       {/* Explorer Secondary Toolbar: Sort & Count Controls */}
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <span className="explorer-item-count" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem' }}>
-            <span>전체</span> <strong>{totalItemCount}</strong><span>개 항목</span>
+          <span className="explorer-item-count">
+            전체 <strong>{totalItemCount}</strong>개 항목
           </span>
           {files.length > 0 && (
             <button
