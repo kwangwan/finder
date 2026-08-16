@@ -1721,7 +1721,14 @@ h1, h2, h3, h4, h5, h6,
 
   /* Admin Dashboard Mobile Overrides */
   .admin-dashboard-container {
-    padding: 0.85rem 0.65rem !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    box-sizing: border-box !important;
+    padding: 0.85rem 0.75rem !important;
+    padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 0.85rem)) !important;
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom)) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
   }
 
   .admin-dashboard-header {
@@ -1815,10 +1822,14 @@ h1, h2, h3, h4, h5, h6,
    ========================================================================== */
 .admin-dashboard-container {
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
+  box-sizing: border-box;
   background-color: var(--bg-primary);
   overflow-y: auto;
-  padding: 2.5rem 2rem;
+  padding: 2rem 2rem;
+  padding-top: max(1.75rem, env(safe-area-inset-top));
+  padding-bottom: max(2rem, env(safe-area-inset-bottom));
   -webkit-overflow-scrolling: touch;
 }
 
