@@ -227,53 +227,29 @@ export default function WorkspaceSettingsModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
       <div 
-        className="modal-content" 
+        className="modal-content workspace-settings-modal-content" 
         onClick={e => e.stopPropagation()} 
-        style={{ 
-          maxWidth: 660, 
-          padding: '2rem',
-          borderRadius: 'var(--radius-xl)',
-          boxShadow: '0 24px 56px rgba(0, 0, 0, 0.5)',
-          background: 'var(--bg-secondary)'
-        }}
       >
         {/* Header */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'flex-start', 
-          justifyContent: 'space-between', 
-          marginBottom: '1.5rem', 
-          borderBottom: '1px solid var(--border-subtle)', 
-          paddingBottom: '1.25rem' 
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-            <div style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              backgroundColor: 'rgba(59, 130, 246, 0.12)',
-              border: '1px solid rgba(59, 130, 246, 0.25)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--accent-primary)',
-              flexShrink: 0
-            }}>
-              <Briefcase size={22} />
+        <div className="workspace-modal-header">
+          <div className="workspace-modal-title-box">
+            <div className="workspace-modal-icon-badge">
+              <Briefcase size={20} />
             </div>
-            <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
-                {isCreateMode ? '새 워크스페이스 만들기' : `${workspace?.name} 워크스페이스 관리`}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h2 className="workspace-modal-title">
+                {isCreateMode ? '새 워크스페이스 만들기' : `${workspace?.name} 관리`}
               </h2>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
-                {isCreateMode ? '새로운 프로젝트 또는 팀을 위한 독립적인 작업 공간을 생성합니다.' : '워크스페이스 기본 정보 및 소속 멤버 권한을 관리합니다.'}
+              <p className="workspace-modal-subtitle">
+                {isCreateMode ? '새로운 프로젝트나 팀을 위한 작업 공간을 생성합니다.' : '워크스페이스 기본 정보 및 멤버 권한을 관리합니다.'}
               </p>
             </div>
           </div>
           <button 
+            type="button"
             className="btn-icon" 
             onClick={onClose}
-            style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
             title="닫기"
           >
             <X size={18} />
@@ -282,80 +258,60 @@ export default function WorkspaceSettingsModal({
 
         {error && (
           <div style={{ 
-            padding: '0.75rem 1rem', 
+            padding: '0.65rem 0.85rem', 
             background: 'rgba(244, 63, 94, 0.12)', 
             border: '1px solid rgba(244, 63, 94, 0.25)', 
             borderRadius: 'var(--radius-md)', 
             color: 'var(--accent-rose)', 
-            fontSize: '0.85rem', 
-            marginBottom: '1.5rem', 
+            fontSize: '0.8rem', 
+            marginBottom: '1rem', 
             display: 'flex', 
             alignItems: 'center', 
             gap: 8,
-            fontWeight: 500
+            fontWeight: 500,
+            wordBreak: 'keep-all'
           }}>
-            <AlertCircle size={16} />
+            <AlertCircle size={15} style={{ flexShrink: 0 }} />
             <span>{error}</span>
           </div>
         )}
 
         {successMsg && (
           <div style={{ 
-            padding: '0.75rem 1rem', 
+            padding: '0.65rem 0.85rem', 
             background: 'rgba(16, 185, 129, 0.12)', 
             border: '1px solid rgba(16, 185, 129, 0.25)', 
             borderRadius: 'var(--radius-md)', 
             color: 'var(--accent-emerald)', 
-            fontSize: '0.85rem', 
-            marginBottom: '1.5rem', 
+            fontSize: '0.8rem', 
+            marginBottom: '1rem', 
             display: 'flex', 
             alignItems: 'center', 
             gap: 8,
-            fontWeight: 500
+            fontWeight: 500,
+            wordBreak: 'keep-all'
           }}>
-            <CheckCircle2 size={16} />
+            <CheckCircle2 size={15} style={{ flexShrink: 0 }} />
             <span>{successMsg}</span>
           </div>
         )}
 
         {/* Tabs for existing workspace */}
         {!isCreateMode && (
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="workspace-tabs-row">
             <button
+              type="button"
               onClick={() => setActiveTab('settings')}
-              style={{
-                padding: '0.5rem 0.85rem',
-                background: 'transparent',
-                border: 'none',
-                borderBottom: activeTab === 'settings' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                color: activeTab === 'settings' ? 'var(--text-primary)' : 'var(--text-muted)',
-                fontWeight: 600,
-                fontSize: '0.875rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
+              className={`workspace-tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
             >
               <Settings size={15} />
               <span>워크스페이스 설정</span>
             </button>
 
             <button
+              type="button"
               onClick={() => setActiveTab('members')}
-              style={{
-                padding: '0.5rem 0.85rem',
-                background: 'transparent',
-                border: 'none',
-                borderBottom: activeTab === 'members' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                color: activeTab === 'members' ? 'var(--text-primary)' : 'var(--text-muted)',
-                fontWeight: 600,
-                fontSize: '0.875rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
+              className={`workspace-tab-btn ${activeTab === 'members' ? 'active' : ''}`}
             >
               <Users size={15} />
               <span>멤버 관리 ({members.length})</span>
@@ -366,8 +322,8 @@ export default function WorkspaceSettingsModal({
         {/* Tab 1: Settings / Create */}
         {(isCreateMode || activeTab === 'settings') && (
           <form onSubmit={handleSaveSettings}>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+            <div style={{ marginBottom: '0.85rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
                 워크스페이스 이름 *
               </label>
               <input
@@ -382,16 +338,17 @@ export default function WorkspaceSettingsModal({
                   background: 'var(--bg-tertiary)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: 'var(--radius-md)',
-                  padding: '0.6rem 0.8rem',
-                  fontSize: '0.9rem',
+                  padding: '0.55rem 0.75rem',
+                  fontSize: '0.88rem',
                   color: 'var(--text-primary)',
-                  outline: 'none'
+                  outline: 'none',
+                  boxSizing: 'border-box'
                 }}
               />
             </div>
 
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+            <div style={{ marginBottom: '0.85rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
                 워크스페이스 설명
               </label>
               <textarea
@@ -405,20 +362,21 @@ export default function WorkspaceSettingsModal({
                   background: 'var(--bg-tertiary)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: 'var(--radius-md)',
-                  padding: '0.6rem 0.8rem',
-                  fontSize: '0.85rem',
+                  padding: '0.55rem 0.75rem',
+                  fontSize: '0.82rem',
                   color: 'var(--text-primary)',
                   outline: 'none',
-                  resize: 'none'
+                  resize: 'none',
+                  boxSizing: 'border-box'
                 }}
               />
             </div>
 
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
                 아이콘 테마
               </label>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem' }}>
                 {ICONS.map(item => {
                   const IconComp = item.Icon;
                   const isSelected = icon === item.id;
@@ -430,12 +388,11 @@ export default function WorkspaceSettingsModal({
                       disabled={!isAdminOrOwner}
                       onClick={() => setIcon(item.id)}
                       style={{
-                        flex: 1,
-                        padding: '0.5rem',
+                        padding: '0.45rem 0.25rem',
                         display: 'flex',
                         flexDirection: 'column',
                         alignItems: 'center',
-                        gap: 4,
+                        gap: 3,
                         background: isSelected ? 'var(--bg-tertiary)' : 'transparent',
                         border: '1px solid',
                         borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-subtle)',
@@ -444,8 +401,8 @@ export default function WorkspaceSettingsModal({
                         color: isSelected ? 'var(--accent-primary)' : 'var(--text-muted)'
                       }}
                     >
-                      <IconComp size={18} />
-                      <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>{item.label}</span>
+                      <IconComp size={16} />
+                      <span style={{ fontSize: '0.68rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{item.label}</span>
                     </button>
                   );
                 })}
@@ -453,11 +410,11 @@ export default function WorkspaceSettingsModal({
             </div>
 
             {isAdminOrOwner && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                <button type="button" className="btn-secondary" onClick={onClose}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
+                <button type="button" className="btn-secondary" onClick={onClose} style={{ fontSize: '0.82rem', padding: '0.45rem 0.85rem' }}>
                   취소
                 </button>
-                <button type="submit" className="btn-primary" disabled={isLoading || !name.trim()}>
+                <button type="submit" className="btn-primary" disabled={isLoading || !name.trim()} style={{ fontSize: '0.82rem', padding: '0.45rem 0.95rem' }}>
                   {isCreateMode ? '워크스페이스 생성' : '변경사항 저장'}
                 </button>
               </div>
@@ -465,14 +422,14 @@ export default function WorkspaceSettingsModal({
 
             {/* Danger Zone: Delete Workspace */}
             {!isCreateMode && isOwner && (
-              <div style={{ marginTop: '2rem', borderTop: '1px solid rgba(244, 63, 94, 0.2)', paddingTop: '1.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(244, 63, 94, 0.2)', paddingTop: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-rose)' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent-rose)' }}>
                       워크스페이스 삭제
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      워크스페이스와 포함된 모든 데이터가 삭제됩니다.
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      포함된 모든 데이터가 영구 삭제됩니다.
                     </div>
                   </div>
                   <button
@@ -483,10 +440,11 @@ export default function WorkspaceSettingsModal({
                       border: '1px solid rgba(244, 63, 94, 0.3)',
                       borderRadius: 'var(--radius-md)',
                       color: 'var(--accent-rose)',
-                      padding: '0.45rem 0.85rem',
-                      fontSize: '0.8rem',
+                      padding: '0.35rem 0.75rem',
+                      fontSize: '0.78rem',
                       fontWeight: 600,
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     워크스페이스 삭제
@@ -502,15 +460,16 @@ export default function WorkspaceSettingsModal({
           <div>
             {/* Invite Form */}
             {isAdminOrOwner && (
-              <form onSubmit={handleInviteMember} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', background: 'var(--bg-tertiary)', padding: '0.75rem', borderRadius: 'var(--radius-md)' }}>
+              <form onSubmit={handleInviteMember} className="workspace-member-invite-form">
                 <input
                   type="email"
                   required
-                  placeholder="초대할 사용자 이메일 (예: teammate@company.com)"
+                  placeholder="초대할 이메일 (예: teammate@company.com)"
                   value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   style={{
-                    flex: 1,
+                    flex: '1 1 180px',
+                    minWidth: 0,
                     background: 'var(--bg-card)',
                     border: '1px solid var(--border-subtle)',
                     borderRadius: 'var(--radius-sm)',
@@ -520,37 +479,39 @@ export default function WorkspaceSettingsModal({
                     outline: 'none'
                   }}
                 />
-                <select
-                  value={inviteRole}
-                  onChange={e => setInviteRole(e.target.value)}
-                  style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '0.45rem',
-                    fontSize: '0.82rem',
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    width: 90
-                  }}
-                >
-                  <option value="member">멤버</option>
-                  {isOwner && <option value="admin">관리자</option>}
-                </select>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={!inviteEmail.trim() || isLoading}
-                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.8rem' }}
-                >
-                  <UserPlus size={14} />
-                  <span>초대</span>
-                </button>
+                <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                  <select
+                    value={inviteRole}
+                    onChange={e => setInviteRole(e.target.value)}
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '0.45rem 0.35rem',
+                      fontSize: '0.8rem',
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                      width: 82
+                    }}
+                  >
+                    <option value="member">멤버</option>
+                    {isOwner && <option value="admin">관리자</option>}
+                  </select>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={!inviteEmail.trim() || isLoading}
+                    style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem', whiteSpace: 'nowrap' }}
+                  >
+                    <UserPlus size={14} />
+                    <span>초대</span>
+                  </button>
+                </div>
               </form>
             )}
 
             {/* Member List */}
-            <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 260, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
               {members.map(m => {
                 const isMemberOwner = m.role === 'owner' || m.user_id === workspace?.owner_id;
                 const isSelf = m.user_id === currentUser?.id;
@@ -562,31 +523,34 @@ export default function WorkspaceSettingsModal({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      padding: '0.55rem 0.75rem',
+                      padding: '0.5rem 0.65rem',
                       background: 'var(--bg-tertiary)',
                       borderRadius: 'var(--radius-md)',
-                      marginBottom: 5
+                      marginBottom: 5,
+                      gap: '0.5rem'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
                       <img
                         src={m.user_picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${m.user_email}`}
                         alt={m.user_name}
-                        style={{ width: 30, height: 30, borderRadius: '50%' }}
+                        style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0 }}
                       />
-                      <div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                          {m.user_name || m.user_email?.split('@')[0]}
-                          {isMemberOwner && <Crown size={13} color="var(--accent-amber)" title="워크스페이스 소유자" />}
-                          {isSelf && <span style={{ fontSize: '0.7rem', color: 'var(--accent-primary)' }}>(나)</span>}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {m.user_name || m.user_email?.split('@')[0]}
+                          </span>
+                          {isMemberOwner && <Crown size={12} color="var(--accent-amber)" style={{ flexShrink: 0 }} title="소유자" />}
+                          {isSelf && <span style={{ fontSize: '0.68rem', color: 'var(--accent-primary)', flexShrink: 0 }}>(나)</span>}
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {m.user_email}
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
                       {/* Role Selector or Badge */}
                       {isOwner && !isMemberOwner ? (
                         <select
@@ -596,8 +560,8 @@ export default function WorkspaceSettingsModal({
                             background: 'var(--bg-card)',
                             border: '1px solid var(--border-subtle)',
                             borderRadius: 'var(--radius-sm)',
-                            padding: '0.2rem 0.4rem',
-                            fontSize: '0.75rem',
+                            padding: '0.2rem 0.35rem',
+                            fontSize: '0.74rem',
                             color: 'var(--text-primary)',
                             outline: 'none'
                           }}
@@ -607,12 +571,13 @@ export default function WorkspaceSettingsModal({
                         </select>
                       ) : (
                         <span style={{
-                          fontSize: '0.72rem',
+                          fontSize: '0.7rem',
                           fontWeight: 600,
                           color: isMemberOwner ? 'var(--accent-amber)' : (m.role === 'admin' ? 'var(--accent-primary)' : 'var(--text-muted)'),
                           background: 'var(--bg-card)',
-                          padding: '0.15rem 0.5rem',
-                          borderRadius: 'var(--radius-sm)'
+                          padding: '0.15rem 0.45rem',
+                          borderRadius: 'var(--radius-sm)',
+                          whiteSpace: 'nowrap'
                         }}>
                           {isMemberOwner ? '소유자' : (m.role === 'admin' ? '관리자' : '멤버')}
                         </span>
@@ -621,12 +586,13 @@ export default function WorkspaceSettingsModal({
                       {/* Remove or Leave Button */}
                       {!isMemberOwner && (isSelf || isOwner || (isAdminOrOwner && m.role === 'member')) && (
                         <button
+                          type="button"
                           className="btn-icon"
                           onClick={() => handleRemoveMember(m.user_id, m.user_email)}
                           title={isSelf ? "워크스페이스 탈퇴" : "멤버 추방"}
                           style={{ padding: 4 }}
                         >
-                          <UserX size={15} color="var(--accent-rose)" />
+                          <UserX size={14} color="var(--accent-rose)" />
                         </button>
                       )}
                     </div>

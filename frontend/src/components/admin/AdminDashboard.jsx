@@ -74,6 +74,18 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
     loadData();
   }, []);
 
+  // Handle browser back button as well as UI back button
+  useEffect(() => {
+    window.history.pushState({ view: 'admin' }, '');
+    const handlePopState = () => {
+      if (onBackToApp) onBackToApp();
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [onBackToApp]);
+
   const handleToggleApprove = async (user) => {
     setActionLoadingId(user.id);
     try {
@@ -99,23 +111,22 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
       });
       return;
     }
-    const confirmTitle = user.is_admin ? '관리자 권한 회수' : '관리자 권한 부여';
-    const confirmMsg = user.is_admin 
-      ? `'${user.email}' 님의 최고 관리자 권한을 회수하시겠습니까?`
-      : `'${user.email}' 님에게 최고 관리자 권한을 부여하시겠습니까?\n관리자는 전체 사용자 및 시스템 설정을 관리할 수 있습니다.`;
-    
+
+    const newAdminStatus = !user.is_admin;
     const confirmed = await showConfirm({
-      title: confirmTitle,
-      message: confirmMsg,
-      type: user.is_admin ? 'danger' : 'info',
-      confirmText: user.is_admin ? '권한 회수' : '권한 부여',
+      title: newAdminStatus ? '최고 관리자 권한 부여' : '최고 관리자 권한 해제',
+      message: newAdminStatus 
+        ? `'${user.name || user.email}'님에게 최고 관리자 권한을 부여하시겠습니까?\n모든 워크스페이스 및 시스템 설정에 접근할 수 있게 됩니다.`
+        : `'${user.name || user.email}'님의 최고 관리자 권한을 해제하시겠습니까?`,
+      type: newAdminStatus ? 'info' : 'danger',
+      confirmText: newAdminStatus ? '권한 부여' : '권한 해제',
       cancelText: '취소'
     });
     if (!confirmed) return;
 
     setActionLoadingId(user.id);
     try {
-      await toggleAdminUser(user.id, !user.is_admin);
+      await toggleAdminUser(user.id, newAdminStatus);
       await loadData();
     } catch (err) {
       await showAlert({
@@ -131,18 +142,18 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
   const handleDeleteUser = async (user) => {
     if (user.id === currentUser.id) {
       await showAlert({
-        title: '계정 삭제 불가',
-        message: '현재 로그인된 본인 계정은 삭제할 수 없습니다.',
+        title: '삭제 불가',
+        message: '본인 계정은 삭제할 수 없습니다.',
         type: 'warning'
       });
       return;
     }
-    
+
     const confirmed = await showConfirm({
-      title: '사용자 계정 삭제',
-      message: `'${user.email}' 사용자를 정말 삭제하시겠습니까?\n해당 사용자의 개인 워크스페이스, 파일, 임베딩 데이터가 영구 삭제됩니다.`,
+      title: '사용자 영구 삭제',
+      message: `'${user.name || user.email}' 계정을 영구 삭제하시겠습니까?\n해당 사용자의 모든 업로드 파일 및 메모가 영구 삭제될 수 있으며 복구할 수 없습니다.`,
       type: 'danger',
-      confirmText: '계정 영구 삭제',
+      confirmText: '영구 삭제',
       cancelText: '취소'
     });
     if (!confirmed) return;
@@ -153,8 +164,8 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
       await loadData();
     } catch (err) {
       await showAlert({
-        title: '사용자 삭제 실패',
-        message: '사용자 계정을 삭제하지 못했습니다: ' + err.message,
+        title: '계정 삭제 실패',
+        message: '계정을 삭제하지 못했습니다: ' + err.message,
         type: 'error'
       });
     } finally {
@@ -162,30 +173,33 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
     }
   };
 
-  const handleQuotaEdit = (user) => {
+  const handleStartEditQuota = (user) => {
     setEditingQuotaUserId(user.id);
-    setQuotaInputGb(String(bytesToGb(user.storage_quota_bytes ?? 0)));
+    const gb = user.storage_quota_bytes ? bytesToGb(user.storage_quota_bytes) : 0;
+    setQuotaInputGb(gb.toString());
   };
 
-  const handleQuotaSave = async (user) => {
-    const gb = parseFloat(quotaInputGb);
-    if (isNaN(gb) || gb < 0) {
+  const handleSaveQuota = async (userId) => {
+    const gbVal = parseFloat(quotaInputGb);
+    if (isNaN(gbVal) || gbVal < 0) {
       await showAlert({
         title: '입력 오류',
-        message: '0 이상의 유효한 용량(GB) 숫자를 입력해주세요.',
+        message: '유효한 용량(GB)을 입력해주세요. (0 이상)',
         type: 'warning'
       });
       return;
     }
-    setActionLoadingId(user.id);
+
+    const bytes = gbToBytes(gbVal);
+    setActionLoadingId(userId);
     try {
-      await updateUserQuota(user.id, gbToBytes(gb));
+      await updateUserQuota(userId, bytes);
       setEditingQuotaUserId(null);
       await loadData();
     } catch (err) {
       await showAlert({
-        title: '용량 변경 실패',
-        message: '저장소 용량을 변경하지 못했습니다: ' + err.message,
+        title: '할당량 변경 실패',
+        message: '스토리지 용량을 변경하지 못했습니다: ' + err.message,
         type: 'error'
       });
     } finally {
@@ -193,83 +207,58 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.email.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (u.name && u.name.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const handleCancelEditQuota = () => {
+    setEditingQuotaUserId(null);
+    setQuotaInputGb('');
+  };
+
+  const filteredUsers = users.filter(u => {
+    const q = searchTerm.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      (u.name && u.name.toLowerCase().includes(q)) ||
+      (u.email && u.email.toLowerCase().includes(q))
+    );
+  });
 
   const pendingCount = users.filter(u => !u.is_approved && !u.is_admin).length;
   const approvedCount = users.filter(u => u.is_approved || u.is_admin).length;
   const adminCount = users.filter(u => u.is_admin).length;
 
   return (
-    <div style={{
-      height: '100vh',
-      width: '100vw',
-      backgroundColor: 'var(--bg-primary)',
-      overflowY: 'auto',
-      padding: '2.5rem 2rem'
-    }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+    <div className="admin-dashboard-container">
+      <div style={{ maxWidth: 1200, margin: '0 auto', width: '100%' }}>
         {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '2rem',
-          borderBottom: '1px solid var(--border-subtle)',
-          paddingBottom: '1.5rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="admin-dashboard-header">
+          <div className="admin-header-left">
             <button 
-              className="btn-icon" 
+              type="button"
+              className="btn-icon admin-back-btn" 
               onClick={onBackToApp} 
               title="Finder로 돌아가기"
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 10,
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-subtle)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--text-primary)'
-              }}
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={19} />
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-              <div style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                border: '1px solid rgba(59, 130, 246, 0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--accent-primary)',
-                flexShrink: 0
-              }}>
-                <ShieldCheck size={24} />
+            <div className="admin-header-brand-wrap">
+              <div className="admin-shield-icon">
+                <ShieldCheck size={22} />
               </div>
-              <div>
-                <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.2 }}>
+              <div className="admin-header-title-box">
+                <h1 className="admin-main-title">
                   최고 관리자 대시보드
                 </h1>
-                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  전체 사용자 계정 승인 · 권한 부여 · 스토리지 할당량 관리
+                <p className="admin-sub-title">
+                  전체 사용자 계정 승인 · 권한 부여 · 스토리지 관리
                 </p>
               </div>
             </div>
           </div>
 
           <button 
-            className="btn-secondary" 
+            type="button"
+            className="btn-secondary admin-refresh-btn" 
             onClick={loadData} 
             disabled={isLoading}
-            style={{ height: 38, padding: '0 1.1rem', fontSize: '0.85rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <RefreshCw size={14} className={isLoading ? 'spin-anim' : ''} />
             <span>새로고침</span>
@@ -277,12 +266,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
         </div>
 
         {/* Stats Grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '1.25rem',
-          marginBottom: '2rem'
-        }}>
+        <div className="admin-stats-grid">
           {[
             { label: '전체 등록 회원', value: `${users.length}명`, icon: Users, color: 'var(--text-primary)', bg: 'var(--bg-secondary)', borderColor: 'var(--border-subtle)' },
             { label: '가입 승인 대기', value: `${pendingCount}명`, icon: Clock, color: 'var(--accent-amber)', bg: 'rgba(245, 158, 11, 0.05)', borderColor: 'rgba(245, 158, 11, 0.3)' },
@@ -293,37 +277,22 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
             return (
               <div 
                 key={i} 
+                className="admin-stat-card"
                 style={{
                   background: stat.bg,
-                  border: `1px solid ${stat.borderColor}`,
-                  borderRadius: 'var(--radius-xl)',
-                  padding: '1.25rem 1.4rem',
-                  boxShadow: 'var(--shadow-sm)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between'
+                  border: `1px solid ${stat.borderColor}`
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>
+                  <div className="admin-stat-label">
                     {stat.label}
                   </div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: stat.color }}>
+                  <div className="admin-stat-value" style={{ color: stat.color }}>
                     {stat.value}
                   </div>
                 </div>
-                <div style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 10,
-                  background: 'var(--bg-tertiary)',
-                  border: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: stat.color
-                }}>
-                  <IconComponent size={20} />
+                <div className="admin-stat-icon-wrap" style={{ color: stat.color }}>
+                  <IconComponent size={18} />
                 </div>
               </div>
             );
@@ -331,44 +300,20 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
         </div>
 
         {/* User Management Table Card */}
-        <div style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-xl)',
-          overflow: 'hidden',
-          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.25)'
-        }}>
-          <div style={{
-            padding: '1.25rem 1.5rem',
-            borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '1rem',
-            flexWrap: 'wrap'
-          }}>
+        <div className="admin-table-card">
+          <div className="admin-table-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <Users size={20} color="var(--accent-primary)" />
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+              <Users size={18} color="var(--accent-primary)" />
+              <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
                 사용자 계정 목록
               </h2>
-              <span className="menu-badge" style={{ fontSize: '0.75rem', padding: '2px 8px' }}>
+              <span className="menu-badge" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>
                 {filteredUsers.length}명
               </span>
             </div>
 
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.6rem',
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '0 0.85rem',
-              height: 38,
-              width: 280
-            }}>
-              <Search size={15} color="var(--text-muted)" />
+            <div className="admin-search-box">
+              <Search size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
               <input
                 type="text"
                 placeholder="이메일 또는 이름으로 검색..."
