@@ -48,6 +48,18 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
+    # AWS SES (초대 및 알림 메일 발송용)
+    AWS_SES_ACCESS_KEY_ID: str = ""
+    AWS_SES_SECRET_ACCESS_KEY: str = ""
+    AWS_SES_REGION: str = "ap-northeast-2"
+    SES_FROM_EMAIL_NOTIFY: str = "notify@proj.run"
+
+    # Fallback aliases
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_REGION: str = "ap-northeast-2"
+    SES_SOURCE_EMAIL: str = "notify@proj.run"
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",

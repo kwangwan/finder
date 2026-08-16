@@ -2,19 +2,38 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 from typing import Optional
+from app.core.config import settings
 
 class EmailService:
-    def __init__(self):
-        self.aws_access_key = os.getenv("AWS_SES_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID")
-        self.aws_secret_key = os.getenv("AWS_SES_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
-        self.aws_region = os.getenv("AWS_SES_REGION") or os.getenv("AWS_REGION", "ap-northeast-2")
-        self.source_email = os.getenv("SES_FROM_EMAIL_NOTIFY") or os.getenv("SES_SOURCE_EMAIL", "noreply@proj.run")
-        self.app_url = os.getenv("APP_PUBLIC_URL", "https://finder.proj.run")
+    @property
+    def aws_access_key(self) -> str:
+        return (settings.AWS_SES_ACCESS_KEY_ID or settings.AWS_ACCESS_KEY_ID or 
+                os.getenv("AWS_SES_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID") or "")
 
+    @property
+    def aws_secret_key(self) -> str:
+        return (settings.AWS_SES_SECRET_ACCESS_KEY or settings.AWS_SECRET_ACCESS_KEY or 
+                os.getenv("AWS_SES_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY") or "")
+
+    @property
+    def aws_region(self) -> str:
+        return (settings.AWS_SES_REGION or settings.AWS_REGION or 
+                os.getenv("AWS_SES_REGION") or os.getenv("AWS_REGION") or "ap-northeast-2")
+
+    @property
+    def source_email(self) -> str:
+        return (settings.SES_FROM_EMAIL_NOTIFY or settings.SES_SOURCE_EMAIL or 
+                os.getenv("SES_FROM_EMAIL_NOTIFY") or os.getenv("SES_SOURCE_EMAIL") or "notify@proj.run")
+
+    @property
+    def app_url(self) -> str:
+        return settings.APP_PUBLIC_URL or os.getenv("APP_PUBLIC_URL", "https://finder.proj.run")
 
     @property
     def is_ses_configured(self) -> bool:
-        return bool(self.aws_access_key and self.aws_secret_key)
+        key = self.aws_access_key
+        secret = self.aws_secret_key
+        return bool(key and secret and len(key.strip()) > 5 and len(secret.strip()) > 5 and key != "your_ses_key")
 
     def send_invitation_email(
         self,
@@ -77,8 +96,9 @@ class EmailService:
                     aws_access_key_id=self.aws_access_key,
                     aws_secret_access_key=self.aws_secret_key
                 )
+                source_formatted = f"Project Run <{self.source_email}>" if ("@" in self.source_email and "<" not in self.source_email) else self.source_email
                 response = client.send_email(
-                    Source=self.source_email,
+                    Source=source_formatted,
                     Destination={"ToAddresses": [to_email]},
                     Message={
                         "Subject": {"Data": subject, "Charset": "UTF-8"},
@@ -91,8 +111,13 @@ class EmailService:
                 print(f"[SES Success] Sent invitation email to {to_email}, MessageId: {response.get('MessageId')}")
                 return True
             except ClientError as e:
-                print(f"[SES Error] Failed to send email via AWS SES: {e.response['Error']['Message']}")
-                # Fallback to local log
+                err_code = e.response.get('Error', {}).get('Code', 'Unknown')
+                err_msg = e.response.get('Error', {}).get('Message', str(e))
+                print(f"[SES Error] Code: {err_code}, Message: {err_msg}")
+            except Exception as e:
+                print(f"[SES Unexpected Error] {e}")
+        else:
+            print(f"[SES Info] AWS SES credentials not configured in environment; fallback to console mock.")
         
         # Local console logger fallback for test development
         print(f"\n=======================================================")
