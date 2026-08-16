@@ -30,6 +30,7 @@ export default function MediaPreviewModal({
   const [mediaUrl, setMediaUrl] = useState(null);
   const [fileDetail, setFileDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [bgMode, setBgMode] = useState('checkerboard'); // 'checkerboard' | 'light' | 'dark'
   const [error, setError] = useState('');
@@ -39,6 +40,7 @@ export default function MediaPreviewModal({
       setZoomLevel(1);
       setError('');
       setIsLoading(false);
+      setIsImageLoaded(false);
       const url = getMediaPreviewUrl(file.id);
       setMediaUrl(url);
 
@@ -57,6 +59,7 @@ export default function MediaPreviewModal({
     } else {
       setMediaUrl(null);
       setFileDetail(null);
+      setIsImageLoaded(false);
     }
   }, [isOpen, file?.id]);
 
@@ -115,7 +118,7 @@ export default function MediaPreviewModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100, backgroundColor: 'rgba(0, 0, 0, 0.85)' }}>
       <div 
-        className="modal-content" 
+        className="modal-content media-preview-content" 
         onClick={e => e.stopPropagation()} 
         style={{ 
           maxWidth: isVideo || isPdf ? 960 : 880, 
@@ -254,7 +257,8 @@ export default function MediaPreviewModal({
         {/* Media Content Body */}
         <div style={{
           flex: 1,
-          minHeight: 360,
+          minHeight: 440,
+          height: isImage ? '75vh' : 'auto',
           maxHeight: 'calc(92vh - 80px)',
           display: 'flex',
           alignItems: 'center',
@@ -262,6 +266,7 @@ export default function MediaPreviewModal({
           overflow: 'auto',
           position: 'relative',
           padding: (isPdf || isVideo) ? 0 : '1.5rem',
+          transition: 'background-color 0.25s ease',
           ...getContainerBgStyle()
         }}>
           {isLoading && (
@@ -305,19 +310,60 @@ export default function MediaPreviewModal({
                   }}
                 />
               ) : isImage ? (
-                <img
-                  src={mediaUrl}
-                  alt={file.name}
-                  style={{
-                    maxWidth: zoomLevel === 1 ? '100%' : 'none',
-                    maxHeight: zoomLevel === 1 ? '72vh' : 'none',
-                    transform: `scale(${zoomLevel})`,
-                    transformOrigin: 'center center',
-                    transition: 'transform 0.15s ease',
-                    objectFit: 'contain',
-                    borderRadius: 'var(--radius-sm)'
-                  }}
-                />
+                <>
+                  {!isImageLoaded && (
+                    <div style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.85rem',
+                      color: 'var(--text-muted)',
+                      zIndex: 2,
+                      animation: 'fadeIn 0.2s ease'
+                    }}>
+                      <div style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--bg-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+                        border: '1px solid var(--border-subtle)'
+                      }}>
+                        <Loader2 size={24} color="var(--accent-primary)" className="spin" />
+                      </div>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>
+                        고화질 이미지 불러오는 중...
+                      </span>
+                    </div>
+                  )}
+                  <img
+                    src={mediaUrl}
+                    alt={file.name}
+                    onLoad={() => setIsImageLoaded(true)}
+                    onError={() => {
+                      setIsImageLoaded(true);
+                      setError('이미지를 불러오지 못했습니다.');
+                    }}
+                    style={{
+                      maxWidth: zoomLevel === 1 ? '100%' : 'none',
+                      maxHeight: zoomLevel === 1 ? '72vh' : 'none',
+                      transform: `scale(${isImageLoaded ? zoomLevel : 0.94})`,
+                      transformOrigin: 'center center',
+                      opacity: isImageLoaded ? 1 : 0,
+                      transition: 'opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                      objectFit: 'contain',
+                      borderRadius: 'var(--radius-sm)',
+                      boxShadow: isImageLoaded ? '0 10px 30px rgba(0, 0, 0, 0.35)' : 'none',
+                      pointerEvents: isImageLoaded ? 'auto' : 'none'
+                    }}
+                  />
+                </>
               ) : (isDocx || isExcel || isTextOrCode) && displayContent ? (
                 <div style={{
                   width: '100%',
