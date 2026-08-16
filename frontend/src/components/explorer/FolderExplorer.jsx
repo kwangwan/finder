@@ -101,10 +101,26 @@ export default function FolderExplorer({
     );
   };
 
-  const isMediaFile = (file) => {
-    return file.file_type === 'image' || 
-           file.file_type === 'video' || 
-           file.name.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov)$/i);
+  const isImageOrVideo = (file) => {
+    if (!file) return false;
+    const type = (file.file_type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    return type === 'image' || type === 'video' || name.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov)$/i);
+  };
+
+  const isMarkdownFile = (file) => {
+    if (!file) return false;
+    const name = (file.name || '').toLowerCase();
+    return file.is_markdown === true || name.endsWith('.md') || name.endsWith('.markdown');
+  };
+
+  const isPreviewableFile = (file) => {
+    if (!file) return false;
+    if (isMarkdownFile(file)) return false;
+    const type = (file.file_type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    return type === 'image' || type === 'video' || type === 'pdf' || type === 'docx' || type === 'xlsx' || type === 'archive' ||
+           name.match(/\.(pdf|png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov|avi|mkv|docx|doc|xlsx|xls|csv|zip|tar|gz|7z)$/i);
   };
 
   const getFileIcon = (file) => {
@@ -202,7 +218,7 @@ export default function FolderExplorer({
       toggleFileSelection(file.id, e);
       return;
     }
-    if (isMediaFile(file) && onOpenMediaPreview) {
+    if (isPreviewableFile(file) && onOpenMediaPreview) {
       onOpenMediaPreview(file);
     } else {
       onOpenFile(file);
@@ -247,61 +263,24 @@ export default function FolderExplorer({
         if (onBackgroundContextMenu) onBackgroundContextMenu(e);
       }}
     >
-      {/* Download Progress Banner */}
+      {/* Download Floating Progress Bar */}
       {downloadProgress && (
-        <div style={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          backgroundColor: 'var(--bg-secondary)',
-          border: '1px solid var(--border-medium)',
-          borderRadius: 'var(--radius-md)',
-          padding: '1rem 1.25rem',
-          boxShadow: 'var(--shadow-lg)',
-          zIndex: 1000,
-          minWidth: 300,
-          backdropFilter: 'blur(8px)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-            <span>다운로드 진행 중</span>
-            <span style={{ color: 'var(--accent-primary)' }}>{downloadProgress.percent}%</span>
+        <div className="download-progress-bar">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+            <span style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+              {downloadProgress.status || '다운로드 중...'}
+            </span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', fontWeight: 700 }}>
+              {downloadProgress.percent}%
+            </span>
           </div>
-          <div style={{
-            height: 6,
-            backgroundColor: 'var(--bg-tertiary)',
-            borderRadius: 'var(--radius-full)',
-            overflow: 'hidden',
-            marginBottom: 6
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${downloadProgress.percent}%`,
-              backgroundColor: 'var(--accent-primary)',
-              transition: 'width 0.2s ease'
-            }} />
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            {downloadProgress.status}
+          <div style={{ width: '100%', height: 6, background: 'var(--bg-tertiary)', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ width: `${downloadProgress.percent}%`, height: '100%', background: 'var(--accent-primary)', transition: 'width 0.2s ease' }} />
           </div>
         </div>
       )}
 
-      {/* Drag & Drop Visual Overlay */}
-      {isDragOver && (
-        <div className="drag-overlay">
-          <div className="drag-overlay-box">
-            <UploadCloud size={48} color="var(--accent-primary)" />
-            <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '1rem' }}>
-              파일 또는 폴더를 여기에 놓아 업로드
-            </div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4 }}>
-              폴더 통째로 드래그 시 하위 계층 구조가 그대로 유지되어 자동 생성됩니다.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Breadcrumb Header & Actions Toolbar */}
+      {/* Explorer Header: Breadcrumb & Actions */}
       <div className="explorer-header">
         <div className="breadcrumb-nav">
           <span 
@@ -352,7 +331,7 @@ export default function FolderExplorer({
                           onSelectFolder(f.id);
                         }}
                       >
-                        <FolderIcon size={14} color="var(--accent-primary)" />
+                        <FileText size={14} color="var(--accent-primary)" />
                         <span>{f.name}</span>
                       </div>
                     ))}
@@ -449,11 +428,10 @@ export default function FolderExplorer({
             </select>
             <button
               className={`sort-order-btn ${sortOrder === 'asc' ? 'active' : ''}`}
-              onClick={onToggleSortOrder}
+              onClick={() => onSortOrderChange && onSortOrderChange(sortOrder === 'asc' ? 'desc' : 'asc')}
               title={sortOrder === 'asc' ? '오름차순 (클릭시 내림차순)' : '내림차순 (클릭시 오름차순)'}
             >
-              {sortOrder === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-              <span className="sort-order-text hide-mobile">{sortOrder === 'asc' ? '오름차순' : '내림차순'}</span>
+              {sortOrder === 'asc' ? '▲ 오름차순' : '▼ 내림차순'}
             </button>
           </div>
         </div>
@@ -521,7 +499,7 @@ export default function FolderExplorer({
                   }
                 }}
               >
-                <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
+                <FileText size={20} color={sub.color || 'var(--accent-primary)'} />
                 <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sub.name}
                 </span>
@@ -583,8 +561,9 @@ export default function FolderExplorer({
         ) : (
           <div className="grid-cards">
             {files.map(file => {
-              const hasMedia = isMediaFile(file);
               const isSelected = selectedFileIds.includes(file.id);
+              const previewable = isPreviewableFile(file);
+              const hasVisualThumb = isImageOrVideo(file) || file.thumbnail_url || file.thumbnail_s3_key;
 
               return (
                 <div 
@@ -636,11 +615,11 @@ export default function FolderExplorer({
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                      {hasMedia && (
+                      {previewable && (
                         <button
                           className="btn-icon card-action-btn"
                           onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
-                          title="미디어 미리보기"
+                          title="파일 미리보기"
                         >
                           <Eye size={14} color="var(--accent-primary)" />
                         </button>
@@ -673,7 +652,7 @@ export default function FolderExplorer({
                     </div>
                   </div>
 
-                  {hasMedia ? (
+                  {hasVisualThumb ? (
                     <div 
                       className="file-card-thumbnail" 
                       onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
@@ -692,9 +671,30 @@ export default function FolderExplorer({
                   ) : (
                     <div 
                       className="file-card-doc-preview"
-                      title="클릭하여 문서 열기"
+                      onClick={(e) => {
+                        if (previewable) {
+                          e.stopPropagation();
+                          onOpenMediaPreview(file);
+                        }
+                      }}
+                      title={previewable ? "클릭하여 미리보기 열기" : "클릭하여 문서 편집"}
                     >
-                      {file.content ? (
+                      {file.file_type === 'pdf' || file.name.toLowerCase().endsWith('.pdf') ? (
+                        <div className="doc-preview-placeholder" style={{ color: 'var(--accent-rose)' }}>
+                          <FileText size={24} style={{ opacity: 0.8 }} />
+                          <span style={{ fontSize: '0.74rem', fontWeight: 600 }}>PDF 문서 뷰어</span>
+                        </div>
+                      ) : file.file_type === 'docx' || file.name.match(/\.(docx|doc)$/i) ? (
+                        <div className="doc-preview-placeholder" style={{ color: '#2563eb' }}>
+                          <FileText size={24} style={{ opacity: 0.8 }} />
+                          <span style={{ fontSize: '0.74rem', fontWeight: 600 }}>Word 문서 뷰어</span>
+                        </div>
+                      ) : file.file_type === 'xlsx' || file.name.match(/\.(xlsx|xls|csv)$/i) ? (
+                        <div className="doc-preview-placeholder" style={{ color: 'var(--accent-emerald)' }}>
+                          <Table size={24} style={{ opacity: 0.8 }} />
+                          <span style={{ fontSize: '0.74rem', fontWeight: 600 }}>스프레드시트 뷰어</span>
+                        </div>
+                      ) : file.content ? (
                         <div className="doc-preview-text">
                           {file.content.slice(0, 160).replace(/[#*`_~>-]/g, '').trim() || '내용이 비어있는 문서입니다.'}
                         </div>

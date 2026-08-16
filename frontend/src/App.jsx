@@ -583,9 +583,26 @@ export default function App() {
     }
   };
 
+  const isPreviewableFileType = (file) => {
+    if (!file) return false;
+    if (file.is_markdown || (file.name && file.name.toLowerCase().endsWith('.md'))) return false;
+    const name = (file.name || '').toLowerCase();
+    const type = (file.file_type || '').toLowerCase();
+    return type === 'image' || type === 'video' || type === 'pdf' || type === 'docx' || type === 'xlsx' || type === 'archive' ||
+           name.match(/\.(pdf|png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov|avi|mkv|docx|doc|xlsx|xls|csv|zip|tar|gz|7z)$/i);
+  };
+
   const handleOpenFile = async (file) => {
     try {
+      if (isPreviewableFileType(file)) {
+        setMediaPreviewFile(file);
+        return;
+      }
       const detail = await getFileDetail(file.id);
+      if (isPreviewableFileType(detail)) {
+        setMediaPreviewFile(detail);
+        return;
+      }
       setActiveFile(detail);
     } catch (err) {
       await showAlert({
