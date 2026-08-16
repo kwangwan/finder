@@ -79,7 +79,8 @@ async def create_invitation(
             raise HTTPException(status_code=404, detail="워크스페이스를 찾을 수 없습니다.")
         workspace_name = workspace.name
 
-        if not current_user.is_admin and workspace.owner_id != current_user.id:
+        is_owner = current_user.is_admin or (workspace.owner_id == current_user.id)
+        if not is_owner:
             m_res = await db.execute(
                 select(WorkspaceMember).where(
                     WorkspaceMember.workspace_id == req.workspace_id,
@@ -88,7 +89,11 @@ async def create_invitation(
             )
             member = m_res.scalar_one_or_none()
             if not member or member.role not in ("owner", "admin"):
-                raise HTTPException(status_code=403, detail="이 워크스페이스에 멤버를 초대할 권한이 없습니다.")
+                raise HTTPException(status_code=403, detail="이 워크스페이스에 멤버를 초대할 권한이 없습니다. (소유자 및 관리자만 초대 가능)")
+        
+        # Rule: Only Workspace Owner or Super Admin can grant 'admin' role
+        if req.role == "admin" and not is_owner:
+            raise HTTPException(status_code=403, detail="워크스페이스 관리자 권한은 워크스페이스 소유자만 부여할 수 있습니다.")
     else:
         # Service-wide invitation only allowed by Super Admin
         if not current_user.is_admin:

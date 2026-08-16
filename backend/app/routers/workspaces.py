@@ -131,7 +131,7 @@ async def list_my_workspaces(
 
     res = await db.execute(stmt)
     workspaces = res.scalars().unique().all()
-    return [ws.to_dict() for ws in workspaces]
+    return [ws.to_dict(current_user_id=current_user.id) for ws in workspaces]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -312,6 +312,12 @@ async def invite_member(
         raise HTTPException(status_code=400, detail="이미 워크스페이스에 속해있는 사용자입니다.")
 
     role = req.role if req.role in ("admin", "member") else "member"
+    if role == "admin" and not current_user.is_admin and workspace.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="워크스페이스 관리자 권한은 워크스페이스 소유자만 부여할 수 있습니다."
+        )
+
     new_member = WorkspaceMember(
         workspace_id=workspace_id,
         user_id=target_user.id,

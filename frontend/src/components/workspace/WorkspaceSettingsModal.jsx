@@ -533,7 +533,7 @@ export default function WorkspaceSettingsModal({
                   }}
                 >
                   <option value="member">멤버</option>
-                  <option value="admin">관리자</option>
+                  {isOwner && <option value="admin">관리자</option>}
                 </select>
                 <button
                   type="submit"

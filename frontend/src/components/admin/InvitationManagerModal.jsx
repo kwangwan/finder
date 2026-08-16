@@ -43,6 +43,24 @@ export default function InvitationManagerModal({
     }
   }, [isOpen, activeWorkspaceId]);
 
+  // Workspaces user can invite to (Owner or Admin or Superadmin)
+  const manageableWorkspaces = workspaces.filter(w => 
+    currentUser?.is_admin || 
+    w.owner_id === currentUser?.id || 
+    w.role === 'owner' || 
+    w.role === 'admin'
+  );
+
+  const selectedWorkspace = workspaces.find(w => w.id === workspaceId);
+  const isOwnerOfSelectedWs = currentUser?.is_admin || (selectedWorkspace && (selectedWorkspace.owner_id === currentUser?.id || selectedWorkspace.role === 'owner'));
+
+  // Ensure role is member if not owner
+  useEffect(() => {
+    if (!isOwnerOfSelectedWs && role === 'admin') {
+      setRole('member');
+    }
+  }, [workspaceId, isOwnerOfSelectedWs]);
+
   const loadInvitations = async () => {
     setIsLoading(true);
     try {
@@ -196,128 +214,170 @@ export default function InvitationManagerModal({
         )}
 
         {/* Send Invitation Form Card */}
-        <form 
-          onSubmit={handleSendInvite} 
-          style={{ 
-            background: 'var(--bg-tertiary)', 
-            padding: '1.25rem 1.4rem', 
-            borderRadius: 'var(--radius-lg)', 
+        {manageableWorkspaces.length === 0 && !currentUser?.is_admin ? (
+          <div style={{
+            background: 'var(--bg-tertiary)',
+            padding: '1.5rem',
+            borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border-subtle)',
-            marginBottom: '1.75rem' 
-          }}
-        >
-          <div style={{ 
-            fontSize: '0.92rem', 
-            fontWeight: 700, 
-            color: 'var(--text-primary)', 
-            marginBottom: '1rem', 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 6 
+            marginBottom: '1.75rem',
+            textAlign: 'center',
+            color: 'var(--text-muted)'
           }}>
-            <UserPlus size={16} color="var(--accent-primary)" />
-            <span>새 멤버 초대장 발송</span>
+            <AlertCircle size={24} color="var(--accent-amber)" style={{ margin: '0 auto 8px', display: 'block' }} />
+            <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>초대 권한 안내</div>
+            <div style={{ fontSize: '0.82rem', lineHeight: 1.4 }}>
+              멤버 초대는 <strong>워크스페이스 소유자</strong> 및 <strong>지정된 관리자</strong>만 발송할 수 있습니다.
+            </div>
           </div>
-
-          <div className="invitation-grid" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.1fr 100px', gap: '0.75rem', marginBottom: '0.85rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                초대할 이메일 주소
-              </label>
-              <input
-                type="email"
-                required
-                placeholder="name@company.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                style={{
-                  width: '100%',
-                  height: 40,
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0 0.85rem',
-                  fontSize: '0.875rem',
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
-              />
+        ) : (
+          <form 
+            onSubmit={handleSendInvite} 
+            style={{ 
+              background: 'var(--bg-tertiary)', 
+              padding: '1.25rem 1.4rem', 
+              borderRadius: 'var(--radius-lg)', 
+              border: '1px solid var(--border-subtle)',
+              marginBottom: '1.75rem' 
+            }}
+          >
+            <div style={{ 
+              fontSize: '0.92rem', 
+              fontWeight: 700, 
+              color: 'var(--text-primary)', 
+              marginBottom: '1rem', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 6 
+            }}>
+              <UserPlus size={16} color="var(--accent-primary)" />
+              <span>새 멤버 초대장 발송</span>
             </div>
 
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                대상 워크스페이스
-              </label>
-              <select
-                value={workspaceId}
-                onChange={e => setWorkspaceId(e.target.value)}
-                style={{
-                  width: '100%',
-                  height: 40,
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0 0.75rem',
-                  fontSize: '0.85rem',
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  boxSizing: 'border-box'
+            <div className="invitation-grid" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.1fr 100px', gap: '0.75rem', marginBottom: '0.85rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  초대할 이메일 주소
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: 40,
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0 0.85rem',
+                    fontSize: '0.875rem',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  대상 워크스페이스
+                </label>
+                <select
+                  value={workspaceId}
+                  onChange={e => setWorkspaceId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: 40,
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0 0.75rem',
+                    fontSize: '0.85rem',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  {currentUser?.is_admin && <option value="">전체 서비스 (기본)</option>}
+                  {manageableWorkspaces.map(w => {
+                    const isOwner = currentUser?.is_admin || w.owner_id === currentUser?.id || w.role === 'owner';
+                    return (
+                      <option key={w.id} value={w.id}>
+                        {w.name} ({isOwner ? '소유자' : '관리자'})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                  역할 권한
+                </label>
+                <select
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                  style={{
+                    width: '100%',
+                    height: 40,
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0 0.65rem',
+                    fontSize: '0.85rem',
+                    color: 'var(--text-primary)',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="member">멤버</option>
+                  {isOwnerOfSelectedWs ? (
+                    <option value="admin">관리자</option>
+                  ) : (
+                    <option value="admin" disabled>관리자 (소유자 전용)</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                {!isOwnerOfSelectedWs && (
+                  <span>* 워크스페이스 관리자(Admin) 권한은 소유자만 부여할 수 있습니다.</span>
+                )}
+              </div>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={isSending || !email.trim()}
+                style={{ 
+                  height: 38, 
+                  padding: '0 1.25rem', 
+                  fontSize: '0.85rem', 
+                  fontWeight: 700, 
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginLeft: 'auto'
                 }}
               >
-                {currentUser?.is_admin && <option value="">전체 서비스 (기본)</option>}
-                {workspaces.map(w => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
-                ))}
-              </select>
+                {isSending ? (
+                  <>
+                    <RefreshCw size={14} className="spin-anim" />
+                    <span>발송 중...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send size={14} />
+                    <span>초대장 발송</span>
+                  </>
+                )}
+              </button>
             </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                역할 권한
-              </label>
-              <select
-                value={role}
-                onChange={e => setRole(e.target.value)}
-                style={{
-                  width: '100%',
-                  height: 40,
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '0 0.65rem',
-                  fontSize: '0.85rem',
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  boxSizing: 'border-box'
-                }}
-              >
-                <option value="member">멤버</option>
-                <option value="admin">관리자</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={isSending || !email.trim()}
-              style={{ 
-                height: 38, 
-                padding: '0 1.25rem', 
-                fontSize: '0.85rem', 
-                fontWeight: 700, 
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-            >
-              <Send size={14} />
-              <span>{isSending ? '초대장 발송 중...' : '초대장 발송하기'}</span>
-            </button>
-          </div>
-        </form>
+          </form>
+        )}
 
         {/* Sent Invitations List Section */}
         <div>

@@ -22,7 +22,16 @@ class Workspace(Base):
     owner = relationship("User", foreign_keys=[owner_id])
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
 
-    def to_dict(self):
+    def to_dict(self, current_user_id=None):
+        user_role = None
+        if current_user_id and self.members:
+            for m in self.members:
+                if str(m.user_id) == str(current_user_id):
+                    user_role = m.role
+                    break
+        if not user_role and current_user_id and str(self.owner_id) == str(current_user_id):
+            user_role = "owner"
+
         return {
             "id": str(self.id),
             "name": self.name,
@@ -33,6 +42,7 @@ class Workspace(Base):
             "owner_email": self.owner.email if self.owner else None,
             "icon": self.icon,
             "member_count": len(self.members) if self.members else 0,
+            "role": user_role,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
