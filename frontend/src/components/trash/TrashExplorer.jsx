@@ -8,16 +8,29 @@ import {
   Image as ImageIcon, 
   FileCode, 
   File, 
-  RefreshCw,
-  Search,
-  Clock,
-  Info,
-  ExternalLink,
-  Calendar,
-  Lock
+  Film,
+  Music,
+  RefreshCw, 
+  Search, 
+  Clock, 
+  Info, 
+  ExternalLink, 
+  Calendar, 
+  Lock,
+  Eye
 } from 'lucide-react';
-import { listTrash, deletePermanentFile, deletePermanentFolder, emptyTrash, restoreFile, restoreFolder, getThumbnailUrl } from '../../api';
+import { 
+  listTrash, 
+  deletePermanentFile, 
+  deletePermanentFolder, 
+  emptyTrash, 
+  restoreFile, 
+  restoreFolder, 
+  getThumbnailUrl,
+  getMediaPreviewUrl
+} from '../../api';
 import { useDialog } from '../../context/DialogContext';
+import TrashPreviewModal from './TrashPreviewModal';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -44,6 +57,8 @@ export default function TrashExplorer({
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [previewItem, setPreviewItem] = useState(null);
+  const [brokenImages, setBrokenImages] = useState({});
 
   const isOwnerOrAdmin = currentUser?.is_admin || 
     activeWorkspace?.owner_id === currentUser?.id || 
@@ -105,7 +120,7 @@ export default function TrashExplorer({
       if (onRefreshParent) onRefreshParent();
       await showAlert({
         title: '복구 완료',
-        message: `'${folder.name}' 폴더와 하위 파일들이 성공적으로 복구되었습니다.`,
+        message: `'${folder.name}' 폴더와 내부 항목들이 성공적으로 복구되었습니다.`,
         type: 'success'
       });
     } catch (err) {
@@ -120,13 +135,24 @@ export default function TrashExplorer({
   };
 
   const handleDeletePermanentFile = async (file) => {
+    const isMyFile = file.created_by && file.created_by === currentUser?.id;
+    if (!isOwnerOrAdmin && !isMyFile) {
+      await showAlert({
+        title: '권한 부족',
+        message: '타인이 올린 파일은 워크스페이스 소유자 또는 관리자만 영구 삭제할 수 있습니다.',
+        type: 'error'
+      });
+      return;
+    }
+
     const confirmed = await showConfirm({
       title: '파일 영구 삭제',
-      message: `'${file.name}' 파일을 완전히 영구 삭제하시겠습니까?\n저장소에서 파일과 AI 인덱싱 데이터가 완전히 지워지며 절대 복구할 수 없습니다.`,
+      message: `'${file.name}' 파일을 영구 삭제하시겠습니까?\n영구 삭제된 파일은 복구할 수 없습니다.`,
       type: 'danger',
       confirmText: '영구 삭제',
       cancelText: '취소'
     });
+
     if (!confirmed) return;
 
     setActionLoadingId(file.id);
@@ -134,10 +160,15 @@ export default function TrashExplorer({
       await deletePermanentFile(file.id);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
+      await showAlert({
+        title: '영구 삭제 완료',
+        message: `'${file.name}' 파일이 영구 삭제되었습니다.`,
+        type: 'success'
+      });
     } catch (err) {
       await showAlert({
         title: '영구 삭제 실패',
-        message: '파일 삭제 중 오류가 발생했습니다: ' + err.message,
+        message: '파일 영구 삭제 중 오류가 발생했습니다: ' + err.message,
         type: 'error'
       });
     } finally {
@@ -146,13 +177,24 @@ export default function TrashExplorer({
   };
 
   const handleDeletePermanentFolder = async (folder) => {
+    const isMyFolder = folder.created_by && folder.created_by === currentUser?.id;
+    if (!isOwnerOrAdmin && !isMyFolder) {
+      await showAlert({
+        title: '권한 부족',
+        message: '타인이 생성한 폴더는 워크스페이스 소유자 또는 관리자만 영구 삭제할 수 있습니다.',
+        type: 'error'
+      });
+      return;
+    }
+
     const confirmed = await showConfirm({
       title: '폴더 영구 삭제',
-      message: `'${folder.name}' 폴더 및 하위 모든 파일/문서를 완전히 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`,
+      message: `'${folder.name}' 폴더와 그 안의 모든 파일 및 하위 폴더가 영구 삭제됩니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`,
       type: 'danger',
       confirmText: '영구 삭제',
       cancelText: '취소'
     });
+
     if (!confirmed) return;
 
     setActionLoadingId(folder.id);
@@ -160,10 +202,15 @@ export default function TrashExplorer({
       await deletePermanentFolder(folder.id);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
+      await showAlert({
+        title: '영구 삭제 완료',
+        message: `'${folder.name}' 폴더와 하위 항목들이 영구 삭제되었습니다.`,
+        type: 'success'
+      });
     } catch (err) {
       await showAlert({
         title: '영구 삭제 실패',
-        message: '폴더 삭제 중 오류가 발생했습니다: ' + err.message,
+        message: '폴더 영구 삭제 중 오류가 발생했습니다: ' + err.message,
         type: 'error'
       });
     } finally {
@@ -172,15 +219,23 @@ export default function TrashExplorer({
   };
 
   const handleEmptyTrash = async () => {
-    if (trashData.total_count === 0) return;
+    if (!isOwnerOrAdmin) {
+      await showAlert({
+        title: '권한 부족',
+        message: '휴지통 전체 비우기는 워크스페이스 소유자 또는 관리자만 가능합니다.',
+        type: 'error'
+      });
+      return;
+    }
 
     const confirmed = await showConfirm({
-      title: '휴지통 비우기',
-      message: '휴지통의 모든 파일 및 폴더를 영구적으로 삭제하시겠습니까?\n삭제된 모든 지식과 데이터는 즉시 파기되며 복구할 수 없습니다.',
+      title: '휴지통 전체 비우기',
+      message: `휴지통의 모든 파일과 폴더(${trashData.total_count}개)를 영구 삭제하시겠습니까?\n이 작업은 절대로 되돌릴 수 없습니다.`,
       type: 'danger',
       confirmText: '휴지통 비우기',
       cancelText: '취소'
     });
+
     if (!confirmed) return;
 
     setIsLoading(true);
@@ -190,13 +245,13 @@ export default function TrashExplorer({
       if (onRefreshParent) onRefreshParent();
       await showAlert({
         title: '휴지통 비우기 완료',
-        message: '휴지통이 성공적으로 비워졌습니다.',
+        message: '휴지통의 모든 항목이 영구 삭제되었습니다.',
         type: 'success'
       });
     } catch (err) {
       await showAlert({
         title: '휴지통 비우기 실패',
-        message: '휴지통을 비우지 못했습니다: ' + err.message,
+        message: '휴지통 비우기 중 오류가 발생했습니다: ' + err.message,
         type: 'error'
       });
     } finally {
@@ -212,11 +267,19 @@ export default function TrashExplorer({
     f.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const isImageFile = (file) => {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    return file.file_type === 'image' || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico'].includes(ext);
+  };
+
   const getFileIcon = (file) => {
-    if (file.is_markdown || file.name.endsWith('.md')) return <FileText size={20} color="var(--accent-primary)" />;
-    if (file.file_type === 'pdf') return <FileText size={20} color="var(--accent-rose)" />;
-    if (file.file_type === 'image') return <ImageIcon size={20} color="var(--accent-emerald)" />;
-    if (file.file_type === 'code') return <FileCode size={20} color="var(--accent-purple)" />;
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    if (file.is_markdown || ext === 'md') return <FileText size={20} color="var(--accent-primary)" />;
+    if (file.file_type === 'pdf' || ext === 'pdf') return <FileText size={20} color="var(--accent-rose)" />;
+    if (isImageFile(file)) return <ImageIcon size={20} color="var(--accent-emerald)" />;
+    if (file.file_type === 'video' || ['mp4', 'webm', 'mov', 'mkv'].includes(ext)) return <Film size={20} color="var(--accent-purple)" />;
+    if (file.file_type === 'audio' || ['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) return <Music size={20} color="var(--accent-amber)" />;
+    if (file.file_type === 'code' || ['js', 'jsx', 'ts', 'tsx', 'py', 'json', 'html', 'css', 'sql', 'sh'].includes(ext)) return <FileCode size={20} color="var(--accent-purple)" />;
     return <File size={20} color="var(--text-muted)" />;
   };
 
@@ -234,6 +297,7 @@ export default function TrashExplorer({
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
               • <strong>자동 정리</strong>: 휴지통 항목은 30일 후 자동 영구 삭제되며, 기간 내에는 누구나 원래 위치로 복구할 수 있습니다.<br />
+              • <strong>미리보기</strong>: 휴지통 항목을 클릭하면 삭제 전 내용을 안전하게 확인할 수 있습니다.<br />
               • <strong>영구 삭제 권한</strong>: 자신이 올린 파일은 작성자가 언제든 직접 영구 삭제할 수 있으며, 타인이 올린 파일의 영구 삭제 및 휴지통 전체 비우기는 워크스페이스 소유자/관리자만 가능합니다.
             </div>
           </div>
@@ -293,10 +357,10 @@ export default function TrashExplorer({
       {/* Search Input if items exist */}
       {trashData.total_count > 0 && (
         <div style={{ maxWidth: 400, marginBottom: '1.5rem', position: 'relative' }}>
-          <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-          <input
+          <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input 
             type="text"
-            placeholder="삭제된 항목 검색..."
+            placeholder="휴지통 파일 및 폴더 검색..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             style={{
@@ -453,18 +517,27 @@ export default function TrashExplorer({
             {filteredFiles.map(file => {
               const isMyFile = file.created_by && file.created_by === currentUser?.id;
               const canPurgeFile = isOwnerOrAdmin || isMyFile;
+              const isImg = isImageFile(file);
+              const thumbUrl = getThumbnailUrl(file.id);
+              const isThumbBroken = brokenImages[file.id];
 
               return (
-                <div key={file.id} className="trash-list-item">
+                <div 
+                  key={file.id} 
+                  className="trash-list-item"
+                  onClick={() => setPreviewItem(file)}
+                  style={{ cursor: 'pointer' }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
-                    {file.thumbnail_url ? (
+                    {isImg && !isThumbBroken ? (
                       <img 
-                        src={file.thumbnail_url} 
+                        src={thumbUrl} 
                         alt="" 
-                        style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', objectFit: 'cover', background: 'var(--bg-tertiary)', flexShrink: 0 }}
+                        onError={() => setBrokenImages(prev => ({ ...prev, [file.id]: true }))}
+                        style={{ width: 38, height: 38, borderRadius: 'var(--radius-sm)', objectFit: 'cover', background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', flexShrink: 0 }}
                       />
                     ) : (
-                      <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div style={{ width: 38, height: 38, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         {getFileIcon(file)}
                       </div>
                     )}
@@ -512,7 +585,14 @@ export default function TrashExplorer({
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                    <button 
+                      className="btn-icon" 
+                      onClick={() => setPreviewItem(file)}
+                      title="내용 미리보기"
+                    >
+                      <Eye size={15} color="var(--accent-primary)" />
+                    </button>
                     <button 
                       className="btn-icon" 
                       onClick={() => handleRestoreFile(file)}
@@ -546,6 +626,24 @@ export default function TrashExplorer({
             })}
           </div>
         </div>
+      )}
+
+      {/* Trash File Preview Modal */}
+      {previewItem && (
+        <TrashPreviewModal
+          file={previewItem}
+          onClose={() => setPreviewItem(null)}
+          onRestore={(fileToRestore) => {
+            handleRestoreFile(fileToRestore);
+            setPreviewItem(null);
+          }}
+          onPermanentDelete={(fileToDelete) => {
+            handleDeletePermanentFile(fileToDelete);
+            setPreviewItem(null);
+          }}
+          canPurge={Boolean(isOwnerOrAdmin || (previewItem.created_by && previewItem.created_by === currentUser?.id))}
+          isActionLoading={actionLoadingId === previewItem?.id}
+        />
       )}
     </div>
   );

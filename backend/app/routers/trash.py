@@ -199,6 +199,9 @@ async def get_trash(
             if folder:
                 folder_name = folder.name
 
+        is_img = f.file_type == 'image' or any(f.name.lower().endswith(ext) for ext in ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp', '.ico'))
+        thumb_url = f"/api/storage/thumbnail/{f.id}" if f.thumbnail_s3_key else (f"/api/storage/preview/{f.id}" if is_img else None)
+
         file_items.append(TrashFileItem(
             id=f.id,
             name=f.name,
@@ -208,7 +211,7 @@ async def get_trash(
             created_by=f.created_by,
             file_type=f.file_type,
             size_bytes=f.size_bytes,
-            thumbnail_url=f"/api/storage/thumbnail/{f.id}" if f.thumbnail_s3_key else None,
+            thumbnail_url=thumb_url,
             is_markdown=f.is_markdown,
             trashed_at=f.trashed_at,
             days_remaining=days_rem
