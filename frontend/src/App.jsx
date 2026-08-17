@@ -66,6 +66,39 @@ import {
 } from './api';
 import { useDialog } from './context/DialogContext';
 
+// Helper to find folder and build breadcrumb path
+function findFolderById(nodeList, id) {
+  if (!nodeList || !id) return null;
+  for (const node of nodeList) {
+    if (node.id === id) return node;
+    if (node.children) {
+      const found = findFolderById(node.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function buildFolderPath(nodeList, targetId) {
+  const path = [];
+  function traverse(nodes, id) {
+    if (!nodes) return false;
+    for (const n of nodes) {
+      if (n.id === id) {
+        path.unshift(n);
+        return true;
+      }
+      if (n.children && traverse(n.children, id)) {
+        path.unshift(n);
+        return true;
+      }
+    }
+    return false;
+  }
+  if (targetId) traverse(nodeList, targetId);
+  return path;
+}
+
 export default function App() {
   const { showAlert, showConfirm } = useDialog();
   const [theme, setTheme] = useState(() => localStorage.getItem('kb_theme') || 'dark');
@@ -88,22 +121,47 @@ export default function App() {
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isCreateWorkspaceMode, setIsCreateWorkspaceMode] = useState(false);
 
-  const updateUrlWsParam = (wsId) => {
+  const updateUrlParams = useCallback(({ wsId, folderId, view }) => {
     try {
       const url = new URL(window.location.href);
-      if (wsId) {
-        url.searchParams.set('ws', wsId);
-      } else {
-        url.searchParams.delete('ws');
+      if (wsId !== undefined) {
+        if (wsId) url.searchParams.set('ws', wsId);
+        else url.searchParams.delete('ws');
+      }
+      if (folderId !== undefined) {
+        if (folderId) url.searchParams.set('folder', folderId);
+        else url.searchParams.delete('folder');
+      }
+      if (view !== undefined) {
+        if (view && view !== 'all' && view !== 'folder') url.searchParams.set('view', view);
+        else url.searchParams.delete('view');
       }
       window.history.replaceState(null, '', url.toString());
     } catch (e) {}
-  };
+  }, []);
 
-  // Navigation & View
+  // Navigation & View (Initialize from URL query params)
   const [folders, setFolders] = useState([]);
-  const [activeFolderId, setActiveFolderId] = useState(null);
-  const [activeView, setActiveView] = useState('all'); // 'all' | 'notes' | 'favorites' | 'trash' | 'folder' | 'admin'
+  const [activeFolderId, setActiveFolderId] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('folder') || null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [activeView, setActiveView] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlFolder = params.get('folder');
+      const urlView = params.get('view');
+      if (urlFolder) return 'folder';
+      if (urlView) return urlView;
+      return 'all';
+    } catch (e) {
+      return 'all';
+    }
+  });
   const [files, setFiles] = useState([]);
   const [activeFile, setActiveFile] = useState(null);
   const [stats, setStats] = useState(null);
@@ -446,24 +504,24 @@ export default function App() {
         setActiveWorkspace(matched);
         localStorage.setItem('kb_active_ws_id', matched.id);
         localStorage.setItem('kb_active_ws_data', JSON.stringify(matched));
-        updateUrlWsParam(matched.id);
+        updateUrlParams({ wsId: matched.id });
       } else if (wsList.length > 0) {
         setActiveWorkspace(wsList[0]);
         localStorage.setItem('kb_active_ws_id', wsList[0].id);
         localStorage.setItem('kb_active_ws_data', JSON.stringify(wsList[0]));
-        updateUrlWsParam(wsList[0].id);
+        updateUrlParams({ wsId: wsList[0].id });
       } else {
         setActiveWorkspace(null);
         localStorage.removeItem('kb_active_ws_id');
         localStorage.removeItem('kb_active_ws_data');
-        updateUrlWsParam(null);
+        updateUrlParams({ wsId: null });
       }
     } catch (err) {
       console.error('Error loading workspaces:', err);
     } finally {
       setIsWorkspacesLoaded(true);
     }
-  }, [currentUser]);
+  }, [currentUser, updateUrlParams]);
 
   useEffect(() => {
     loadWorkspaces();
@@ -474,12 +532,12 @@ export default function App() {
     if (ws) {
       localStorage.setItem('kb_active_ws_id', ws.id);
       localStorage.setItem('kb_active_ws_data', JSON.stringify(ws));
-      updateUrlWsParam(ws.id);
     }
     setActiveFolderId(null);
     setActiveFile(null);
     setActiveView('all');
     setCurrentPage(1);
+    updateUrlParams({ wsId: ws?.id || null, folderId: null, view: 'all' });
   };
 
 
@@ -500,14 +558,66 @@ export default function App() {
       ]);
       setFolders(tree);
       setStats(systemStats);
+
+      // Verify if current activeFolderId (from URL or state) exists in this workspace
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetFolderId = activeFolderId || urlParams.get('folder');
+
+      if (targetFolderId) {
+        const found = findFolderById(tree, targetFolderId);
+        if (found) {
+          setActiveFolderId(targetFolderId);
+          setActiveView('folder');
+          updateUrlParams({ folderId: targetFolderId, view: 'folder' });
+        } else {
+          // Folder not found in this workspace (deleted or wrong ID) -> gracefully fallback to root view
+          setActiveFolderId(null);
+          setActiveView('all');
+          updateUrlParams({ folderId: null, view: 'all' });
+        }
+      } else {
+        const urlView = urlParams.get('view');
+        if (urlView && urlView !== 'folder') {
+          setActiveView(urlView);
+        }
+      }
     } catch (err) {
       console.error('Error loading folders/stats:', err);
     }
-  }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id]);
+  }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, activeFolderId, updateUrlParams]);
 
   useEffect(() => {
     refreshFoldersAndStats();
   }, [refreshFoldersAndStats]);
+
+  // Support Browser Back/Forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlWs = params.get('ws');
+      const urlFolder = params.get('folder');
+      const urlView = params.get('view');
+
+      if (urlWs && activeWorkspace?.id !== urlWs) {
+        const matched = workspaces.find(w => w.id === urlWs);
+        if (matched) setActiveWorkspace(matched);
+      }
+
+      if (urlFolder) {
+        setActiveFolderId(urlFolder);
+        setActiveView('folder');
+      } else if (urlView) {
+        setActiveFolderId(null);
+        setActiveView(urlView);
+      } else {
+        setActiveFolderId(null);
+        setActiveView('all');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeWorkspace?.id, workspaces]);
 
   // Fetch Files for active workspace with sorting and pagination
   const refreshFiles = useCallback(async (silent = false) => {
@@ -588,37 +698,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Helper to find folder and build breadcrumb path
-  const findFolderById = (nodeList, id) => {
-    for (const node of nodeList) {
-      if (node.id === id) return node;
-      if (node.children) {
-        const found = findFolderById(node.children, id);
-        if (found) return found;
-      }
-    }
-    return null;
-  };
-
-  const buildFolderPath = (nodeList, targetId) => {
-    const path = [];
-    function traverse(nodes, id) {
-      for (const n of nodes) {
-        if (n.id === id) {
-          path.unshift(n);
-          return true;
-        }
-        if (n.children && traverse(n.children, id)) {
-          path.unshift(n);
-          return true;
-        }
-      }
-      return false;
-    }
-    if (targetId) traverse(nodeList, targetId);
-    return path;
-  };
-
   const currentFolder = activeFolderId ? findFolderById(folders, activeFolderId) : null;
   const currentFolderPath = activeFolderId ? buildFolderPath(folders, activeFolderId) : [];
   const currentSubfolders = currentFolder ? (currentFolder.children || []) : (activeView === 'all' || activeView === 'folder' ? folders : []);
@@ -626,9 +705,11 @@ export default function App() {
   // Folder navigation
   const handleSelectFolder = (folderId) => {
     setActiveFolderId(folderId);
-    setActiveView(folderId ? 'folder' : 'all');
+    const newView = folderId ? 'folder' : 'all';
+    setActiveView(newView);
     setActiveFile(null);
     setCurrentPage(1);
+    updateUrlParams({ folderId, view: newView });
     if (window.innerWidth <= 768) {
       setIsSidebarCollapsed(true);
     }
@@ -639,6 +720,7 @@ export default function App() {
     setActiveFolderId(null);
     setActiveFile(null);
     setCurrentPage(1);
+    updateUrlParams({ folderId: null, view: viewName });
     if (window.innerWidth <= 768) {
       setIsSidebarCollapsed(true);
     }

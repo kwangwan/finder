@@ -42,10 +42,10 @@ export function useUploadManager({ onUploadSuccess } = {}) {
    * Thread-safe in-flight promise caching for folder creation.
    * Prevents concurrent workers from creating duplicate folders with identical paths.
    */
-  const resolveFolderPath = useCallback(async (targetWsId, parentFolderId, folderPath) => {
-    if (!folderPath || !targetWsId) return parentFolderId || null;
+  const resolveFolderPath = useCallback(async (targetWsId, baseFolderId, folderPath) => {
+    if (!folderPath || !targetWsId) return baseFolderId || null;
 
-    const cacheKey = `${targetWsId}:${parentFolderId || 'root'}:${folderPath}`;
+    const cacheKey = `${targetWsId}:${baseFolderId || 'root'}:${folderPath}`;
     
     // 1. Return cached ID if already resolved
     if (folderIdCacheRef.current.has(cacheKey)) {
@@ -60,7 +60,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     // 3. Create a single in-flight promise shared by all workers
     const promise = (async () => {
       try {
-        const ensured = await ensureFolderPath(targetWsId, parentFolderId || null, folderPath);
+        const ensured = await ensureFolderPath(targetWsId, baseFolderId || null, folderPath);
         folderIdCacheRef.current.set(cacheKey, ensured.folder_id);
         return ensured.folder_id;
       } finally {
@@ -86,7 +86,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     updateItem(nextItem.id, { status: 'uploading', statusText: '업로드 준비 중...' });
 
     try {
-      let targetFolderId = nextItem.targetFolderId || null;
+      let targetFolderId = nextItem.targetFolderId || nextItem.baseFolderId || null;
       const targetWsId = nextItem.activeWorkspaceId || null;
 
       // If relative path exists (from folder drop/selection), ensure folder hierarchy exists
@@ -97,7 +97,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
 
         if (folderPath && targetWsId) {
           updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
-          targetFolderId = await resolveFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
+          targetFolderId = await resolveFolderPath(targetWsId, nextItem.baseFolderId || null, folderPath);
           updateItem(nextItem.id, { targetFolderId });
         }
       }
@@ -148,6 +148,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   const addFilesToQueue = useCallback((fileList, targetFolderId, activeWorkspaceId) => {
     if (!fileList || fileList.length === 0) return;
 
+    const initialBaseFolderId = targetFolderId || null;
+
     // Filter out files that might already be in queue or duplicate instances
     const newItems = Array.from(fileList).map(file => {
       const relPath = file.relativePath || file.webkitRelativePath || '';
@@ -157,7 +159,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         name: file.name,
         size: file.size,
         relativePath: relPath,
-        targetFolderId,
+        baseFolderId: initialBaseFolderId, // Immutable base parent
+        targetFolderId: initialBaseFolderId, // Final resolved target folder
         activeWorkspaceId,
         percent: 0,
         status: 'pending', // 'pending' | 'uploading' | 'completed' | 'error' | 'canceled'
@@ -181,7 +184,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     if (uniquePaths.size > 0 && activeWorkspaceId) {
       uniquePaths.forEach(async (p) => {
         try {
-          const resolvedId = await resolveFolderPath(activeWorkspaceId, targetFolderId, p);
+          const resolvedId = await resolveFolderPath(activeWorkspaceId, initialBaseFolderId, p);
           if (resolvedId) {
             setQueue(prev => prev.map(item => {
               if (item.relativePath && (item.relativePath === p || item.relativePath.startsWith(p + '/'))) {
@@ -231,7 +234,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   }, [cancelUpload]);
 
   const retryItem = useCallback((id) => {
-    setQueue(prev => prev.map(it => it.id === id ? { ...it, status: 'pending', percent: 0, statusText: '재시도 대기 중...' } : it));
+    setQueue(prev => prev.map(it => it.id === id ? { ...item, status: 'pending', percent: 0, statusText: '재시도 대기 중...' } : it));
     setTimeout(() => {
       startWorkerPool();
     }, 50);
