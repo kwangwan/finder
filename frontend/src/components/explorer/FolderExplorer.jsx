@@ -117,8 +117,7 @@ export default function FolderExplorer({
     it => (it.status === 'uploading' || it.status === 'pending') &&
     (
       (currentFolder?.id && it.targetFolderId === currentFolder.id) ||
-      (!currentFolder?.id && (!it.targetFolderId || it.targetFolderId === '')) ||
-      (currentFolder?.name && it.relativePath && it.relativePath.startsWith(currentFolder.name + '/'))
+      (!currentFolder?.id && (!it.targetFolderId || it.targetFolderId === ''))
     )
   );
 

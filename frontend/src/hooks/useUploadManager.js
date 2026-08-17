@@ -98,6 +98,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         if (folderPath && targetWsId) {
           updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
           targetFolderId = await resolveFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
+          updateItem(nextItem.id, { targetFolderId });
         }
       }
 
@@ -178,8 +179,18 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     });
 
     if (uniquePaths.size > 0 && activeWorkspaceId) {
-      uniquePaths.forEach(p => {
-        resolveFolderPath(activeWorkspaceId, targetFolderId, p).catch(() => {});
+      uniquePaths.forEach(async (p) => {
+        try {
+          const resolvedId = await resolveFolderPath(activeWorkspaceId, targetFolderId, p);
+          if (resolvedId) {
+            setQueue(prev => prev.map(item => {
+              if (item.relativePath && (item.relativePath === p || item.relativePath.startsWith(p + '/'))) {
+                return { ...item, targetFolderId: resolvedId };
+              }
+              return item;
+            }));
+          }
+        } catch (e) {}
       });
     }
 
