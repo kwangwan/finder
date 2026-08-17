@@ -25,7 +25,6 @@ export async function traverseFileSystemEntry(entry, path = '') {
   if (entry.isDirectory) {
     const dirReader = entry.createReader();
     const currentPath = path ? `${path}/${entry.name}` : entry.name;
-    const allFiles = [];
 
     const readBatch = () => {
       return new Promise((resolve) => {
@@ -92,4 +91,56 @@ export async function extractFilesFromDataTransfer(dataTransfer) {
   }
 
   return [];
+}
+
+/**
+ * Modern Directory Picker using showDirectoryPicker (Chrome/Edge/Chromium)
+ * Shows the native "업로드 (Upload)" dialog and confirmation prompt.
+ * Falls back to input.click() for unsupported browsers.
+ */
+export async function openDirectoryPicker(fallbackInputRef = null) {
+  if (typeof window.showDirectoryPicker === 'function') {
+    try {
+      const dirHandle = await window.showDirectoryPicker({
+        mode: 'read'
+      });
+      if (!dirHandle) return [];
+
+      const collectedFiles = [];
+      async function traverseHandle(handle, currentPath = '') {
+        const path = currentPath ? `${currentPath}/${handle.name}` : handle.name;
+        for await (const entry of handle.values()) {
+          if (entry.kind === 'file') {
+            const file = await entry.getFile();
+            // Assign relativePath property so backend recreates folder tree
+            const relPath = `${path}/${file.name}`;
+            Object.defineProperty(file, 'relativePath', {
+              value: relPath,
+              writable: true,
+              configurable: true,
+              enumerable: true
+            });
+            collectedFiles.push(file);
+          } else if (entry.kind === 'directory') {
+            await traverseHandle(entry, path);
+          }
+        }
+      }
+
+      await traverseHandle(dirHandle);
+      return collectedFiles;
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        // User clicked cancel
+        return [];
+      }
+      console.warn('showDirectoryPicker failed, falling back to input:', err);
+    }
+  }
+
+  // Fallback to hidden file input with webkitdirectory
+  if (fallbackInputRef?.current) {
+    fallbackInputRef.current.click();
+  }
+  return null;
 }

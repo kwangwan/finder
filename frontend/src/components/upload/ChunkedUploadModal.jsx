@@ -15,7 +15,7 @@ import {
   Check
 } from 'lucide-react';
 
-import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
+import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
 
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
@@ -187,7 +187,9 @@ export default function ChunkedUploadModal({
               style={{ display: 'none' }} 
               multiple 
               onChange={(e) => {
-                handleFiles(e.target.files);
+                if (e.target.files && e.target.files.length > 0) {
+                  handleFiles(Array.from(e.target.files));
+                }
                 e.target.value = '';
               }} 
             />
@@ -200,7 +202,15 @@ export default function ChunkedUploadModal({
               directory="" 
               multiple 
               onChange={(e) => {
-                handleFiles(e.target.files);
+                if (e.target.files && e.target.files.length > 0) {
+                  const files = Array.from(e.target.files).map(f => {
+                    if (!f.relativePath && f.webkitRelativePath) {
+                      f.relativePath = f.webkitRelativePath;
+                    }
+                    return f;
+                  });
+                  handleFiles(files);
+                }
                 e.target.value = '';
               }} 
             />
@@ -244,9 +254,12 @@ export default function ChunkedUploadModal({
               <button 
                 type="button" 
                 className="btn-secondary"
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  folderInputRef.current?.click();
+                  const files = await openDirectoryPicker(folderInputRef);
+                  if (files && files.length > 0) {
+                    handleFiles(files);
+                  }
                 }}
                 style={{ fontSize: '0.82rem', padding: '0.45rem 0.9rem' }}
               >

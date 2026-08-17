@@ -16,13 +16,13 @@ import {
   ExternalLink,
   Table,
   FileCode,
-  File,
   Sun,
   Moon,
   Grid,
   Loader2
 } from 'lucide-react';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
+import VideoPlayer from '../common/VideoPlayer';
 
 export default function MediaPreviewModal({
   isOpen,
@@ -358,20 +358,14 @@ export default function MediaPreviewModal({
           {!isLoading && !error && (
             <>
               {isVideo ? (
-                <video
-                  controls
-                  autoPlay
-                  playsInline
-                  style={{
-                    width: '100%',
-                    maxHeight: '75vh',
-                    outline: 'none',
-                    backgroundColor: '#000'
-                  }}
-                  src={mediaUrl}
-                >
-                  브라우저가 비디오 스트리밍을 지원하지 않습니다.
-                </video>
+                <div style={{ width: '100%', height: '70vh', padding: '0.25rem' }}>
+                  <VideoPlayer
+                    src={mediaUrl}
+                    file={file}
+                    onDownload={handleDownload}
+                    autoPlay
+                  />
+                </div>
               ) : isPdf ? (
                 <iframe
                   src={mediaUrl}

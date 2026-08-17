@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
+import VideoPlayer from '../common/VideoPlayer';
 
 export default function PreviewWindow({
   windowState,
@@ -489,12 +490,12 @@ export default function PreviewWindow({
             />
           </div>
         ) : isVideo ? (
-          <div className="os-video-viewport">
-            <video 
-              controls 
-              autoPlay={false}
+          <div className="os-video-viewport" style={{ width: '100%', height: '100%', padding: '0.5rem' }}>
+            <VideoPlayer
               src={mediaUrl}
-              style={{ width: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              file={file}
+              onDownload={handleDownload}
+              autoPlay={false}
             />
           </div>
         ) : isAudio ? (

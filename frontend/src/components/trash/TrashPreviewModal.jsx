@@ -17,12 +17,12 @@ import {
   ZoomIn, 
   ZoomOut, 
   RotateCw, 
-  Loader2,
   Calendar,
   Clock,
   HardDrive
 } from 'lucide-react';
 import { getFileDetail, getMediaPreviewUrl } from '../../api';
+import VideoPlayer from '../common/VideoPlayer';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';
@@ -321,11 +321,11 @@ export default function TrashPreviewModal({
 
               {/* VIDEO VIEWER */}
               {isVideo && (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', background: '#000' }}>
-                  <video
-                    controls
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', background: '#07090e', height: '100%' }}>
+                  <VideoPlayer
                     src={mediaUrl}
-                    style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 'var(--radius-md)' }}
+                    file={file}
+                    autoPlay={false}
                   />
                 </div>
               )}
