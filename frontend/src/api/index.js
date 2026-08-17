@@ -947,17 +947,17 @@ export async function searchDocuments({
 /**
  * Cloudflare Zero Trust Aware Multipart / Presigned Chunked File Uploader
  */
-export async function uploadFileChunked(file, folderId = null, workspaceId = null, onProgress = () => {}) {
-  const chunkSize = 50 * 1024 * 1024;
+export async function uploadFileChunked(file, folderId = null, workspaceId = null, onProgress = () => {}, signal = null) {
+  const chunkSize = 5 * 1024 * 1024; // 5MB chunks (Cloudflare Tunnel safe & S3 part size)
   const fileSize = file.size;
 
-  // Single chunk upload (< 50MB) - Direct upload through backend (Fast & 100% reliable)
+  // Single small file upload (< 5MB)
   if (fileSize <= chunkSize) {
-    return directUploadFallback(file, folderId, workspaceId, onProgress);
+    return directUploadFallback(file, folderId, workspaceId, onProgress, signal);
   }
 
-  // Large Multipart Chunked Upload (> 50MB)
-  onProgress({ percent: 5, status: '대용량 Multipart 업로드 세션 초기화...' });
+  // Large Multipart Chunked Upload (> 5MB)
+  onProgress({ percent: 2, status: '대용량 업로드 세션 초기화...' });
 
   const initRes = await fetch(`${API_BASE}/storage/multipart/initiate`, {
     method: 'POST',
@@ -969,11 +969,12 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
       content_type: file.type || 'application/octet-stream',
       size_bytes: fileSize,
     }),
+    signal
   });
 
   if (!initRes.ok) {
     console.warn('Multipart init failed, trying direct upload:', await initRes.text());
-    return directUploadFallback(file, folderId, workspaceId, onProgress);
+    return directUploadFallback(file, folderId, workspaceId, onProgress, signal);
   }
 
   const { upload_id, s3_key, total_parts } = await initRes.json();
@@ -981,14 +982,21 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
 
   try {
     for (let partNumber = 1; partNumber <= total_parts; partNumber++) {
+      if (signal?.aborted) {
+        throw new Error('Upload aborted by user');
+      }
+
       const start = (partNumber - 1) * chunkSize;
       const end = Math.min(start + chunkSize, fileSize);
       const chunkBlob = file.slice(start, end);
 
-      const currentPercent = Math.round(((partNumber - 1) / total_parts) * 80) + 5;
+      const currentPercent = Math.min(92, Math.round(((partNumber - 1) / total_parts) * 90) + 3);
+      const sentMb = (start / (1024 * 1024)).toFixed(1);
+      const totalMb = (fileSize / (1024 * 1024)).toFixed(1);
+
       onProgress({
         percent: currentPercent,
-        status: `청크 ${partNumber}/${total_parts} 업로드 중 (${config.max_chunk_size_mb}MB 단위)...`,
+        status: `청크 전송 중 (${partNumber}/${total_parts} · ${sentMb}MB/${totalMb}MB)`,
       });
 
       const partUrlRes = await fetch(`${API_BASE}/storage/multipart/part-urls`, {
@@ -999,6 +1007,7 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
           upload_id,
           part_numbers: [partNumber],
         }),
+        signal
       });
 
       if (!partUrlRes.ok) throw new Error(`청크 ${partNumber} Presigned URL 발급 실패`);
@@ -1008,6 +1017,7 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
       const partUploadRes = await fetch(partUrl, {
         method: 'PUT',
         body: chunkBlob,
+        signal
       });
 
       if (!partUploadRes.ok) throw new Error(`청크 ${partNumber} 업로드 실패`);
@@ -1019,7 +1029,7 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
       });
     }
 
-    onProgress({ percent: 90, status: '청크 결합 및 업로드 완료 처리 중...' });
+    onProgress({ percent: 94, status: '파일 병합 및 썸네일 생성 중...' });
 
     let fileType = 'other';
     const nameLower = file.name.toLowerCase();
@@ -1027,6 +1037,9 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
     else if (nameLower.endsWith('.pdf')) fileType = 'pdf';
     else if (nameLower.endsWith('.docx') || nameLower.endsWith('.doc')) fileType = 'docx';
     else if (nameLower.endsWith('.xlsx') || nameLower.endsWith('.xls')) fileType = 'xlsx';
+    else if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico'].some(ext => nameLower.endsWith('.' + ext))) fileType = 'image';
+    else if (['mp4', 'webm', 'mov', 'mkv', 'avi'].some(ext => nameLower.endsWith('.' + ext))) fileType = 'video';
+    else if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].some(ext => nameLower.endsWith('.' + ext))) fileType = 'audio';
 
     const completeRes = await fetch(`${API_BASE}/storage/multipart/complete`, {
       method: 'POST',
@@ -1042,11 +1055,12 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
         mime_type: file.type || 'application/octet-stream',
         size_bytes: fileSize,
       }),
+      signal
     });
 
     if (!completeRes.ok) throw new Error('Multipart 업로드 완료 처리 실패');
     const resultFile = await completeRes.json();
-    onProgress({ percent: 100, status: '완료!' });
+    onProgress({ percent: 100, status: '완료됨' });
     return resultFile;
   } catch (e) {
     fetch(`${API_BASE}/storage/multipart/abort`, {
@@ -1058,22 +1072,58 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
   }
 }
 
-async function directUploadFallback(file, folderId, workspaceId, onProgress) {
-  onProgress({ percent: 40, status: '서버를 통해 업로드 중...' });
+async function directUploadFallback(file, folderId, workspaceId, onProgress, signal = null) {
+  onProgress({ percent: 15, status: '파일 전송 중...' });
   const formData = new FormData();
   formData.append('file', file);
   if (folderId) formData.append('folder_id', folderId);
   if (workspaceId) formData.append('workspace_id', workspaceId);
 
-  const res = await fetch(`${API_BASE}/storage/direct-upload`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: formData,
-  });
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/storage/direct-upload`);
 
-  if (!res.ok) throw new Error('Direct upload failed');
-  onProgress({ percent: 100, status: '완료!' });
-  return res.json();
+    const token = getStoredToken();
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        xhr.abort();
+        reject(new Error('Upload aborted by user'));
+      });
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.min(90, Math.round((event.loaded / event.total) * 90));
+        onProgress({ percent, status: `파일 전송 중 (${percent}%)...` });
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const res = JSON.parse(xhr.responseText);
+          onProgress({ percent: 100, status: '완료됨' });
+          resolve(res);
+        } catch (err) {
+          reject(new Error('Invalid JSON response'));
+        }
+      } else {
+        try {
+          const errRes = JSON.parse(xhr.responseText);
+          reject(new Error(errRes.detail || `Direct upload failed with status ${xhr.status}`));
+        } catch (e) {
+          reject(new Error(`Direct upload failed with status ${xhr.status}`));
+        }
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('네트워크 오류로 업로드에 실패했습니다.'));
+    xhr.send(formData);
+  });
 }
 
 export async function uploadNoteImage(file, workspaceId = null, folderId = null) {
@@ -1084,4 +1134,5 @@ export async function uploadNoteImage(file, workspaceId = null, folderId = null)
     previewUrl
   };
 }
+
 

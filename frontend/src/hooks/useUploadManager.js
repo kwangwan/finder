@@ -5,16 +5,36 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   const [queue, setQueue] = useState([]);
   const isProcessingRef = useRef(false);
   const queueRef = useRef([]);
+  const abortControllersRef = useRef(new Map());
 
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
 
+  const activeCount = queue.filter(t => t.status === 'uploading' || t.status === 'pending').length;
+  const completedCount = queue.filter(t => t.status === 'completed').length;
+  const errorCount = queue.filter(t => t.status === 'error' || t.status === 'canceled').length;
+  const isUploading = activeCount > 0;
+
+  // Warning when refreshing/leaving page while upload is in progress
+  useEffect(() => {
+    if (!isUploading) return;
+
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = '현재 파일 업로드가 진행 중입니다. 페이지를 벗어나거나 새로고침하면 업로드가 취소됩니다.';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isUploading]);
+
   const updateItem = useCallback((id, updates) => {
     setQueue(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
   }, []);
 
-  const processQueue = useCallback(async (activeWorkspaceId) => {
+  const processQueue = useCallback(async () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
 
@@ -24,10 +44,14 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         const nextItem = currentQueue.find(it => it.status === 'pending');
         if (!nextItem) break;
 
+        const controller = new AbortController();
+        abortControllersRef.current.set(nextItem.id, controller);
+
         updateItem(nextItem.id, { status: 'uploading', statusText: '업로드 준비 중...' });
 
         try {
           let targetFolderId = nextItem.targetFolderId || null;
+          const targetWsId = nextItem.activeWorkspaceId || null;
 
           // If relative path exists (from folder drop/selection), ensure folder hierarchy exists
           if (nextItem.relativePath && nextItem.relativePath.includes('/')) {
@@ -35,9 +59,9 @@ export function useUploadManager({ onUploadSuccess } = {}) {
             pathParts.pop(); // Remove filename
             const folderPath = pathParts.join('/');
 
-            if (folderPath && activeWorkspaceId) {
+            if (folderPath && targetWsId) {
               updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
-              const ensured = await ensureFolderPath(activeWorkspaceId, nextItem.targetFolderId || null, folderPath);
+              const ensured = await ensureFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
               targetFolderId = ensured.folder_id;
             }
           }
@@ -47,17 +71,30 @@ export function useUploadManager({ onUploadSuccess } = {}) {
           await uploadFileChunked(
             nextItem.file, 
             targetFolderId, 
-            activeWorkspaceId || null, 
+            targetWsId, 
             ({ percent, status }) => {
               updateItem(nextItem.id, { percent, statusText: status });
-            }
+            },
+            controller.signal
           );
 
           updateItem(nextItem.id, { percent: 100, status: 'completed', statusText: '완료됨' });
-          if (onUploadSuccess) onUploadSuccess();
+          if (onUploadSuccess) {
+            onUploadSuccess({
+              ...nextItem,
+              targetFolderId,
+              activeWorkspaceId: targetWsId
+            });
+          }
         } catch (err) {
-          console.error('Upload item failed:', err);
-          updateItem(nextItem.id, { status: 'error', statusText: '업로드 실패: ' + (err.message || '오류 발생') });
+          if (controller.signal.aborted) {
+            updateItem(nextItem.id, { status: 'canceled', statusText: '사용자에 의해 취소됨' });
+          } else {
+            console.error('Upload item failed:', err);
+            updateItem(nextItem.id, { status: 'error', statusText: '업로드 실패: ' + (err.message || '오류 발생') });
+          }
+        } finally {
+          abortControllersRef.current.delete(nextItem.id);
         }
       }
     } finally {
@@ -79,7 +116,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         targetFolderId,
         activeWorkspaceId,
         percent: 0,
-        status: 'pending', // 'pending' | 'uploading' | 'completed' | 'error'
+        status: 'pending', // 'pending' | 'uploading' | 'completed' | 'error' | 'canceled'
         statusText: '대기 중...'
       };
     });
@@ -88,18 +125,44 @@ export function useUploadManager({ onUploadSuccess } = {}) {
 
     // Trigger process in next tick
     setTimeout(() => {
-      processQueue(activeWorkspaceId);
+      processQueue();
     }, 50);
   }, [processQueue]);
 
-  const removeItem = useCallback((id) => {
-    setQueue(prev => prev.filter(it => it.id !== id));
+  const cancelUpload = useCallback((id) => {
+    const controller = abortControllersRef.current.get(id);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(id);
+    }
+    setQueue(prev => prev.map(it => {
+      if (it.id === id) {
+        return { ...it, status: 'canceled', statusText: '취소됨' };
+      }
+      return it;
+    }));
   }, []);
 
-  const retryItem = useCallback((id, activeWorkspaceId) => {
+  const cancelAll = useCallback(() => {
+    abortControllersRef.current.forEach(controller => controller.abort());
+    abortControllersRef.current.clear();
+    setQueue(prev => prev.map(it => {
+      if (it.status === 'uploading' || it.status === 'pending') {
+        return { ...it, status: 'canceled', statusText: '취소됨' };
+      }
+      return it;
+    }));
+  }, []);
+
+  const removeItem = useCallback((id) => {
+    cancelUpload(id);
+    setQueue(prev => prev.filter(it => it.id !== id));
+  }, [cancelUpload]);
+
+  const retryItem = useCallback((id) => {
     setQueue(prev => prev.map(it => it.id === id ? { ...it, status: 'pending', percent: 0, statusText: '재시도 대기 중...' } : it));
     setTimeout(() => {
-      processQueue(activeWorkspaceId);
+      processQueue();
     }, 50);
   }, [processQueue]);
 
@@ -108,13 +171,9 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   }, []);
 
   const clearAll = useCallback(() => {
+    cancelAll();
     setQueue([]);
-  }, []);
-
-  const activeCount = queue.filter(t => t.status === 'uploading' || t.status === 'pending').length;
-  const completedCount = queue.filter(t => t.status === 'completed').length;
-  const errorCount = queue.filter(t => t.status === 'error').length;
-  const isUploading = activeCount > 0;
+  }, [cancelAll]);
 
   const totalProgress = queue.length > 0
     ? Math.round(queue.reduce((acc, t) => acc + (t.percent || (t.status === 'completed' ? 100 : 0)), 0) / queue.length)
@@ -128,6 +187,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     errorCount,
     totalProgress,
     addFilesToQueue,
+    cancelUpload,
+    cancelAll,
     removeItem,
     retryItem,
     clearCompleted,

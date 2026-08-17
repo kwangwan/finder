@@ -10,6 +10,8 @@ import {
   RotateCw, 
   Loader2,
   Trash2,
+  Square,
+  Ban,
   Check
 } from 'lucide-react';
 
@@ -87,6 +89,8 @@ export default function ChunkedUploadModal({
     errorCount,
     totalProgress,
     addFilesToQueue,
+    cancelUpload,
+    cancelAll,
     removeItem,
     retryItem,
     clearCompleted,
@@ -169,39 +173,36 @@ export default function ChunkedUploadModal({
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <UploadCloud size={20} color="var(--accent-primary)" />
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 700 }}>파일 / 폴더 업로드</h2>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 700 }}>파일 및 폴더 업로드</h2>
             {isUploading && (
               <span className="upload-header-active-badge">
                 <Loader2 size={12} className="spin-anim" /> {activeCount}개 전송 중
               </span>
             )}
           </div>
-          <button className="btn-icon" onClick={onClose} title="닫기 (업로드는 백그라운드에서 계속 진행됩니다)">
+          <button className="btn-icon" onClick={onClose} title="닫기 (업로드는 백그라운드에서 유지됩니다)">
             <X size={18} />
           </button>
         </div>
 
-        <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', flex: 1 }}>
-          {/* Target Folder Selection */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-              <Folder size={15} /> 기본 저장 위치:
+        {/* Modal Body */}
+        <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* Target Folder Selector */}
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              업로드 대상 폴더
             </label>
             <select
               value={selectedFolder}
-              onChange={e => setSelectedFolder(e.target.value)}
+              onChange={(e) => setSelectedFolder(e.target.value)}
+              className="custom-select"
               style={{
-                flex: 1,
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md)',
-                padding: '0.4rem 0.6rem',
-                outline: 'none',
+                width: '100%',
+                padding: '0.55rem 2rem 0.55rem 0.75rem',
                 fontSize: '0.85rem'
               }}
             >
-              <option value="">(최상위 루트)</option>
+              <option value="">📁 최상위 루트 (기본 위치)</option>
               {flattenFolderTree(folders).map(f => (
                 <option key={f.id} value={f.id}>
                   {f.displayName}
@@ -210,63 +211,72 @@ export default function ChunkedUploadModal({
             </select>
           </div>
 
-          {/* Dropzone */}
-          <div 
-            className={`dropzone ${isDragging ? 'active' : ''}`}
-            onDragEnter={e => {
+          {/* Drag & Drop Upload Zone */}
+          <div
+            className={`upload-drop-zone ${isDragging ? 'dragging' : ''}`}
+            onDragEnter={(e) => {
               e.preventDefault();
-              dragCounter.current += 1;
+              dragCounter.current++;
               setIsDragging(true);
             }}
-            onDragOver={e => {
+            onDragLeave={(e) => {
               e.preventDefault();
-              setIsDragging(true);
+              dragCounter.current--;
+              if (dragCounter.current === 0) setIsDragging(false);
             }}
-            onDragLeave={e => {
-              e.preventDefault();
-              dragCounter.current -= 1;
-              if (dragCounter.current <= 0) {
-                setIsDragging(false);
-                dragCounter.current = 0;
-              }
-            }}
+            onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
             style={{
-              padding: '1.75rem 1.25rem',
-              textAlign: 'center',
-              border: isDragging ? '2px dashed var(--accent-primary)' : '2px dashed var(--border-subtle)',
+              border: `2px dashed ${isDragging ? 'var(--accent-primary)' : 'var(--border-medium)'}`,
               borderRadius: 'var(--radius-lg)',
-              background: isDragging ? 'rgba(59, 130, 246, 0.08)' : 'var(--bg-tertiary)',
+              padding: '2rem 1.5rem',
+              textAlign: 'center',
+              backgroundColor: isDragging ? 'rgba(59, 130, 246, 0.06)' : 'var(--bg-tertiary)',
               cursor: 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all 0.2s ease',
+              position: 'relative'
             }}
           >
             <input 
               type="file" 
               ref={fileInputRef} 
-              multiple 
               style={{ display: 'none' }} 
-              onChange={e => handleFiles(e.target.files)} 
+              multiple 
+              onChange={(e) => handleFiles(e.target.files)} 
             />
             <input 
               type="file" 
               ref={folderInputRef} 
-              webkitdirectory="true" 
+              style={{ display: 'none' }} 
+              webkitdirectory="" 
               directory="" 
               multiple 
-              style={{ display: 'none' }} 
-              onChange={e => handleFiles(e.target.files)} 
+              onChange={(e) => handleFiles(e.target.files)} 
             />
 
-            <UploadCloud size={34} color="var(--accent-primary)" style={{ margin: '0 auto 0.4rem', display: 'block' }} />
-            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>
-              파일 또는 폴더를 여기에 끌어다 놓으세요
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-              폴더 통째로 드래그 시 하위 계층 구조가 그대로 유지되어 자동 생성됩니다.
+            <div style={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              color: 'var(--accent-primary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 0.75rem'
+            }}>
+              <UploadCloud size={24} />
             </div>
 
-            {/* Selection Action Buttons */}
+            <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+              파일 또는 폴더를 이곳으로 드래그하세요
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+              하위 폴더 계층 구조가 그대로 유지되어 자동 업로드됩니다.
+            </div>
+
+            {/* Quick Action Buttons */}
             <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', marginTop: '1rem' }}>
               <button 
                 type="button" 
@@ -304,13 +314,24 @@ export default function ChunkedUploadModal({
                   업로드 내역 ({queue.length}) · {totalProgress}%
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
+                  {isUploading && (
+                    <button 
+                      type="button"
+                      className="upload-clear-btn danger" 
+                      onClick={cancelAll}
+                      style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                      title="진행 중인 모든 업로드 중단"
+                    >
+                      전체 중단
+                    </button>
+                  )}
                   {completedCount > 0 && (
                     <button 
                       type="button"
                       className="upload-clear-btn" 
                       onClick={clearCompleted}
                     >
-                      완료 항목 정리 ({completedCount})
+                      완료 정리 ({completedCount})
                     </button>
                   )}
                   {!isUploading && (
@@ -319,7 +340,7 @@ export default function ChunkedUploadModal({
                       className="upload-clear-btn danger" 
                       onClick={clearAll}
                     >
-                      전체 비우기
+                      목록 비우기
                     </button>
                   )}
                 </div>
@@ -334,7 +355,7 @@ export default function ChunkedUploadModal({
                     border: '1px solid var(--border-subtle)'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '75%', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '72%', overflow: 'hidden' }}>
                         {item.relativePath && item.relativePath.includes('/') ? (
                           <Folder size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
                         ) : (
@@ -351,13 +372,32 @@ export default function ChunkedUploadModal({
                         </span>
                         {item.status === 'completed' && <CheckCircle2 size={15} color="#10b981" />}
                         {item.status === 'uploading' && (
-                          <Loader2 size={14} className="spin-anim" color="var(--accent-primary)" />
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            onClick={() => cancelUpload && cancelUpload(item.id)}
+                            title="업로드 중단"
+                            style={{ width: 22, height: 22, padding: 0, color: '#ef4444' }}
+                          >
+                            <Square size={12} fill="#ef4444" />
+                          </button>
+                        )}
+                        {item.status === 'canceled' && (
+                          <button 
+                            type="button"
+                            className="btn-icon" 
+                            onClick={() => retryItem && retryItem(item.id)}
+                            title="다시 시도"
+                            style={{ width: 22, height: 22, padding: 0 }}
+                          >
+                            <RotateCw size={13} color="var(--accent-amber)" />
+                          </button>
                         )}
                         {item.status === 'error' && (
                           <button 
                             type="button"
                             className="btn-icon" 
-                            onClick={() => retryItem && retryItem(item.id, activeWorkspaceId)}
+                            onClick={() => retryItem && retryItem(item.id)}
                             title="재시도"
                             style={{ width: 22, height: 22, padding: 0 }}
                           >
@@ -384,12 +424,12 @@ export default function ChunkedUploadModal({
                         <div style={{
                           height: '100%',
                           width: `${item.percent || (item.status === 'completed' ? 100 : 0)}%`,
-                          background: item.status === 'error' ? '#ef4444' : item.status === 'completed' ? '#10b981' : 'var(--accent-primary)',
+                          background: item.status === 'error' || item.status === 'canceled' ? '#ef4444' : item.status === 'completed' ? '#10b981' : 'var(--accent-primary)',
                           transition: 'width 0.2s ease'
                         }} />
                       </div>
-                      <span style={{ fontSize: '0.7rem', color: item.status === 'error' ? '#ef4444' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                        {item.status === 'uploading' ? `${item.percent || 0}%` : item.statusText}
+                      <span style={{ fontSize: '0.7rem', color: item.status === 'error' || item.status === 'canceled' ? '#ef4444' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {item.statusText}
                       </span>
                     </div>
                   </div>
@@ -410,7 +450,7 @@ export default function ChunkedUploadModal({
           flexShrink: 0
         }}>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            {isUploading ? '창을 닫아도 업로드는 백그라운드에서 유지됩니다.' : '모든 작업이 준비되었습니다.'}
+            {isUploading ? '창을 닫아도 업로드는 백그라운드에서 유지됩니다.' : '업로드할 준비가 완료되었습니다.'}
           </div>
           <button 
             type="button"

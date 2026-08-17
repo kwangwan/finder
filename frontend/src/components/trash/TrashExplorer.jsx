@@ -295,10 +295,10 @@ export default function TrashExplorer({
             <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: 4 }}>
               휴지통 보관 및 영구 삭제 정책 안내
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-              • <strong>자동 정리</strong>: 휴지통 항목은 30일 후 자동 영구 삭제되며, 기간 내에는 누구나 원래 위치로 복구할 수 있습니다.<br />
-              • <strong>미리보기</strong>: 휴지통 항목을 클릭하면 삭제 전 내용을 안전하게 확인할 수 있습니다.<br />
-              • <strong>영구 삭제 권한</strong>: 자신이 올린 파일은 작성자가 언제든 직접 영구 삭제할 수 있으며, 타인이 올린 파일의 영구 삭제 및 휴지통 전체 비우기는 워크스페이스 소유자/관리자만 가능합니다.
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              • <strong>자동 정리</strong>: 30일 후 자동 영구 삭제 (기간 내 자유롭게 원래 위치 복구 가능)<br />
+              • <strong>미리보기</strong>: 항목을 클릭하여 삭제 전 내용 열람 및 즉시 복구/영구삭제 가능<br />
+              • <strong>권한 안내</strong>: 본인 파일은 직접 영구 삭제 가능 (전체 비우기는 관리자 전용)
             </div>
           </div>
         </div>

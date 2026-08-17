@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     MINIO_PUBLIC_URL: str = "https://public-storage.proj.run"
     MINIO_PUBLIC_ROOT_USER: str = "project-run"
     MINIO_PUBLIC_ROOT_PASSWORD: str = ""
-    MINIO_MAX_CHUNK_SIZE_MB: int = 50
+    MINIO_MAX_CHUNK_SIZE_MB: int = 5
     MINIO_BUCKET_NAME: str = "knowledge-base"
     MINIO_REGION: str = "us-east-1"
     

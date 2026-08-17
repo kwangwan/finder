@@ -5,7 +5,7 @@ import {
   AlertCircle, 
   Loader2, 
   X, 
-  ExternalLink,
+  Square,
   ChevronRight
 } from 'lucide-react';
 
@@ -20,7 +20,7 @@ export default function UploadProgressBanner({
     completedCount,
     errorCount,
     totalProgress,
-    clearCompleted,
+    cancelAll,
     clearAll
   } = uploadManager;
 
@@ -85,11 +85,24 @@ export default function UploadProgressBanner({
 
         {/* Right Action Buttons */}
         <div className="upload-banner-actions" onClick={e => e.stopPropagation()}>
+          {isUploading && (
+            <button
+              type="button"
+              className="upload-banner-btn-view"
+              onClick={cancelAll}
+              title="전체 업로드 중단"
+              style={{ color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)', padding: '0.2rem 0.45rem' }}
+            >
+              <Square size={10} fill="#ef4444" />
+              <span>중단</span>
+            </button>
+          )}
+
           <button
             type="button"
             className="upload-banner-btn-view"
             onClick={onOpenModal}
-            title="업로드 목록 열기"
+            title="업로드 상세 보기"
           >
             <span>상세</span>
             <ChevronRight size={13} />

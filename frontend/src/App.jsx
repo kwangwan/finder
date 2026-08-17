@@ -49,6 +49,7 @@ import {
   deleteFile, 
   createFolder, 
   deleteFolder,
+  updateFolder,
   getSystemStats,
   uploadFileChunked,
   moveToTrashFile,
@@ -133,11 +134,20 @@ export default function App() {
   // OS-Style Multi-Window Manager
   const windowManager = useWindowManager();
 
+  const refreshDebounceTimerRef = useRef(null);
+
   // Persistent Upload Manager
   const uploadManager = useUploadManager({
-    onUploadSuccess: () => {
-      refreshFiles();
-      refreshFoldersAndStats();
+    onUploadSuccess: (completedItem) => {
+      if (refreshDebounceTimerRef.current) {
+        clearTimeout(refreshDebounceTimerRef.current);
+      }
+      refreshDebounceTimerRef.current = setTimeout(() => {
+        if (!completedItem || !completedItem.activeWorkspaceId || completedItem.activeWorkspaceId === activeWorkspace?.id) {
+          refreshFiles(true);
+          refreshFoldersAndStats();
+        }
+      }, 300);
     }
   });
 
@@ -501,7 +511,7 @@ export default function App() {
   }, [refreshFoldersAndStats]);
 
   // Fetch Files for active workspace with sorting and pagination
-  const refreshFiles = useCallback(async () => {
+  const refreshFiles = useCallback(async (silent = false) => {
     if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
     if (!isWorkspacesLoaded) return;
     if (!activeWorkspace?.id) {
@@ -514,7 +524,9 @@ export default function App() {
       });
       return;
     }
-    setIsLoading(true);
+    if (!silent) {
+      setIsLoading(true);
+    }
     try {
       let params = {
         workspace_id: activeWorkspace.id,
@@ -555,7 +567,9 @@ export default function App() {
     } catch (err) {
       console.error('Error fetching files:', err);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, activeView, activeFolderId, sortBy, sortOrder, currentPage, pageSize]);
 
