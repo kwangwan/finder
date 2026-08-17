@@ -413,14 +413,14 @@ export default function ChunkedUploadModal({
           flexShrink: 0
         }}>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            {isUploading ? '창을 닫아도 업로드는 백그라운드에서 유지됩니다.' : '업로드할 준비가 완료되었습니다.'}
+            {isUploading ? '창을 닫아도 업로드가 계속 진행됩니다.' : '업로드할 준비가 완료되었습니다.'}
           </div>
           <button 
             type="button"
             className="btn-primary" 
             onClick={onClose}
           >
-            {isUploading ? '백그라운드로 계속' : '확인'}
+            닫기
           </button>
         </div>
       </div>
