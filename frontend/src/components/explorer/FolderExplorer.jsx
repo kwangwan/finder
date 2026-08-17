@@ -834,7 +834,7 @@ export default function FolderExplorer({
                   </div>
 
                   <div className="file-card-meta">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div className="file-card-meta-left">
                       <span>{formatFileSize(file.size_bytes)}</span>
                       <span>•</span>
                       <span>{formatDate(file.updated_at || file.created_at)}</span>

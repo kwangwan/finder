@@ -1,98 +1,98 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Layers, 
   X, 
-  Maximize2, 
-  Minimize2, 
+  Minus, 
   FileText, 
   Film, 
-  Image as ImageIcon, 
   Music, 
-  Table, 
+  Image as ImageIcon, 
   FileCode, 
   File, 
-  ChevronUp, 
-  ChevronDown,
+  Table, 
+  Check,
+  Maximize2,
   Sparkles,
-  Eye,
-  Minus
+  Grid
 } from 'lucide-react';
 
 export default function WindowTaskbar({
-  windows = [],
+  windows,
   onFocusWindow,
   onToggleMinimize,
   onCloseWindow,
   onCloseAllWindows,
   onMinimizeAllWindows
 }) {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Close mobile drawer if no windows
-  useEffect(() => {
-    if (windows.length === 0) {
-      setIsMobileMenuOpen(false);
-    }
-  }, [windows.length]);
+  const [isMobileSwitcherOpen, setIsMobileSwitcherOpen] = useState(false);
 
   if (!windows || windows.length === 0) return null;
 
-  const getHeaderIcon = (file) => {
-    const fileNameLower = file.name?.toLowerCase() || '';
-    if (file.file_type === 'video' || fileNameLower.match(/\.(mp4|webm|ogg|mov)$/i)) {
-      return <Film size={14} color="var(--accent-primary)" />;
-    }
-    if (file.file_type === 'image' || fileNameLower.match(/\.(png|jpe?g|gif|webp|svg)$/i)) {
-      return <ImageIcon size={14} color="var(--accent-emerald)" />;
-    }
-    if (file.file_type === 'pdf' || fileNameLower.endsWith('.pdf')) {
-      return <FileText size={14} color="var(--accent-rose)" />;
-    }
-    if (file.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i)) {
-      return <Table size={14} color="var(--accent-emerald)" />;
-    }
-    if (file.file_type === 'markdown' || fileNameLower.endsWith('.md')) {
-      return <FileText size={14} color="var(--accent-primary)" />;
-    }
-    if (file.file_type === 'code' || fileNameLower.match(/\.(json|py|js|html|css|ts|jsx|tsx)$/i)) {
-      return <FileCode size={14} color="var(--accent-amber)" />;
-    }
+  // Active (focused) window
+  const activeWindow = [...windows].sort((a, b) => (b.zIndex || 0) - (a.zIndex || 0))[0];
+
+  const getFileIcon = (file) => {
+    if (!file) return <File size={14} />;
+    const name = (file.name || '').toLowerCase();
+    const type = (file.file_type || '').toLowerCase();
+
+    if (file.is_markdown || name.endsWith('.md')) return <FileText size={14} color="var(--accent-primary)" />;
+    if (type === 'video' || name.match(/\.(mp4|webm|mov|avi|mkv)$/i)) return <Film size={14} color="var(--accent-primary)" />;
+    if (type === 'audio' || name.match(/\.(mp3|wav|ogg|m4a|flac)$/i)) return <Music size={14} color="var(--accent-primary)" />;
+    if (type === 'image' || name.match(/\.(png|jpe?g|gif|webp|svg|bmp)$/i)) return <ImageIcon size={14} color="var(--accent-emerald)" />;
+    if (type === 'pdf' || name.endsWith('.pdf')) return <FileText size={14} color="var(--accent-rose)" />;
+    if (name.match(/\.(xlsx|xls|csv)$/i)) return <Table size={14} color="var(--accent-emerald)" />;
+    if (name.match(/\.(docx|doc)$/i)) return <FileText size={14} color="#2563eb" />;
+    if (name.match(/\.(js|jsx|ts|tsx|json|html|css|py|sql|sh|yaml|yml)$/i)) return <FileCode size={14} color="var(--accent-amber)" />;
     return <File size={14} color="var(--text-secondary)" />;
   };
 
-  const activeWindowsCount = windows.filter(w => !w.isMinimized).length;
-  const minimizedWindowsCount = windows.filter(w => w.isMinimized).length;
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
 
   return (
     <>
       {/* =========================================================================
-          1. Desktop Floating Taskbar Dock (Bottom Center)
+          1. Unified Bottom Taskbar Dock (Desktop & Mobile)
           ========================================================================= */}
-      <div className="os-desktop-dock hide-mobile">
+      <div className="os-desktop-dock" role="navigation" aria-label="작업 표시줄">
         <div className="dock-container">
-          <div className="dock-brand-icon" title={`${windows.length}개의 열린 창`}>
-            <Layers size={16} color="var(--accent-primary)" />
-            <span className="dock-count-badge">{windows.length}</span>
-          </div>
+          {/* Brand / Tab Switcher Trigger Button */}
+          <button 
+            type="button"
+            className="dock-brand-btn" 
+            onClick={() => setIsMobileSwitcherOpen(prev => !prev)}
+            title="탭 관리자 열기"
+          >
+            <div className="dock-brand-icon">
+              <Layers size={14} color="var(--accent-primary)" />
+              {windows.length > 0 && (
+                <span className="dock-count-badge">{windows.length}</span>
+              )}
+            </div>
+            <span className="dock-mobile-label">탭 {windows.length}개</span>
+          </button>
 
           <div className="dock-divider" />
 
-          {/* Window Tabs */}
+          {/* Desktop Tabs List */}
           <div className="dock-tabs-list">
             {windows.map((win) => {
-              const isMinimized = win.isMinimized;
+              const isActive = activeWindow?.id === win.id && !win.isMinimized;
               return (
                 <div
                   key={win.id}
-                  className={`dock-tab-item ${isMinimized ? 'is-minimized' : 'is-active'}`}
+                  className={`dock-tab-item ${isActive ? 'is-active' : ''} ${win.isMinimized ? 'is-minimized' : ''}`}
                   onClick={() => onToggleMinimize(win.id)}
-                  title={`${win.file.name} (${isMinimized ? '최소화됨 - 클릭하여 복원' : '활성화됨 - 클릭하여 최소화'})`}
+                  title={`${win.file.name} (${win.isMinimized ? '최소화됨 - 클릭하여 복원' : '클릭하여 최소화'})`}
                 >
-                  <div className="dock-tab-icon">
-                    {getHeaderIcon(win.file)}
-                  </div>
+                  <span className="dock-tab-icon">{getFileIcon(win.file)}</span>
                   <span className="dock-tab-title">{win.file.name}</span>
-
                   <button
                     type="button"
                     className="dock-tab-close"
@@ -100,22 +100,20 @@ export default function WindowTaskbar({
                       e.stopPropagation();
                       onCloseWindow(win.id);
                     }}
-                    title="창 닫기"
+                    title="닫기"
                   >
-                    <X size={12} />
+                    <X size={11} />
                   </button>
                 </div>
               );
             })}
           </div>
 
-          <div className="dock-divider" />
-
-          {/* Dock Global Actions */}
+          {/* Global Window Actions */}
           <div className="dock-actions">
             <button
               type="button"
-              className="dock-action-btn"
+              className="dock-action-btn hide-mobile"
               onClick={onMinimizeAllWindows}
               title="모든 창 최소화"
             >
@@ -134,121 +132,105 @@ export default function WindowTaskbar({
       </div>
 
       {/* =========================================================================
-          2. Mobile Floating Action Button (FAB) & Staggered Drawer
+          2. Mobile Chrome-style Tab Switcher Grid Overlay
           ========================================================================= */}
-      <div className="os-mobile-fab-container show-mobile">
-        {/* Floating Circular Toggle Button */}
-        <button
-          type="button"
-          className={`os-mobile-fab-btn ${isMobileMenuOpen ? 'active' : ''}`}
-          onClick={() => setIsMobileMenuOpen(prev => !prev)}
-          title="열린 창 관리"
-        >
-          <Layers size={20} />
-          <span className="mobile-fab-badge">{windows.length}</span>
-        </button>
-
-        {/* Backdrop for Mobile Drawer */}
-        {isMobileMenuOpen && (
-          <div 
-            className="os-mobile-drawer-overlay"
-            onClick={() => setIsMobileMenuOpen(false)}
-          />
-        )}
-
-        {/* Animated Staggered Card Stack Drawer */}
-        {isMobileMenuOpen && (
-          <div className="os-mobile-drawer-sheet animate-slide-up">
-            <div className="mobile-drawer-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Layers size={16} color="var(--accent-primary)" />
-                <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
-                  열린 창 관리 ({windows.length})
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={onCloseAllWindows}
-                  style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', height: 26 }}
-                >
-                  전체 닫기
-                </button>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  style={{ width: 26, height: 26 }}
-                >
-                  <X size={15} />
-                </button>
-              </div>
+      {isMobileSwitcherOpen && (
+        <div className="os-chrome-tab-switcher-overlay">
+          <div className="os-chrome-tab-switcher-header">
+            <div className="tab-switcher-title-box">
+              <Layers size={18} color="var(--accent-primary)" />
+              <span className="tab-switcher-title">열린 탭 ({windows.length})</span>
             </div>
+            <div className="tab-switcher-header-actions">
+              <button
+                type="button"
+                className="switcher-btn-secondary"
+                onClick={() => {
+                  onCloseAllWindows();
+                  setIsMobileSwitcherOpen(false);
+                }}
+              >
+                모두 닫기
+              </button>
+              <button
+                type="button"
+                className="switcher-btn-close"
+                onClick={() => setIsMobileSwitcherOpen(false)}
+                title="닫기"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
 
-            <div className="mobile-drawer-list">
-              {windows.map((win, idx) => {
-                const isMinimized = win.isMinimized;
+          <div className="os-chrome-tab-switcher-body">
+            <div className="chrome-tab-grid">
+              {windows.map((win) => {
+                const isActive = activeWindow?.id === win.id && !win.isMinimized;
                 return (
                   <div
                     key={win.id}
-                    className={`mobile-drawer-card ${isMinimized ? 'is-minimized' : 'is-active'}`}
+                    className={`chrome-tab-card ${isActive ? 'is-active' : ''} ${win.isMinimized ? 'is-minimized' : ''}`}
                     onClick={() => {
                       onFocusWindow(win.id);
-                      if (isMinimized) {
-                        onToggleMinimize(win.id);
-                      }
-                      setIsMobileMenuOpen(false);
+                      setIsMobileSwitcherOpen(false);
                     }}
-                    style={{ animationDelay: `${idx * 0.04}s` }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                      <div className="drawer-card-icon">
-                        {getHeaderIcon(win.file)}
+                    {/* Card Header */}
+                    <div className="tab-card-header">
+                      <div className="tab-card-title-box">
+                        <span className="tab-card-icon">{getFileIcon(win.file)}</span>
+                        <span className="tab-card-name">{win.file.name}</span>
                       </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div className="drawer-card-title">
-                          {win.file.name}
-                        </div>
-                        <div className="drawer-card-meta">
-                          {isMinimized ? '최소화됨 (탭하여 열기)' : '현재 활성화됨'}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                       <button
                         type="button"
-                        className="btn-icon"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggleMinimize(win.id);
-                        }}
-                        style={{ width: 28, height: 28 }}
-                        title={isMinimized ? '복원' : '최소화'}
-                      >
-                        {isMinimized ? <Maximize2 size={13} color="var(--accent-primary)" /> : <Minus size={13} />}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-icon"
+                        className="tab-card-close-btn"
                         onClick={(e) => {
                           e.stopPropagation();
                           onCloseWindow(win.id);
+                          if (windows.length <= 1) {
+                            setIsMobileSwitcherOpen(false);
+                          }
                         }}
-                        style={{ width: 28, height: 28, color: 'var(--accent-rose)' }}
-                        title="닫기"
+                        title="탭 닫기"
                       >
-                        <X size={13} />
+                        <X size={14} />
                       </button>
+                    </div>
+
+                    {/* Card Preview Thumbnail / Snippet Body */}
+                    <div className="tab-card-preview">
+                      {win.file.content ? (
+                        <div className="tab-card-text-preview">
+                          {win.file.content.slice(0, 180)}
+                        </div>
+                      ) : (
+                        <div className="tab-card-empty-preview">
+                          {getFileIcon(win.file)}
+                          <span>{win.file.name}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Footer */}
+                    <div className="tab-card-footer">
+                      <span>{formatFileSize(win.file.file_size || win.file.size)}</span>
+                      {win.file.is_embedded && (
+                        <span className="badge-embedded-tiny">
+                          <Sparkles size={8} /> AI
+                        </span>
+                      )}
+                      <span className="tab-status-tag">
+                        {win.isMinimized ? '최소화됨' : isActive ? '현재 보는 중' : '열림'}
+                      </span>
                     </div>
                   </div>
                 );
               })}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 }

@@ -29,6 +29,7 @@ import {
   Layers
 } from 'lucide-react';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
+import { exportMarkdownToPdf } from '../../utils/pdfExport';
 
 export default function PreviewWindow({
   windowState,
@@ -138,7 +139,8 @@ export default function PreviewWindow({
   // ==========================================
   const handleDragStart = (e) => {
     if (isMaximized) return;
-    if (e.target.closest('.window-action-btn') || e.target.closest('.window-traffic-lights')) return;
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Fixed on mobile
+    if (e.target.closest('.window-action-btn') || e.target.closest('.window-os-controls') || e.target.closest('.window-header-actions')) return;
 
     onFocus(id);
     isDraggingRef.current = true;
@@ -190,6 +192,7 @@ export default function PreviewWindow({
   // ==========================================
   const handleResizeStart = (e) => {
     if (isMaximized) return;
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Disabled on mobile
     e.stopPropagation();
     onFocus(id);
     isResizingRef.current = true;
@@ -292,42 +295,14 @@ export default function PreviewWindow({
       onMouseDown={() => onFocus(id)}
       onTouchStart={() => onFocus(id)}
     >
-      {/* Title Bar (macOS Window Header) */}
+      {/* Window Title Bar */}
       <div 
         className="os-window-header"
         onMouseDown={handleDragStart}
         onTouchStart={handleDragStart}
         onDoubleClick={() => onMaximize(id)}
       >
-        {/* Traffic Light Buttons */}
-        <div className="window-traffic-lights">
-          <button 
-            type="button"
-            className="traffic-light-btn close"
-            onClick={(e) => { e.stopPropagation(); onClose(id); }}
-            title="닫기 (Close)"
-          >
-            <X size={9} />
-          </button>
-          <button 
-            type="button"
-            className="traffic-light-btn minimize"
-            onClick={(e) => { e.stopPropagation(); onMinimize(id); }}
-            title="최소화 (Minimize)"
-          >
-            <Minus size={9} />
-          </button>
-          <button 
-            type="button"
-            className="traffic-light-btn maximize"
-            onClick={(e) => { e.stopPropagation(); onMaximize(id); }}
-            title={isMaximized ? "복원 (Restore)" : "최대화 (Maximize)"}
-          >
-            {isMaximized ? <Minimize2 size={9} /> : <Maximize2 size={9} />}
-          </button>
-        </div>
-
-        {/* Title Information */}
+        {/* Left: Title Information */}
         <div className="window-title-box" title={file.name}>
           <div className="window-file-icon">
             {getHeaderIcon()}
@@ -341,7 +316,7 @@ export default function PreviewWindow({
           )}
         </div>
 
-        {/* Action Buttons in Header / Right */}
+        {/* Right: Actions & OS Window Controls */}
         <div className="window-header-actions">
           {/* Edit Button for Markdown / Text */}
           {isTextOrCode && onEditFile && (
@@ -356,6 +331,22 @@ export default function PreviewWindow({
             >
               <Edit3 size={13} />
               <span>수정</span>
+            </button>
+          )}
+
+          {/* PDF Export Button for Markdown */}
+          {isMarkdown && (
+            <button
+              type="button"
+              className="window-action-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                exportMarkdownToPdf(file.name, displayContent);
+              }}
+              title="PDF로 내보내기 / 인쇄"
+            >
+              <FileText size={13} color="var(--accent-rose)" />
+              <span>PDF</span>
             </button>
           )}
 
@@ -436,6 +427,36 @@ export default function PreviewWindow({
           >
             <Download size={13} />
           </button>
+
+          <div className="window-header-divider" />
+
+          {/* Standard OS Control Icons (Minimize, Maximize/Restore, Close) */}
+          <div className="window-os-controls">
+            <button 
+              type="button"
+              className="window-control-icon-btn"
+              onClick={(e) => { e.stopPropagation(); onMinimize(id); }}
+              title="최소화"
+            >
+              <Minus size={13} />
+            </button>
+            <button 
+              type="button"
+              className="window-control-icon-btn hide-mobile"
+              onClick={(e) => { e.stopPropagation(); onMaximize(id); }}
+              title={isMaximized ? "이전 크기로 복원" : "최대화"}
+            >
+              {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+            <button 
+              type="button"
+              className="window-control-icon-btn close-btn"
+              onClick={(e) => { e.stopPropagation(); onClose(id); }}
+              title="닫기"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       </div>
 

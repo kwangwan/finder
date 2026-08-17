@@ -28,11 +28,13 @@ import {
   Folder,
   ExternalLink,
   Image as ImageIcon,
-  Loader2
+  Loader2,
+  FileText
 } from 'lucide-react';
 import InsertFileModal from './InsertFileModal';
 import { getPresignedDownloadUrl, uploadNoteImage } from '../../api';
 import { useDialog } from '../../context/DialogContext';
+import { exportMarkdownToPdf } from '../../utils/pdfExport';
 
 // Helper to extract YouTube Video ID
 function extractYouTubeId(url) {
@@ -363,8 +365,16 @@ export default function MarkdownEditor({
             </button>
           </div>
 
-          <button className="btn-icon" onClick={handleExportMarkdown} title="마크다운 다운로드">
+          <button className="btn-icon" onClick={handleExportMarkdown} title="마크다운 다운로드 (.md)">
             <Download size={16} />
+          </button>
+
+          <button 
+            className="btn-icon" 
+            onClick={() => exportMarkdownToPdf(title, content)} 
+            title="PDF로 내보내기 / 인쇄"
+          >
+            <FileText size={16} color="var(--accent-rose)" />
           </button>
 
           {file && (
