@@ -88,6 +88,7 @@ export default function FolderExplorer({
   pageSize = 20,
   onPageSizeChange,
   paginationMeta = null,
+  uploadManager = null,
 }) {
   const { showAlert } = useDialog();
   const [isDragOver, setIsDragOver] = useState(false);
@@ -111,6 +112,15 @@ export default function FolderExplorer({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const currentFolderUploads = (uploadManager?.queue || []).filter(
+    it => (it.status === 'uploading' || it.status === 'pending') &&
+    (
+      (currentFolder?.id && it.targetFolderId === currentFolder.id) ||
+      (!currentFolder?.id && (!it.targetFolderId || it.targetFolderId === '')) ||
+      (currentFolder?.name && it.relativePath && it.relativePath.startsWith(currentFolder.name + '/'))
+    )
+  );
 
   const toggleFileSelection = (fileId, e) => {
     if (e) e.stopPropagation();
@@ -485,6 +495,38 @@ export default function FolderExplorer({
         </div>
       </div>
 
+      {/* Active Folder Upload Progress Notification */}
+      {currentFolderUploads.length > 0 && (
+        <div style={{
+          margin: '0 0 1.25rem 0',
+          padding: '0.85rem 1.25rem',
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(139, 92, 246, 0.12))',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          borderRadius: 'var(--radius-lg)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          backdropFilter: 'blur(8px)'
+        }}>
+          <div className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: '0.15rem' }}>
+              현재 이 폴더로 파일 업로드가 진행 중입니다 ({currentFolderUploads.length}개 파일 전송/대기 중)
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              전송이 완료되면 자동으로 목록에 반영됩니다.
+            </div>
+          </div>
+          <button 
+            className="btn-secondary" 
+            style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+            onClick={onOpenUpload}
+          >
+            상세 보기
+          </button>
+        </div>
+      )}
+
       {/* Loading Skeleton State */}
       {isLoading ? (
         <div style={{ marginTop: '1.25rem' }}>
@@ -581,7 +623,38 @@ export default function FolderExplorer({
         </div>
 
         {files.length === 0 && (activeView === 'notes' || activeView === 'favorites' || sortedSubfolders.length === 0) ? (
-          activeView === 'notes' ? (
+          currentFolderUploads.length > 0 ? (
+            <div style={{
+              padding: '4rem 2rem',
+              textAlign: 'center',
+              background: 'var(--bg-card)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px dashed var(--accent-primary)',
+              margin: '0.5rem 0'
+            }}>
+              <div style={{
+                width: 56,
+                height: 56,
+                borderRadius: '50%',
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem'
+              }}>
+                <div className="spinner" style={{ width: 26, height: 26, borderWidth: 3 }} />
+              </div>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                파일을 이 폴더로 업로드하고 있습니다...
+              </h3>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
+                {currentFolderUploads.length}개의 파일이 전송 대기/진행 중입니다. 업로드가 완료되면 실시간으로 폴더에 표시됩니다.
+              </p>
+              <button className="btn-secondary" onClick={onOpenUpload} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
+                <span>업로드 큐 확인</span>
+              </button>
+            </div>
+          ) : activeView === 'notes' ? (
             <div style={{
               padding: '4rem 2rem',
               textAlign: 'center',

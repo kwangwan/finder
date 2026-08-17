@@ -977,7 +977,10 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
     throw new Error(errData.detail || '대용량 업로드 세션 초기화에 실패했습니다.');
   }
 
-  const { upload_id, total_parts } = await initRes.json();
+  const initData = await initRes.json();
+  const upload_id = initData.upload_id;
+  const effectiveChunkSize = initData.chunk_size_bytes || chunkSize;
+  const total_parts = initData.total_parts || Math.ceil(fileSize / effectiveChunkSize);
 
   try {
     for (let partNumber = 1; partNumber <= total_parts; partNumber++) {
@@ -985,8 +988,8 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
         throw new Error('Upload aborted by user');
       }
 
-      const start = (partNumber - 1) * chunkSize;
-      const end = Math.min(start + chunkSize, fileSize);
+      const start = (partNumber - 1) * effectiveChunkSize;
+      const end = Math.min(start + effectiveChunkSize, fileSize);
       const chunkBlob = file.slice(start, end);
 
       const currentPercent = Math.min(92, Math.round(((partNumber - 1) / total_parts) * 90) + 3);

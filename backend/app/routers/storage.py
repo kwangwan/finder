@@ -427,15 +427,12 @@ async def complete_chunk_upload(
     thumbnail_s3_key = None
     if file_type in ("image", "video"):
         try:
-            with open(local_target_path, "rb") as f:
-                media_bytes = f.read(10 * 1024 * 1024) if file_type == "video" else f.read()
-            if media_bytes:
-                thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail(
-                    file_uuid=str(file_uuid),
-                    filename=req.filename,
-                    file_bytes=media_bytes,
-                    file_type=file_type
-                )
+            thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail_from_path(
+                file_uuid=str(file_uuid),
+                filename=req.filename,
+                file_path=str(local_target_path),
+                file_type=file_type
+            )
         except Exception as thumb_err:
             print(f"[Thumbnail Warning] Chunk thumbnail generation failed: {thumb_err}")
 

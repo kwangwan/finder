@@ -78,6 +78,62 @@ class ThumbnailService:
                 except Exception:
                     pass
 
+    def create_and_store_thumbnail_from_path(self, file_uuid: str, filename: str, file_path: str, file_type: str) -> Optional[str]:
+        """
+        Generate thumbnail directly from a disk file path without loading large files into memory.
+        """
+        name_lower = filename.lower()
+        thumb_bytes = None
+
+        if file_type == "image" or name_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")):
+            try:
+                with open(file_path, "rb") as f:
+                    thumb_bytes = self.generate_image_thumbnail(f.read())
+            except Exception as e:
+                print(f"[ThumbnailService Warning] Failed to read image file: {e}")
+        elif file_type == "video" or name_lower.endswith((".mp4", ".webm", ".mov", ".avi", ".mkv")):
+            try:
+                cap = cv2.VideoCapture(str(file_path))
+                if cap.isOpened():
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    fps = cap.get(cv2.CAP_PROP_FPS) or 24
+                    target_frame = min(int(fps * 1.0), max(0, total_frames - 1)) if total_frames > 1 else 0
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+
+                    success, frame = cap.read()
+                    if not success or frame is None:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        success, frame = cap.read()
+
+                    cap.release()
+
+                    if success and frame is not None:
+                        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        img = Image.fromarray(rgb_frame)
+                        img.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
+
+                        out_io = io.BytesIO()
+                        img.save(out_io, format=THUMBNAIL_FORMAT, quality=80, method=4)
+                        thumb_bytes = out_io.getvalue()
+            except Exception as e:
+                print(f"[ThumbnailService Warning] Direct video path thumbnail failed: {e}")
+
+        if not thumb_bytes:
+            return None
+
+        thumb_s3_key = f"thumbnails/{file_uuid}/thumb.webp"
+        try:
+            s3_service.put_object(
+                s3_key=thumb_s3_key,
+                data=thumb_bytes,
+                content_type=THUMBNAIL_MIME
+            )
+            print(f"[ThumbnailService] Generated and stored thumbnail: {thumb_s3_key} ({len(thumb_bytes)} bytes)")
+            return thumb_s3_key
+        except Exception as e:
+            print(f"[ThumbnailService Error] Failed to upload thumbnail to S3: {e}")
+            return None
+
     def create_and_store_thumbnail(self, file_uuid: str, filename: str, file_bytes: bytes, file_type: str) -> Optional[str]:
         """
         Generate thumbnail for media files (image/video) and store it in MinIO.

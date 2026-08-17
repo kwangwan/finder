@@ -1,11 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { uploadFileChunked, ensureFolderPath } from '../api';
 
+const MAX_CONCURRENT_UPLOADS = 2;
+
 export function useUploadManager({ onUploadSuccess } = {}) {
   const [queue, setQueue] = useState([]);
-  const isProcessingRef = useRef(false);
+  const activeWorkersRef = useRef(0);
   const queueRef = useRef([]);
   const abortControllersRef = useRef(new Map());
+  const folderPathCacheRef = useRef(new Map());
 
   useEffect(() => {
     queueRef.current = queue;
@@ -34,77 +37,89 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     setQueue(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
   }, []);
 
-  const processQueue = useCallback(async () => {
-    if (isProcessingRef.current) return;
-    isProcessingRef.current = true;
+  const processNextItem = useCallback(async () => {
+    if (activeWorkersRef.current >= MAX_CONCURRENT_UPLOADS) return;
+
+    const currentQueue = queueRef.current;
+    const nextItem = currentQueue.find(it => it.status === 'pending');
+    if (!nextItem) return;
+
+    activeWorkersRef.current += 1;
+    const controller = new AbortController();
+    abortControllersRef.current.set(nextItem.id, controller);
+
+    updateItem(nextItem.id, { status: 'uploading', statusText: '업로드 준비 중...' });
 
     try {
-      while (true) {
-        const currentQueue = queueRef.current;
-        const nextItem = currentQueue.find(it => it.status === 'pending');
-        if (!nextItem) break;
+      let targetFolderId = nextItem.targetFolderId || null;
+      const targetWsId = nextItem.activeWorkspaceId || null;
 
-        const controller = new AbortController();
-        abortControllersRef.current.set(nextItem.id, controller);
+      // If relative path exists (from folder drop/selection), ensure folder hierarchy exists
+      if (nextItem.relativePath && nextItem.relativePath.includes('/')) {
+        const pathParts = nextItem.relativePath.split('/');
+        pathParts.pop(); // Remove filename
+        const folderPath = pathParts.join('/');
 
-        updateItem(nextItem.id, { status: 'uploading', statusText: '업로드 준비 중...' });
-
-        try {
-          let targetFolderId = nextItem.targetFolderId || null;
-          const targetWsId = nextItem.activeWorkspaceId || null;
-
-          // If relative path exists (from folder drop/selection), ensure folder hierarchy exists
-          if (nextItem.relativePath && nextItem.relativePath.includes('/')) {
-            const pathParts = nextItem.relativePath.split('/');
-            pathParts.pop(); // Remove filename
-            const folderPath = pathParts.join('/');
-
-            if (folderPath && targetWsId) {
-              updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
-              const ensured = await ensureFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
-              targetFolderId = ensured.folder_id;
-            }
-          }
-
-          updateItem(nextItem.id, { statusText: '파일 전송 중...' });
-
-          await uploadFileChunked(
-            nextItem.file, 
-            targetFolderId, 
-            targetWsId, 
-            ({ percent, status }) => {
-              updateItem(nextItem.id, { percent, statusText: status });
-            },
-            controller.signal
-          );
-
-          updateItem(nextItem.id, { percent: 100, status: 'completed', statusText: '완료됨' });
-          if (onUploadSuccess) {
-            onUploadSuccess({
-              ...nextItem,
-              targetFolderId,
-              activeWorkspaceId: targetWsId
-            });
-          }
-        } catch (err) {
-          if (controller.signal.aborted) {
-            updateItem(nextItem.id, { status: 'canceled', statusText: '사용자에 의해 취소됨' });
+        if (folderPath && targetWsId) {
+          const cacheKey = `${targetWsId}:${nextItem.targetFolderId || 'root'}:${folderPath}`;
+          if (folderPathCacheRef.current.has(cacheKey)) {
+            targetFolderId = folderPathCacheRef.current.get(cacheKey);
           } else {
-            console.error('Upload item failed:', err);
-            updateItem(nextItem.id, { status: 'error', statusText: '업로드 실패: ' + (err.message || '오류 발생') });
+            updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
+            const ensured = await ensureFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
+            targetFolderId = ensured.folder_id;
+            folderPathCacheRef.current.set(cacheKey, targetFolderId);
           }
-        } finally {
-          abortControllersRef.current.delete(nextItem.id);
         }
       }
+
+      updateItem(nextItem.id, { statusText: '파일 전송 중...' });
+
+      await uploadFileChunked(
+        nextItem.file, 
+        targetFolderId, 
+        targetWsId, 
+        ({ percent, status }) => {
+          updateItem(nextItem.id, { percent, statusText: status });
+        },
+        controller.signal
+      );
+
+      updateItem(nextItem.id, { percent: 100, status: 'completed', statusText: '완료됨' });
+      if (onUploadSuccess) {
+        onUploadSuccess({
+          ...nextItem,
+          targetFolderId,
+          activeWorkspaceId: targetWsId
+        });
+      }
+    } catch (err) {
+      if (controller.signal.aborted) {
+        updateItem(nextItem.id, { status: 'canceled', statusText: '사용자에 의해 취소됨' });
+      } else {
+        console.error('Upload item failed:', err);
+        updateItem(nextItem.id, { status: 'error', statusText: '업로드 실패: ' + (err.message || '오류 발생') });
+      }
     } finally {
-      isProcessingRef.current = false;
+      abortControllersRef.current.delete(nextItem.id);
+      activeWorkersRef.current = Math.max(0, activeWorkersRef.current - 1);
+      // Spawn next item in queue
+      setTimeout(() => {
+        processNextItem();
+      }, 20);
     }
   }, [updateItem, onUploadSuccess]);
+
+  const startWorkerPool = useCallback(() => {
+    for (let i = 0; i < MAX_CONCURRENT_UPLOADS; i++) {
+      processNextItem();
+    }
+  }, [processNextItem]);
 
   const addFilesToQueue = useCallback((fileList, targetFolderId, activeWorkspaceId) => {
     if (!fileList || fileList.length === 0) return;
 
+    // Filter out files that might already be in queue or duplicate instances
     const newItems = Array.from(fileList).map(file => {
       const relPath = file.relativePath || file.webkitRelativePath || '';
       return {
@@ -125,9 +140,9 @@ export function useUploadManager({ onUploadSuccess } = {}) {
 
     // Trigger process in next tick
     setTimeout(() => {
-      processQueue();
+      startWorkerPool();
     }, 50);
-  }, [processQueue]);
+  }, [startWorkerPool]);
 
   const cancelUpload = useCallback((id) => {
     const controller = abortControllersRef.current.get(id);
@@ -162,9 +177,9 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   const retryItem = useCallback((id) => {
     setQueue(prev => prev.map(it => it.id === id ? { ...it, status: 'pending', percent: 0, statusText: '재시도 대기 중...' } : it));
     setTimeout(() => {
-      processQueue();
+      startWorkerPool();
     }, 50);
-  }, [processQueue]);
+  }, [startWorkerPool]);
 
   const clearCompleted = useCallback(() => {
     setQueue(prev => prev.filter(it => it.status !== 'completed'));

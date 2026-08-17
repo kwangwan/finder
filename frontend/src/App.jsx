@@ -124,7 +124,6 @@ export default function App() {
   // Modals & Popups
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [uploadInitialFiles, setUploadInitialFiles] = useState([]);
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [newFolderParentId, setNewFolderParentId] = useState(null);
   const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
@@ -955,7 +954,7 @@ export default function App() {
 
   const handleDropFiles = (droppedFiles) => {
     if (droppedFiles && droppedFiles.length > 0) {
-      setUploadInitialFiles(Array.from(droppedFiles));
+      uploadManager.addFilesToQueue(droppedFiles, activeFolderId, activeWorkspace?.id);
       setIsUploadOpen(true);
     }
   };
@@ -1142,6 +1141,7 @@ export default function App() {
               setCurrentPage(1);
             }}
             paginationMeta={paginationMeta}
+            uploadManager={uploadManager}
           />
         )}
       </div>
@@ -1159,14 +1159,10 @@ export default function App() {
 
       <ChunkedUploadModal
         isOpen={isUploadOpen}
-        onClose={() => {
-          setIsUploadOpen(false);
-          setUploadInitialFiles([]);
-        }}
+        onClose={() => setIsUploadOpen(false)}
         activeWorkspaceId={activeWorkspace?.id || null}
         currentFolderId={activeFolderId}
         folders={folders}
-        initialFiles={uploadInitialFiles}
         uploadManager={uploadManager}
       />
 

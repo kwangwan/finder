@@ -41,8 +41,7 @@ export default function ChunkedUploadModal({
   activeWorkspaceId,
   currentFolderId,
   folders = [],
-  uploadManager,
-  initialFiles = []
+  uploadManager
 }) {
   const [selectedFolder, setSelectedFolder] = useState(currentFolderId || '');
   const [isDragging, setIsDragging] = useState(false);
@@ -69,14 +68,11 @@ export default function ChunkedUploadModal({
   useEffect(() => {
     if (isOpen) {
       setSelectedFolder(currentFolderId || '');
-      if (initialFiles && initialFiles.length > 0 && addFilesToQueue) {
-        addFilesToQueue(initialFiles, currentFolderId, activeWorkspaceId);
-      }
     } else {
       setIsDragging(false);
       dragCounter.current = 0;
     }
-  }, [isOpen, initialFiles, currentFolderId, activeWorkspaceId, addFilesToQueue]);
+  }, [isOpen, currentFolderId]);
 
   if (!isOpen) return null;
 
