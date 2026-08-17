@@ -5,6 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import os
+import shutil
+from pathlib import Path
 from app.core.config import settings
 from app.core.database import get_db
 from app.models import FileItem, User, Folder
@@ -13,7 +16,8 @@ from app.schemas.storage import (
     StorageConfigResponse, PresignedUploadRequest, PresignedUploadResponse,
     PresignedDownloadResponse, MultipartInitRequest, MultipartInitResponse,
     MultipartPartUrlsRequest, MultipartPartUrlsResponse, MultipartCompleteRequest,
-    MultipartAbortRequest
+    MultipartAbortRequest, ChunkInitRequest, ChunkInitResponse,
+    ChunkCompleteRequest, ChunkAbortRequest
 )
 from app.schemas.file import FileResponse
 from app.services.s3_service import s3_service
@@ -295,6 +299,200 @@ async def abort_multipart_upload(
     """Abort multipart upload session."""
     s3_service.abort_multipart_upload(s3_key=req.s3_key, upload_id=req.upload_id)
     return {"status": "aborted"}
+
+TEMP_CHUNKS_DIR = Path(__file__).resolve().parent.parent.parent / "storage_data" / "temp_chunks"
+TEMP_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+
+@router.post("/chunk/init", response_model=ChunkInitResponse)
+async def init_chunk_upload(
+    req: ChunkInitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Initialize a proxy chunked upload session (5MB per chunk, 100% Cloudflare Tunnel safe)."""
+    workspace_id = req.workspace_id
+    if not workspace_id and req.folder_id:
+        folder = await db.get(Folder, req.folder_id)
+        if folder:
+            workspace_id = folder.workspace_id
+    await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
+
+    upload_id = str(uuid.uuid4())
+    session_dir = TEMP_CHUNKS_DIR / upload_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    chunk_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
+    total_parts = math.ceil(req.size_bytes / chunk_bytes) if req.size_bytes > 0 else 1
+
+    return ChunkInitResponse(
+        upload_id=upload_id,
+        chunk_size_mb=settings.MINIO_MAX_CHUNK_SIZE_MB,
+        chunk_size_bytes=chunk_bytes,
+        total_parts=total_parts
+    )
+
+@router.post("/chunk/part")
+async def upload_chunk_part(
+    upload_id: str = Form(...),
+    part_number: int = Form(...),
+    chunk: UploadFile = File(...),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Save an individual chunk part (5MB) into temporary session storage."""
+    session_dir = TEMP_CHUNKS_DIR / upload_id
+    if not session_dir.exists():
+        raise HTTPException(status_code=404, detail="Upload session expired or not found")
+
+    part_file = session_dir / f"part_{part_number:05d}.bin"
+    chunk_bytes = await chunk.read()
+
+    with open(part_file, "wb") as f:
+        f.write(chunk_bytes)
+
+    return {"upload_id": upload_id, "part_number": part_number, "bytes_received": len(chunk_bytes)}
+
+@router.post("/chunk/complete", response_model=FileResponse)
+async def complete_chunk_upload(
+    req: ChunkCompleteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Merge all chunk parts, save file, generate thumbnail, and record in PostgreSQL."""
+    session_dir = TEMP_CHUNKS_DIR / req.upload_id
+    if not session_dir.exists():
+        raise HTTPException(status_code=404, detail="Upload session not found")
+
+    file_uuid = uuid.uuid4()
+    s3_key = f"uploads/{file_uuid}/{req.filename}"
+    local_target_path = s3_service._get_local_path(s3_key)
+
+    try:
+        # Merge all part files in order
+        with open(local_target_path, "wb") as out_f:
+            for part_num in range(1, req.total_parts + 1):
+                part_file = session_dir / f"part_{part_num:05d}.bin"
+                if not part_file.exists():
+                    raise HTTPException(status_code=400, detail=f"Missing chunk part {part_num}")
+                with open(part_file, "rb") as in_f:
+                    shutil.copyfileobj(in_f, out_f)
+
+        # Cleanup temporary chunk parts
+        shutil.rmtree(session_dir, ignore_errors=True)
+    except Exception as merge_err:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        if local_target_path.exists():
+            local_target_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Failed to merge file chunks: {str(merge_err)}")
+
+    # Detect file type
+    name_lower = req.filename.lower()
+    file_type = "other"
+    is_markdown = False
+    if name_lower.endswith(".md"):
+        file_type = "markdown"
+        is_markdown = True
+    elif name_lower.endswith(".pdf"):
+        file_type = "pdf"
+    elif name_lower.endswith((".docx", ".doc")):
+        file_type = "docx"
+    elif name_lower.endswith((".xlsx", ".xls")):
+        file_type = "xlsx"
+    elif name_lower.endswith((".txt", ".json", ".csv", ".py", ".js", ".html", ".css", ".yaml", ".yml")):
+        file_type = "text"
+    elif name_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")):
+        file_type = "image"
+    elif name_lower.endswith((".mp4", ".webm", ".mov", ".avi", ".mkv")):
+        file_type = "video"
+    elif name_lower.endswith((".mp3", ".wav", ".ogg", ".m4a", ".flac")):
+        file_type = "audio"
+    elif name_lower.endswith((".zip", ".tar", ".gz", ".7z", ".rar")):
+        file_type = "archive"
+
+    workspace_id = req.workspace_id
+    if req.folder_id:
+        if not await access_service.can_access_folder(db, current_user, req.folder_id):
+            raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
+        folder = await db.get(Folder, req.folder_id)
+        if folder:
+            if workspace_id and folder.workspace_id and workspace_id != folder.workspace_id:
+                raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
+            if not workspace_id:
+                workspace_id = folder.workspace_id
+
+    if workspace_id:
+        if not await access_service.is_workspace_member(db, current_user, workspace_id):
+            raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+
+    # Generate thumbnail for media files
+    thumbnail_s3_key = None
+    if file_type in ("image", "video"):
+        try:
+            with open(local_target_path, "rb") as f:
+                media_bytes = f.read(10 * 1024 * 1024) if file_type == "video" else f.read()
+            if media_bytes:
+                thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail(
+                    file_uuid=str(file_uuid),
+                    filename=req.filename,
+                    file_bytes=media_bytes,
+                    file_type=file_type
+                )
+        except Exception as thumb_err:
+            print(f"[Thumbnail Warning] Chunk thumbnail generation failed: {thumb_err}")
+
+    # Read content for text/markdown
+    content = None
+    if is_markdown or file_type == "text":
+        try:
+            with open(local_target_path, "rb") as f:
+                content_bytes = f.read()
+            content = content_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+
+    actual_size = local_target_path.stat().st_size if local_target_path.exists() else req.size_bytes
+
+    file_item = FileItem(
+        folder_id=req.folder_id,
+        workspace_id=workspace_id,
+        created_by=current_user.id,
+        name=req.filename,
+        file_type=file_type,
+        mime_type=req.mime_type or "application/octet-stream",
+        size_bytes=actual_size,
+        s3_key=s3_key,
+        thumbnail_s3_key=thumbnail_s3_key,
+        content=content,
+        is_markdown=is_markdown
+    )
+    db.add(file_item)
+    await db.commit()
+    await db.refresh(file_item)
+
+    # Record quota
+    await quota_service.record_storage_added(db, workspace_id, current_user, actual_size)
+
+    # Index embeddings
+    try:
+        await document_service.index_file_chunks(db, file_item)
+    except Exception as e:
+        print(f"[Embedding Warning] Indexing failed for chunk file {file_item.id}: {e}")
+
+    resp = FileResponse.model_validate(file_item)
+    if file_item.thumbnail_s3_key:
+        resp.thumbnail_url = f"/api/storage/thumbnail/{file_item.id}"
+    return resp
+
+@router.post("/chunk/abort")
+async def abort_chunk_upload(
+    req: ChunkAbortRequest,
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Abort proxy chunk upload and delete temporary chunk parts."""
+    session_dir = TEMP_CHUNKS_DIR / req.upload_id
+    if session_dir.exists():
+        shutil.rmtree(session_dir, ignore_errors=True)
+    return {"status": "aborted"}
+
 
 @router.post("/direct-upload", response_model=FileResponse)
 async def direct_upload(

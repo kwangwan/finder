@@ -945,10 +945,10 @@ export async function searchDocuments({
 
 
 /**
- * Cloudflare Zero Trust Aware Multipart / Presigned Chunked File Uploader
+ * Robust 5MB Chunked Proxy File Uploader (100% Cloudflare Tunnel & Proxy Safe)
  */
 export async function uploadFileChunked(file, folderId = null, workspaceId = null, onProgress = () => {}, signal = null) {
-  const chunkSize = 5 * 1024 * 1024; // 5MB chunks (Cloudflare Tunnel safe & S3 part size)
+  const chunkSize = 5 * 1024 * 1024; // 5MB chunks (Cloudflare Tunnel safe)
   const fileSize = file.size;
 
   // Single small file upload (< 5MB)
@@ -956,10 +956,10 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
     return directUploadFallback(file, folderId, workspaceId, onProgress, signal);
   }
 
-  // Large Multipart Chunked Upload (> 5MB)
+  // Large Chunked Proxy Upload (> 5MB)
   onProgress({ percent: 2, status: '대용량 업로드 세션 초기화...' });
 
-  const initRes = await fetch(`${API_BASE}/storage/multipart/initiate`, {
+  const initRes = await fetch(`${API_BASE}/storage/chunk/init`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
@@ -973,12 +973,11 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
   });
 
   if (!initRes.ok) {
-    console.warn('Multipart init failed, trying direct upload:', await initRes.text());
-    return directUploadFallback(file, folderId, workspaceId, onProgress, signal);
+    const errData = await initRes.json().catch(() => ({}));
+    throw new Error(errData.detail || '대용량 업로드 세션 초기화에 실패했습니다.');
   }
 
-  const { upload_id, s3_key, total_parts } = await initRes.json();
-  const completedParts = [];
+  const { upload_id, total_parts } = await initRes.json();
 
   try {
     for (let partNumber = 1; partNumber <= total_parts; partNumber++) {
@@ -999,74 +998,53 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
         status: `청크 전송 중 (${partNumber}/${total_parts} · ${sentMb}MB/${totalMb}MB)`,
       });
 
-      const partUrlRes = await fetch(`${API_BASE}/storage/multipart/part-urls`, {
+      const formData = new FormData();
+      formData.append('upload_id', upload_id);
+      formData.append('part_number', partNumber);
+      formData.append('chunk', chunkBlob, `part_${partNumber}.bin`);
+
+      const partUploadRes = await fetch(`${API_BASE}/storage/chunk/part`, {
         method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          s3_key,
-          upload_id,
-          part_numbers: [partNumber],
-        }),
+        headers: authHeaders(),
+        body: formData,
         signal
       });
 
-      if (!partUrlRes.ok) throw new Error(`청크 ${partNumber} Presigned URL 발급 실패`);
-      const { parts } = await partUrlRes.json();
-      const partUrl = parts[0].upload_url;
-
-      const partUploadRes = await fetch(partUrl, {
-        method: 'PUT',
-        body: chunkBlob,
-        signal
-      });
-
-      if (!partUploadRes.ok) throw new Error(`청크 ${partNumber} 업로드 실패`);
-
-      let etag = partUploadRes.headers.get('ETag') || `"${partNumber}"`;
-      completedParts.push({
-        PartNumber: partNumber,
-        ETag: etag,
-      });
+      if (!partUploadRes.ok) {
+        throw new Error(`청크 ${partNumber}/${total_parts} 전송 실패`);
+      }
     }
 
     onProgress({ percent: 94, status: '파일 병합 및 썸네일 생성 중...' });
 
-    let fileType = 'other';
-    const nameLower = file.name.toLowerCase();
-    if (nameLower.endsWith('.md')) fileType = 'markdown';
-    else if (nameLower.endsWith('.pdf')) fileType = 'pdf';
-    else if (nameLower.endsWith('.docx') || nameLower.endsWith('.doc')) fileType = 'docx';
-    else if (nameLower.endsWith('.xlsx') || nameLower.endsWith('.xls')) fileType = 'xlsx';
-    else if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico'].some(ext => nameLower.endsWith('.' + ext))) fileType = 'image';
-    else if (['mp4', 'webm', 'mov', 'mkv', 'avi'].some(ext => nameLower.endsWith('.' + ext))) fileType = 'video';
-    else if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].some(ext => nameLower.endsWith('.' + ext))) fileType = 'audio';
-
-    const completeRes = await fetch(`${API_BASE}/storage/multipart/complete`, {
+    const completeRes = await fetch(`${API_BASE}/storage/chunk/complete`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
-        s3_key,
         upload_id,
-        parts: completedParts,
         filename: file.name,
         folder_id: folderId,
         workspace_id: workspaceId,
-        file_type: fileType,
         mime_type: file.type || 'application/octet-stream',
         size_bytes: fileSize,
+        total_parts
       }),
       signal
     });
 
-    if (!completeRes.ok) throw new Error('Multipart 업로드 완료 처리 실패');
+    if (!completeRes.ok) {
+      const errData = await completeRes.json().catch(() => ({}));
+      throw new Error(errData.detail || '파일 병합 및 저장에 실패했습니다.');
+    }
+
     const resultFile = await completeRes.json();
     onProgress({ percent: 100, status: '완료됨' });
     return resultFile;
   } catch (e) {
-    fetch(`${API_BASE}/storage/multipart/abort`, {
+    fetch(`${API_BASE}/storage/chunk/abort`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ s3_key, upload_id }),
+      body: JSON.stringify({ upload_id }),
     }).catch(() => {});
     throw e;
   }

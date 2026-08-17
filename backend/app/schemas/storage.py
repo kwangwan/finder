@@ -68,3 +68,29 @@ class MultipartCompleteRequest(BaseModel):
 class MultipartAbortRequest(BaseModel):
     s3_key: str
     upload_id: str
+
+class ChunkInitRequest(BaseModel):
+    filename: str
+    workspace_id: Optional[uuid.UUID] = None
+    folder_id: Optional[uuid.UUID] = None
+    size_bytes: int
+    content_type: str = "application/octet-stream"
+
+class ChunkInitResponse(BaseModel):
+    upload_id: str
+    chunk_size_mb: int = 5
+    chunk_size_bytes: int = 5 * 1024 * 1024
+    total_parts: int
+
+class ChunkCompleteRequest(BaseModel):
+    upload_id: str
+    filename: str
+    workspace_id: Optional[uuid.UUID] = None
+    folder_id: Optional[uuid.UUID] = None
+    size_bytes: int
+    mime_type: Optional[str] = None
+    total_parts: int
+
+class ChunkAbortRequest(BaseModel):
+    upload_id: str
+
