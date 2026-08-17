@@ -460,54 +460,59 @@ export default function WorkspaceSettingsModal({
           <div>
             {/* Invite Form */}
             {isAdminOrOwner && (
-              <form onSubmit={handleInviteMember} className="workspace-member-invite-form">
-                <input
-                  type="email"
-                  required
-                  placeholder="초대할 이메일 (예: teammate@company.com)"
-                  value={inviteEmail}
-                  onChange={e => setInviteEmail(e.target.value)}
-                  style={{
-                    flex: '1 1 180px',
-                    minWidth: 0,
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '0.45rem 0.65rem',
-                    fontSize: '0.82rem',
-                    color: 'var(--text-primary)',
-                    outline: 'none'
-                  }}
-                />
-                <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                  <select
-                    value={inviteRole}
-                    onChange={e => setInviteRole(e.target.value)}
+              <>
+                <form onSubmit={handleInviteMember} className="workspace-member-invite-form">
+                  <input
+                    type="email"
+                    required
+                    placeholder="초대할 이메일 (예: teammate@company.com)"
+                    value={inviteEmail}
+                    onChange={e => setInviteEmail(e.target.value)}
                     style={{
+                      flex: '1 1 180px',
+                      minWidth: 0,
                       background: 'var(--bg-card)',
                       border: '1px solid var(--border-subtle)',
                       borderRadius: 'var(--radius-sm)',
-                      padding: '0.45rem 0.35rem',
-                      fontSize: '0.8rem',
+                      padding: '0.45rem 0.65rem',
+                      fontSize: '0.82rem',
                       color: 'var(--text-primary)',
-                      outline: 'none',
-                      width: 82
+                      outline: 'none'
                     }}
-                  >
-                    <option value="member">멤버</option>
-                    {isOwner && <option value="admin">관리자</option>}
-                  </select>
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={!inviteEmail.trim() || isLoading}
-                    style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem', whiteSpace: 'nowrap' }}
-                  >
-                    <UserPlus size={14} />
-                    <span>초대</span>
-                  </button>
+                  />
+                  <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
+                    <select
+                      value={inviteRole}
+                      onChange={e => setInviteRole(e.target.value)}
+                      style={{
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '0.45rem 0.35rem',
+                        fontSize: '0.8rem',
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                        width: 82
+                      }}
+                    >
+                      <option value="member">멤버</option>
+                      {(isOwner || currentUser?.is_admin) && <option value="admin">관리자</option>}
+                    </select>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={!inviteEmail.trim() || isLoading}
+                      style={{ fontSize: '0.8rem', padding: '0.45rem 0.75rem', whiteSpace: 'nowrap' }}
+                    >
+                      <UserPlus size={14} />
+                      <span>초대</span>
+                    </button>
+                  </div>
+                </form>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: -8, marginBottom: '1rem', wordBreak: 'keep-all' }}>
+                  초대 링크는 발송일로부터 7일간 유효합니다.
                 </div>
-              </form>
+              </>
             )}
 
             {/* Member List */}

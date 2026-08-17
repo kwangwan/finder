@@ -89,7 +89,7 @@ export default function InvitationManagerModal({
       setEmail('');
       setMessage({ 
         type: 'success', 
-        text: `'${email}' 님에게 7일 유효 초대장이 성공적으로 발송되었습니다.` 
+        text: `'${email}' 님에게 초대장을 성공적으로 발송했습니다. (7일간 유효)` 
       });
       await loadInvitations();
     } catch (err) {
@@ -169,18 +169,18 @@ export default function InvitationManagerModal({
               <Mail size={22} />
             </div>
             <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3, wordBreak: 'keep-all' }}>
                 {currentUser?.is_admin ? '초대 및 멤버 관리' : '워크스페이스 멤버 초대'}
               </h2>
               <p style={{ 
-                fontSize: '0.82rem', 
+                fontSize: '0.8rem', 
                 color: 'var(--text-muted)', 
                 marginTop: '4px', 
                 lineHeight: 1.45,
                 wordBreak: 'keep-all',
                 overflowWrap: 'break-word'
               }}>
-                초대 링크는 7일간 유효하며, 초대된 사용자는 즉시 워크스페이스에 참여할 수 있습니다.
+                초대 링크는 발송일로부터 7일간 유효합니다.
               </p>
             </div>
           </div>
@@ -343,9 +343,9 @@ export default function InvitationManagerModal({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', wordBreak: 'keep-all' }}>
                 {!isOwnerOfSelectedWs && (
-                  <span>* 워크스페이스 관리자(Admin) 권한은 소유자만 부여할 수 있습니다.</span>
+                  <span>* 관리자(Admin) 권한 초대는 워크스페이스 소유자만 가능합니다.</span>
                 )}
               </div>
               <button
