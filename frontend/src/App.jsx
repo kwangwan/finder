@@ -19,6 +19,8 @@ import MoveFilesModal from './components/modals/MoveFilesModal';
 import TransferManager from './components/transfer/TransferManager';
 import WindowManager from './components/window/WindowManager';
 import { useWindowManager } from './hooks/useWindowManager';
+import UploadProgressBanner from './components/upload/UploadProgressBanner';
+import { useUploadManager } from './hooks/useUploadManager';
 import { 
   Folder as FolderIcon,
   FolderPlus,
@@ -130,6 +132,14 @@ export default function App() {
 
   // OS-Style Multi-Window Manager
   const windowManager = useWindowManager();
+
+  // Persistent Upload Manager
+  const uploadManager = useUploadManager({
+    onUploadSuccess: () => {
+      refreshFiles();
+      refreshFoldersAndStats();
+    }
+  });
 
   // Sync theme
   useEffect(() => {
@@ -1143,11 +1153,16 @@ export default function App() {
         currentFolderId={activeFolderId}
         folders={folders}
         initialFiles={uploadInitialFiles}
-        onUploadSuccess={() => {
-          refreshFiles();
-          refreshFoldersAndStats();
-        }}
+        uploadManager={uploadManager}
       />
+
+      {/* Persistent Upload Progress Floating Banner */}
+      {!isUploadOpen && (
+        <UploadProgressBanner
+          uploadManager={uploadManager}
+          onOpenModal={() => setIsUploadOpen(true)}
+        />
+      )}
 
       <NewFolderModal
         isOpen={isNewFolderOpen}
