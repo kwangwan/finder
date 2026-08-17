@@ -720,7 +720,7 @@ export default function FolderExplorer({
                   }}
                 >
                   <div className="file-card-top">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minHeight: 30, minWidth: 0, flexShrink: 1, flexWrap: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minHeight: 30, minWidth: 0, flexShrink: 0 }}>
                       <div 
                         onClick={(e) => toggleFileSelection(file.id, e)}
                         title="선택"
@@ -736,16 +736,6 @@ export default function FolderExplorer({
                       <div className="file-icon-wrap" style={{ flexShrink: 0 }}>
                         {getFileIcon(file)}
                       </div>
-                      {file.is_embedded && (
-                        <span 
-                          className="badge-embedded" 
-                          title="AI 지식 검색 연동 완료"
-                          style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-                        >
-                          <Sparkles size={11} />
-                          <span>임베딩됨</span>
-                        </span>
-                      )}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
@@ -846,8 +836,20 @@ export default function FolderExplorer({
                   </div>
 
                   <div className="file-card-meta">
-                    <span>{formatFileSize(file.size_bytes)}</span>
-                    <span>{formatDate(file.updated_at || file.created_at)}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span>{formatFileSize(file.size_bytes)}</span>
+                      <span>•</span>
+                      <span>{formatDate(file.updated_at || file.created_at)}</span>
+                    </div>
+                    {file.is_embedded && (
+                      <span 
+                        className="badge-embedded" 
+                        title="AI 지식 검색 연동 완료"
+                      >
+                        <Sparkles size={10} />
+                        <span>임베딩됨</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               );
