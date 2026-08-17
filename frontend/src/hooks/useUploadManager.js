@@ -8,7 +8,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   const activeWorkersRef = useRef(0);
   const queueRef = useRef([]);
   const abortControllersRef = useRef(new Map());
-  const folderPathCacheRef = useRef(new Map());
+  const folderIdCacheRef = useRef(new Map());
+  const folderInFlightPromisesRef = useRef(new Map());
 
   useEffect(() => {
     queueRef.current = queue;
@@ -37,6 +38,40 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     setQueue(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
   }, []);
 
+  /**
+   * Thread-safe in-flight promise caching for folder creation.
+   * Prevents concurrent workers from creating duplicate folders with identical paths.
+   */
+  const resolveFolderPath = useCallback(async (targetWsId, parentFolderId, folderPath) => {
+    if (!folderPath || !targetWsId) return parentFolderId || null;
+
+    const cacheKey = `${targetWsId}:${parentFolderId || 'root'}:${folderPath}`;
+    
+    // 1. Return cached ID if already resolved
+    if (folderIdCacheRef.current.has(cacheKey)) {
+      return folderIdCacheRef.current.get(cacheKey);
+    }
+
+    // 2. If a request is already in flight for this exact path, await the existing promise
+    if (folderInFlightPromisesRef.current.has(cacheKey)) {
+      return folderInFlightPromisesRef.current.get(cacheKey);
+    }
+
+    // 3. Create a single in-flight promise shared by all workers
+    const promise = (async () => {
+      try {
+        const ensured = await ensureFolderPath(targetWsId, parentFolderId || null, folderPath);
+        folderIdCacheRef.current.set(cacheKey, ensured.folder_id);
+        return ensured.folder_id;
+      } finally {
+        folderInFlightPromisesRef.current.delete(cacheKey);
+      }
+    })();
+
+    folderInFlightPromisesRef.current.set(cacheKey, promise);
+    return promise;
+  }, []);
+
   const processNextItem = useCallback(async () => {
     if (activeWorkersRef.current >= MAX_CONCURRENT_UPLOADS) return;
 
@@ -61,15 +96,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         const folderPath = pathParts.join('/');
 
         if (folderPath && targetWsId) {
-          const cacheKey = `${targetWsId}:${nextItem.targetFolderId || 'root'}:${folderPath}`;
-          if (folderPathCacheRef.current.has(cacheKey)) {
-            targetFolderId = folderPathCacheRef.current.get(cacheKey);
-          } else {
-            updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
-            const ensured = await ensureFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
-            targetFolderId = ensured.folder_id;
-            folderPathCacheRef.current.set(cacheKey, targetFolderId);
-          }
+          updateItem(nextItem.id, { statusText: `폴더 구조 확인 중 (${folderPath})...` });
+          targetFolderId = await resolveFolderPath(targetWsId, nextItem.targetFolderId || null, folderPath);
         }
       }
 
@@ -108,7 +136,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         processNextItem();
       }, 20);
     }
-  }, [updateItem, onUploadSuccess]);
+  }, [updateItem, onUploadSuccess, resolveFolderPath]);
 
   const startWorkerPool = useCallback(() => {
     for (let i = 0; i < MAX_CONCURRENT_UPLOADS; i++) {
@@ -138,11 +166,28 @@ export function useUploadManager({ onUploadSuccess } = {}) {
 
     setQueue(prev => [...prev, ...newItems]);
 
+    // Pre-resolve folder paths in background so folder trees exist before workers begin
+    const uniquePaths = new Set();
+    newItems.forEach(it => {
+      if (it.relativePath && it.relativePath.includes('/')) {
+        const parts = it.relativePath.split('/');
+        parts.pop();
+        const p = parts.join('/');
+        if (p) uniquePaths.add(p);
+      }
+    });
+
+    if (uniquePaths.size > 0 && activeWorkspaceId) {
+      uniquePaths.forEach(p => {
+        resolveFolderPath(activeWorkspaceId, targetFolderId, p).catch(() => {});
+      });
+    }
+
     // Trigger process in next tick
     setTimeout(() => {
       startWorkerPool();
     }, 50);
-  }, [startWorkerPool]);
+  }, [startWorkerPool, resolveFolderPath]);
 
   const cancelUpload = useCallback((id) => {
     const controller = abortControllersRef.current.get(id);

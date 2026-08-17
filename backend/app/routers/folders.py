@@ -1,5 +1,6 @@
 import uuid
 import math
+import asyncio
 from datetime import datetime
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -409,6 +410,8 @@ async def delete_folder(
     return None
 
 
+folder_creation_lock = asyncio.Lock()
+
 @router.post("/ensure-path", response_model=EnsurePathResponse)
 async def ensure_folder_path(
     req: EnsurePathRequest,
@@ -418,6 +421,7 @@ async def ensure_folder_path(
     """
     Ensure all folders along relative_path exist in workspace.
     Creates missing parent/child folders recursively and returns the target folder ID.
+    Thread-safe and atomic with asyncio lock to prevent race conditions during parallel uploads.
     """
     if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
         raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
@@ -437,44 +441,45 @@ async def ensure_folder_path(
             relative_path=""
         )
 
-    current_parent_id = req.parent_id
-    last_folder = None
+    async with folder_creation_lock:
+        current_parent_id = req.parent_id
+        last_folder = None
 
-    for part in parts:
-        # Check if folder exists under current_parent_id
-        q = select(Folder).where(
-            and_(
-                Folder.workspace_id == req.workspace_id,
-                Folder.name == part,
-                Folder.parent_id == current_parent_id,
-                Folder.is_trashed == False
-            )
+        for part in parts:
+            # Check if folder exists under current_parent_id
+            q = select(Folder).where(
+                and_(
+                    Folder.workspace_id == req.workspace_id,
+                    Folder.name == part,
+                    Folder.parent_id == current_parent_id,
+                    Folder.is_trashed == False
+                )
+            ).order_by(Folder.created_at.asc())
+            res = await db.execute(q)
+            existing = res.scalars().first()
+
+            if existing:
+                current_parent_id = existing.id
+                last_folder = existing
+            else:
+                # Create new folder
+                new_folder = Folder(
+                    name=part,
+                    workspace_id=req.workspace_id,
+                    parent_id=current_parent_id,
+                    created_by=current_user.id
+                )
+                db.add(new_folder)
+                await db.commit()
+                await db.refresh(new_folder)
+                current_parent_id = new_folder.id
+                last_folder = new_folder
+
+        return EnsurePathResponse(
+            folder_id=last_folder.id if last_folder else None,
+            folder_name=last_folder.name if last_folder else parts[-1],
+            relative_path=clean_path
         )
-        res = await db.execute(q)
-        existing = res.scalar_one_or_none()
-
-        if existing:
-            current_parent_id = existing.id
-            last_folder = existing
-        else:
-            # Create new folder
-            new_folder = Folder(
-                name=part,
-                workspace_id=req.workspace_id,
-                parent_id=current_parent_id,
-                created_by=current_user.id
-            )
-            db.add(new_folder)
-            await db.commit()
-            await db.refresh(new_folder)
-            current_parent_id = new_folder.id
-            last_folder = new_folder
-
-    return EnsurePathResponse(
-        folder_id=last_folder.id if last_folder else None,
-        folder_name=last_folder.name if last_folder else parts[-1],
-        relative_path=clean_path
-    )
 
 
 async def _collect_folder_files_recursive(
