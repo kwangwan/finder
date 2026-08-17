@@ -31,9 +31,11 @@ import {
   CheckSquare,
   Square,
   FolderInput,
-  X
+  X,
+  Filter
 } from 'lucide-react';
 import { downloadFileChunked, getThumbnailUrl } from '../../api';
+import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
 
 function getPageNumbers(currentPage, totalPages) {
@@ -221,12 +223,13 @@ export default function FolderExplorer({
     }
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     setIsDragOver(false);
     dragCounter.current = 0;
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onDropFiles(e.dataTransfer.files);
+    const extractedFiles = await extractFilesFromDataTransfer(e.dataTransfer);
+    if (extractedFiles && extractedFiles.length > 0) {
+      onDropFiles(extractedFiles);
     }
   };
 

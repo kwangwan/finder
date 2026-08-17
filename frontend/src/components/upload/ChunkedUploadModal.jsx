@@ -15,6 +15,8 @@ import {
   Check
 } from 'lucide-react';
 
+import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
+
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
   let result = [];
@@ -31,39 +33,6 @@ function flattenFolderTree(nodeList, depth = 0) {
     }
   }
   return result;
-}
-
-// Recursive entry traversal for drag and drop folder trees
-async function traverseFileSystemEntry(entry, path = '') {
-  if (entry.isFile) {
-    return new Promise((resolve) => {
-      entry.file((file) => {
-        file.relativePath = path ? `${path}/${file.name}` : file.name;
-        resolve([file]);
-      }, () => resolve([]));
-    });
-  } else if (entry.isDirectory) {
-    const dirReader = entry.createReader();
-    const currentPath = path ? `${path}/${entry.name}` : entry.name;
-    return new Promise((resolve) => {
-      const allFiles = [];
-      const readEntries = () => {
-        dirReader.readEntries(async (entries) => {
-          if (!entries || entries.length === 0) {
-            resolve(allFiles);
-          } else {
-            for (const childEntry of entries) {
-              const childFiles = await traverseFileSystemEntry(childEntry, currentPath);
-              allFiles.push(...childFiles);
-            }
-            readEntries();
-          }
-        }, () => resolve(allFiles));
-      };
-      readEntries();
-    });
-  }
-  return [];
 }
 
 export default function ChunkedUploadModal({
@@ -123,31 +92,9 @@ export default function ChunkedUploadModal({
     setIsDragging(false);
     dragCounter.current = 0;
 
-    const items = e.dataTransfer.items;
-    if (items && items.length > 0) {
-      const entries = [];
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.webkitGetAsEntry) {
-          const entry = item.webkitGetAsEntry();
-          if (entry) entries.push(entry);
-        }
-      }
-
-      const allFiles = [];
-      for (const entry of entries) {
-        const files = await traverseFileSystemEntry(entry);
-        allFiles.push(...files);
-      }
-
-      if (allFiles.length > 0) {
-        handleFiles(allFiles);
-        return;
-      }
-    }
-
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFiles(e.dataTransfer.files);
+    const files = await extractFilesFromDataTransfer(e.dataTransfer);
+    if (files && files.length > 0) {
+      handleFiles(files);
     }
   };
 
@@ -243,16 +190,23 @@ export default function ChunkedUploadModal({
               ref={fileInputRef} 
               style={{ display: 'none' }} 
               multiple 
-              onChange={(e) => handleFiles(e.target.files)} 
+              onChange={(e) => {
+                handleFiles(e.target.files);
+                e.target.value = '';
+              }} 
             />
             <input 
               type="file" 
               ref={folderInputRef} 
               style={{ display: 'none' }} 
               webkitdirectory="" 
+              mozdirectory=""
               directory="" 
               multiple 
-              onChange={(e) => handleFiles(e.target.files)} 
+              onChange={(e) => {
+                handleFiles(e.target.files);
+                e.target.value = '';
+              }} 
             />
 
             <div style={{
