@@ -235,9 +235,7 @@ export default function FolderExplorer({
       toggleFileSelection(file.id, e);
       return;
     }
-    if (isPreviewableFile(file) && onOpenMediaPreview) {
-      onOpenMediaPreview(file);
-    } else {
+    if (onOpenFile) {
       onOpenFile(file);
     }
   };

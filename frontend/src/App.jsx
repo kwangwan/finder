@@ -17,6 +17,8 @@ import ContextMenu from './components/common/ContextMenu';
 import RenameModal from './components/modals/RenameModal';
 import MoveFilesModal from './components/modals/MoveFilesModal';
 import TransferManager from './components/transfer/TransferManager';
+import WindowManager from './components/window/WindowManager';
+import { useWindowManager } from './hooks/useWindowManager';
 import { 
   Folder as FolderIcon,
   FolderPlus,
@@ -123,9 +125,11 @@ export default function App() {
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [newFolderParentId, setNewFolderParentId] = useState(null);
   const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
-  const [mediaPreviewFile, setMediaPreviewFile] = useState(null);
   const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, items: [] });
   const [renameModal, setRenameModal] = useState({ isOpen: false, item: null });
+
+  // OS-Style Multi-Window Manager
+  const windowManager = useWindowManager();
 
   // Sync theme
   useEffect(() => {
@@ -617,34 +621,9 @@ export default function App() {
     }
   };
 
-  const isPreviewableFileType = (file) => {
-    if (!file) return false;
-    if (file.is_markdown || (file.name && file.name.toLowerCase().endsWith('.md'))) return false;
-    const name = (file.name || '').toLowerCase();
-    const type = (file.file_type || '').toLowerCase();
-    return type === 'image' || type === 'video' || type === 'pdf' || type === 'docx' || type === 'xlsx' || type === 'archive' ||
-           name.match(/\.(pdf|png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov|avi|mkv|docx|doc|xlsx|xls|csv|zip|tar|gz|7z)$/i);
-  };
-
-  const handleOpenFile = async (file) => {
-    try {
-      if (isPreviewableFileType(file)) {
-        setMediaPreviewFile(file);
-        return;
-      }
-      const detail = await getFileDetail(file.id);
-      if (isPreviewableFileType(detail)) {
-        setMediaPreviewFile(detail);
-        return;
-      }
-      setActiveFile(detail);
-    } catch (err) {
-      await showAlert({
-        title: '조회 실패',
-        message: '파일 상세 정보를 불러오지 못했습니다: ' + err.message,
-        type: 'error'
-      });
-    }
+  const handleOpenFile = (file) => {
+    if (!file) return;
+    windowManager.openWindow(file);
   };
 
   const handleNewNote = async () => {
@@ -1070,7 +1049,7 @@ export default function App() {
           <TrashExplorer
             activeWorkspace={activeWorkspace}
             currentUser={currentUser}
-            onOpenMediaPreview={(file) => setMediaPreviewFile(file)}
+            onOpenMediaPreview={(file) => windowManager.openWindow(file)}
             onRefreshParent={() => {
               refreshFiles();
               refreshFoldersAndStats();
@@ -1102,7 +1081,7 @@ export default function App() {
             folderPath={currentFolderPath}
             onSelectFolder={handleSelectFolder}
             onOpenFile={handleOpenFile}
-            onOpenMediaPreview={(file) => setMediaPreviewFile(file)}
+            onOpenMediaPreview={(file) => windowManager.openWindow(file)}
             onNewNote={handleNewNote}
             onNewFolder={(parentId) => {
               setNewFolderParentId(parentId !== undefined ? parentId : activeFolderId);
@@ -1197,11 +1176,12 @@ export default function App() {
         }}
       />
 
-      {/* Media Preview Modal (Image Lightbox & Video Player) */}
-      <MediaPreviewModal
-        isOpen={!!mediaPreviewFile}
-        onClose={() => setMediaPreviewFile(null)}
-        file={mediaPreviewFile}
+      {/* OS-Style Multi-Window Preview Manager & Dock */}
+      <WindowManager
+        windowManager={windowManager}
+        onEditFile={(file) => {
+          setActiveFile(file);
+        }}
       />
 
       {/* Invitation Manager Modal (7-day invites & AWS SES) */}
