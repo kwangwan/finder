@@ -855,7 +855,7 @@ export default function App() {
   const handleTrashFolder = async (folder) => {
     const confirmed = await showConfirm({
       title: '폴더 휴지통으로 이동',
-      message: `'${folder.name}' 폴더와 하위 모든 파일/하위 폴더를 휴지통으로 이동하시겠습니까?\n휴지통에서 언제든 복구할 수 있으며 30일 후 자동 영구 삭제됩니다.`,
+      message: `'${folder.name}' 폴더를 휴지통으로 이동하시겠습니까?\n하위 파일·폴더도 함께 이동되며, 30일 후 자동 영구 삭제됩니다.`,
       type: 'danger',
       confirmText: '휴지통으로 이동',
       cancelText: '취소'

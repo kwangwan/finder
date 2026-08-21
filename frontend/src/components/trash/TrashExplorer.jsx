@@ -189,7 +189,7 @@ export default function TrashExplorer({
 
     const confirmed = await showConfirm({
       title: '폴더 영구 삭제',
-      message: `'${folder.name}' 폴더와 그 안의 모든 파일 및 하위 폴더가 영구 삭제됩니다.\n이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`,
+      message: `'${folder.name}' 폴더를 영구 삭제하시겠습니까?\n하위 파일·폴더도 모두 삭제되며, 되돌릴 수 없습니다.`,
       type: 'danger',
       confirmText: '영구 삭제',
       cancelText: '취소'
