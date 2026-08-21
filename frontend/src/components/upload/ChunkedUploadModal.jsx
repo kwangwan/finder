@@ -16,8 +16,6 @@ import {
 } from 'lucide-react';
 
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
-import { listFiles, deleteFile, ensureFolderPath } from '../../api';
-import FileConflictModal from './FileConflictModal';
 import Select from '../common/Select';
 
 // Helper to flatten nested folder tree for dropdown options with indentations
@@ -48,7 +46,6 @@ export default function ChunkedUploadModal({
 }) {
   const [selectedFolder, setSelectedFolder] = useState(currentFolderId || '');
   const [isDragging, setIsDragging] = useState(false);
-  const [pendingConflict, setPendingConflict] = useState(null); // { conflicts, restFiles }
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const dragCounter = useRef(0);
@@ -60,7 +57,7 @@ export default function ChunkedUploadModal({
     completedCount,
     errorCount,
     totalProgress,
-    addFilesToQueue,
+    checkAndQueueFiles,
     cancelUpload,
     cancelAll,
     removeItem,
@@ -80,108 +77,13 @@ export default function ChunkedUploadModal({
 
   if (!isOpen) return null;
 
-  const enqueueFiles = (fileList) => {
-    if (fileList.length > 0 && addFilesToQueue) {
-      addFilesToQueue(fileList, selectedFolder, activeWorkspaceId);
+  // The conflict check (same-name-file dialog) lives in useUploadManager so
+  // it also covers dropping a folder directly onto the explorer view, not
+  // just this modal's own drop zone / pickers.
+  const handleFiles = (fileList) => {
+    if (fileList && fileList.length > 0 && checkAndQueueFiles) {
+      checkAndQueueFiles(fileList, selectedFolder, activeWorkspaceId);
     }
-  };
-
-  // Checks one folder's existing files for name collisions against the files
-  // headed there, returning [conflicts, clean].
-  const findConflictsInFolder = async (folderId, files) => {
-    const existing = await listFiles({
-      workspace_id: activeWorkspaceId,
-      folder_id: folderId || null,
-      root_only: !folderId
-    });
-    const existingItems = Array.isArray(existing) ? existing : (existing?.items || []);
-    const existingNames = new Set(existingItems.map(f => f.name));
-    const conflicts = files
-      .filter(f => existingNames.has(f.name))
-      .map(f => ({ file: f, existingId: existingItems.find(e => e.name === f.name)?.id }));
-    const clean = files.filter(f => !existingNames.has(f.name));
-    return [conflicts, clean];
-  };
-
-  const handleFiles = async (fileList) => {
-    if (!fileList || fileList.length === 0) return;
-
-    if (!activeWorkspaceId) {
-      enqueueFiles(fileList);
-      return;
-    }
-
-    const directFiles = fileList.filter(f => !f.relativePath || !f.relativePath.includes('/'));
-    const nestedFiles = fileList.filter(f => f.relativePath && f.relativePath.includes('/'));
-
-    const allConflicts = [];
-    const cleanFiles = [];
-
-    try {
-      if (directFiles.length > 0) {
-        const [conflicts, clean] = await findConflictsInFolder(selectedFolder, directFiles);
-        allConflicts.push(...conflicts);
-        cleanFiles.push(...clean);
-      }
-
-      // Nested files (from a folder upload) land in a sub-folder that may
-      // already exist and already contain files of its own — merging into
-      // an existing sub-folder doesn't mean its contents are new. Resolve
-      // each unique sub-folder path once (find-or-create, same as the real
-      // upload does) and check that folder's existing files too.
-      if (nestedFiles.length > 0) {
-        const byFolderPath = new Map();
-        nestedFiles.forEach(f => {
-          const parts = f.relativePath.split('/');
-          parts.pop();
-          const folderPath = parts.join('/');
-          if (!byFolderPath.has(folderPath)) byFolderPath.set(folderPath, []);
-          byFolderPath.get(folderPath).push(f);
-        });
-
-        for (const [folderPath, filesInFolder] of byFolderPath) {
-          if (!folderPath) {
-            cleanFiles.push(...filesInFolder);
-            continue;
-          }
-          const ensured = await ensureFolderPath(activeWorkspaceId, selectedFolder || null, folderPath);
-          const [conflicts, clean] = await findConflictsInFolder(ensured.folder_id, filesInFolder);
-          allConflicts.push(...conflicts);
-          cleanFiles.push(...clean);
-        }
-      }
-    } catch (e) {
-      // If the duplicate check itself fails, don't block the upload over it.
-      enqueueFiles(fileList);
-      return;
-    }
-
-    if (allConflicts.length > 0) {
-      setPendingConflict({ conflicts: allConflicts, restFiles: cleanFiles });
-      return;
-    }
-
-    enqueueFiles(cleanFiles);
-  };
-
-  const resolveConflicts = async (resolved) => {
-    const { restFiles } = pendingConflict;
-    setPendingConflict(null);
-
-    const finalFiles = [...restFiles];
-
-    for (const { file, existingId, action } of resolved) {
-      if (action === 'skip') continue;
-      if (action === 'replace' && existingId) {
-        try { await deleteFile(existingId); } catch (e) { /* proceed with upload regardless */ }
-      }
-      // Both 'replace' and 'keep' upload the file as-is under its original
-      // name — this app already allows duplicate filenames in one folder
-      // (like Google Drive), so "keep both" needs no renaming.
-      finalFiles.push(file);
-    }
-
-    enqueueFiles(finalFiles);
   };
 
   const handleDrop = async (e) => {
@@ -204,7 +106,6 @@ export default function ChunkedUploadModal({
   };
 
   return (
-    <>
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content upload-modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
@@ -496,13 +397,5 @@ export default function ChunkedUploadModal({
         </div>
       </div>
     </div>
-
-    <FileConflictModal
-      isOpen={!!pendingConflict}
-      conflicts={pendingConflict?.conflicts || []}
-      onCancel={() => setPendingConflict(null)}
-      onConfirm={resolveConflicts}
-    />
-    </>
   );
 }

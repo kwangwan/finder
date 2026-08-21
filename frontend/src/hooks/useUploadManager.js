@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { uploadFileChunked, ensureFolderPath } from '../api';
+import { uploadFileChunked, ensureFolderPath, listFiles, deleteFile } from '../api';
 
 const MAX_CONCURRENT_UPLOADS = 2;
 
@@ -10,6 +10,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   const abortControllersRef = useRef(new Map());
   const folderIdCacheRef = useRef(new Map());
   const folderInFlightPromisesRef = useRef(new Map());
+  const [pendingConflict, setPendingConflict] = useState(null); // { conflicts, restFiles, targetFolderId, activeWorkspaceId }
 
   useEffect(() => {
     queueRef.current = queue;
@@ -212,6 +213,121 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     }, 50);
   }, [startWorkerPool, resolveFolderPath]);
 
+  // Checks one folder's existing files for name collisions against the files
+  // headed there, returning [conflicts, clean].
+  const findConflictsInFolder = useCallback(async (activeWorkspaceId, folderId, files) => {
+    const existing = await listFiles({
+      workspace_id: activeWorkspaceId,
+      folder_id: folderId || null,
+      root_only: !folderId
+    });
+    const existingItems = Array.isArray(existing) ? existing : (existing?.items || []);
+    const existingNames = new Set(existingItems.map(f => f.name));
+    const conflicts = files
+      .filter(f => existingNames.has(f.name))
+      .map(f => ({ file: f, existingId: existingItems.find(e => e.name === f.name)?.id }));
+    const clean = files.filter(f => !existingNames.has(f.name));
+    return [conflicts, clean];
+  }, []);
+
+  /**
+   * Single entry point for adding files to the upload queue, shared by every
+   * upload trigger (drag-drop onto the folder view, drag-drop into the
+   * upload modal, file/folder picker buttons) — runs the same-name-file
+   * conflict check first and, if any are found, pauses for the user to
+   * choose replace/keep/skip via FileConflictModal before actually
+   * enqueueing anything. Do not call addFilesToQueue directly from a UI
+   * entry point; call this instead so no path can skip the conflict check.
+   */
+  const checkAndQueueFiles = useCallback(async (fileList, targetFolderId, activeWorkspaceId) => {
+    if (!fileList || fileList.length === 0) return;
+
+    if (!activeWorkspaceId) {
+      addFilesToQueue(fileList, targetFolderId, activeWorkspaceId);
+      return;
+    }
+
+    const files = Array.from(fileList).map(f => {
+      if (!f.relativePath && f.webkitRelativePath) f.relativePath = f.webkitRelativePath;
+      return f;
+    });
+    const directFiles = files.filter(f => !f.relativePath || !f.relativePath.includes('/'));
+    const nestedFiles = files.filter(f => f.relativePath && f.relativePath.includes('/'));
+
+    const allConflicts = [];
+    const cleanFiles = [];
+
+    try {
+      if (directFiles.length > 0) {
+        const [conflicts, clean] = await findConflictsInFolder(activeWorkspaceId, targetFolderId, directFiles);
+        allConflicts.push(...conflicts);
+        cleanFiles.push(...clean);
+      }
+
+      // Nested files (from a folder upload) land in a sub-folder that may
+      // already exist and already contain files of its own — merging into
+      // an existing sub-folder doesn't mean its contents are new. Resolve
+      // each unique sub-folder path once (find-or-create, same as the real
+      // upload does) and check that folder's existing files too.
+      if (nestedFiles.length > 0) {
+        const byFolderPath = new Map();
+        nestedFiles.forEach(f => {
+          const parts = f.relativePath.split('/');
+          parts.pop();
+          const folderPath = parts.join('/');
+          if (!byFolderPath.has(folderPath)) byFolderPath.set(folderPath, []);
+          byFolderPath.get(folderPath).push(f);
+        });
+
+        for (const [folderPath, filesInFolder] of byFolderPath) {
+          if (!folderPath) {
+            cleanFiles.push(...filesInFolder);
+            continue;
+          }
+          const ensured = await resolveFolderPath(activeWorkspaceId, targetFolderId || null, folderPath);
+          const [conflicts, clean] = await findConflictsInFolder(activeWorkspaceId, ensured, filesInFolder);
+          allConflicts.push(...conflicts);
+          cleanFiles.push(...clean);
+        }
+      }
+    } catch (e) {
+      // If the duplicate check itself fails, don't block the upload over it.
+      addFilesToQueue(files, targetFolderId, activeWorkspaceId);
+      return;
+    }
+
+    if (allConflicts.length > 0) {
+      setPendingConflict({ conflicts: allConflicts, restFiles: cleanFiles, targetFolderId, activeWorkspaceId });
+      return;
+    }
+
+    addFilesToQueue(cleanFiles, targetFolderId, activeWorkspaceId);
+  }, [addFilesToQueue, findConflictsInFolder, resolveFolderPath]);
+
+  const resolveFileConflicts = useCallback(async (resolved) => {
+    const { restFiles, targetFolderId, activeWorkspaceId } = pendingConflict;
+    setPendingConflict(null);
+
+    const finalFiles = [...restFiles];
+
+    for (const { file, existingId, action } of resolved) {
+      if (action === 'skip') continue;
+      if (action === 'replace' && existingId) {
+        try { await deleteFile(existingId); } catch (e) { /* proceed with upload regardless */ }
+      }
+      // Both 'replace' and 'keep' upload the file as-is under its original
+      // name — this app already allows duplicate filenames in one folder
+      // (like Google Drive), so "keep both" needs no renaming.
+      finalFiles.push(file);
+    }
+
+    addFilesToQueue(finalFiles, targetFolderId, activeWorkspaceId);
+  }, [pendingConflict, addFilesToQueue]);
+
+  const cancelFileConflict = useCallback(() => {
+    setPendingConflict(null);
+  }, []);
+
   const cancelUpload = useCallback((id) => {
     const controller = abortControllersRef.current.get(id);
     if (controller) {
@@ -270,6 +386,10 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     errorCount,
     totalProgress,
     addFilesToQueue,
+    checkAndQueueFiles,
+    pendingConflict,
+    resolveFileConflicts,
+    cancelFileConflict,
     cancelUpload,
     cancelAll,
     removeItem,

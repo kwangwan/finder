@@ -5,6 +5,7 @@ import FolderExplorer from './components/explorer/FolderExplorer';
 import MarkdownEditor from './components/editor/MarkdownEditor';
 import SemanticSearchModal from './components/search/SemanticSearchModal';
 import ChunkedUploadModal from './components/upload/ChunkedUploadModal';
+import FileConflictModal from './components/upload/FileConflictModal';
 import NewFolderModal from './components/modals/NewFolderModal';
 import LoginModal from './components/auth/LoginModal';
 import PendingApprovalScreen from './components/auth/PendingApprovalScreen';
@@ -1071,7 +1072,7 @@ export default function App() {
 
   const handleDropFiles = (droppedFiles) => {
     if (droppedFiles && droppedFiles.length > 0) {
-      uploadManager.addFilesToQueue(droppedFiles, activeFolderId, activeWorkspace?.id);
+      uploadManager.checkAndQueueFiles(droppedFiles, activeFolderId, activeWorkspace?.id);
       setIsUploadOpen(true);
     }
   };
@@ -1281,6 +1282,13 @@ export default function App() {
         currentFolderId={activeFolderId}
         folders={folders}
         uploadManager={uploadManager}
+      />
+
+      <FileConflictModal
+        isOpen={!!uploadManager.pendingConflict}
+        conflicts={uploadManager.pendingConflict?.conflicts || []}
+        onCancel={uploadManager.cancelFileConflict}
+        onConfirm={uploadManager.resolveFileConflicts}
       />
 
       {/* Persistent Upload Progress Floating Banner */}
