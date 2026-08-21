@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Load .env from the repo root instead of frontend/, so there is a single
+  // .env file to manage (only VITE_-prefixed keys are exposed to client code).
+  envDir: '..',
   plugins: [react()],
   server: {
     host: '0.0.0.0',
