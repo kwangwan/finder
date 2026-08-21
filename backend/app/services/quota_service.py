@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, update, func, and_
 from app.models import User, Workspace, FileItem
 
 
@@ -36,14 +36,18 @@ class QuotaService:
     ) -> User:
         """
         Check if the workspace owner has sufficient quota for the incoming upload.
+        Counts bytes already reserved by other in-flight uploads (see reserve_quota)
+        as spent, so this can't pass while a concurrent large upload is still
+        streaming and hasn't hit storage_used_bytes yet.
         Raises 413 Payload Too Large if exceeded.
         Returns the workspace owner User.
         """
         owner = await self.get_quota_owner(db, workspace_id, user)
         await db.refresh(owner)
 
-        if additional_bytes > 0 and (owner.storage_used_bytes + additional_bytes > owner.storage_quota_bytes):
-            remaining = max(0, owner.storage_quota_bytes - owner.storage_used_bytes)
+        committed = owner.storage_used_bytes + owner.storage_reserved_bytes
+        if additional_bytes > 0 and (committed + additional_bytes > owner.storage_quota_bytes):
+            remaining = max(0, owner.storage_quota_bytes - committed)
             remaining_mb = round(remaining / (1024 * 1024), 1)
             ws_str = "워크스페이스" if workspace_id else "개인 저장소"
             raise HTTPException(
@@ -51,6 +55,89 @@ class QuotaService:
                 detail=f"{ws_str} 저장 용량을 초과했습니다. 남은 용량: {remaining_mb}MB. 워크스페이스 관리자에게 용량 증설을 요청하세요."
             )
         return owner
+
+    async def reserve_quota(
+        self,
+        db: AsyncSession,
+        workspace_id: Optional[uuid.UUID],
+        user: User,
+        bytes_needed: int
+    ) -> User:
+        """
+        Atomically claim bytes against the workspace owner's quota before a
+        long-running upload (e.g. a multipart chunk session) starts streaming.
+        Unlike check_quota, this actually reserves the space in the same
+        statement it checks it in — via a conditional UPDATE — so two uploads
+        starting at nearly the same moment can't both pass the check based on
+        the same stale storage_used_bytes and together exceed the quota.
+        Raises 413 if there isn't enough headroom. Returns the owner.
+        """
+        owner = await self.get_quota_owner(db, workspace_id, user)
+        if bytes_needed <= 0:
+            return owner
+
+        stmt = (
+            update(User)
+            .where(
+                User.id == owner.id,
+                (User.storage_used_bytes + User.storage_reserved_bytes + bytes_needed) <= User.storage_quota_bytes,
+            )
+            .values(storage_reserved_bytes=User.storage_reserved_bytes + bytes_needed)
+            .returning(User.id)
+        )
+        result = await db.execute(stmt)
+        claimed = result.first() is not None
+        await db.commit()
+
+        if not claimed:
+            await db.refresh(owner)
+            remaining = max(0, owner.storage_quota_bytes - owner.storage_used_bytes - owner.storage_reserved_bytes)
+            remaining_mb = round(remaining / (1024 * 1024), 1)
+            ws_str = "워크스페이스" if workspace_id else "개인 저장소"
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"{ws_str} 저장 용량을 초과했습니다. 남은 용량: {remaining_mb}MB. 워크스페이스 관리자에게 용량 증설을 요청하세요."
+            )
+        return owner
+
+    async def release_reservation(
+        self,
+        db: AsyncSession,
+        owner_id: Optional[uuid.UUID],
+        bytes_amount: int
+    ) -> None:
+        """Give back a reservation made by reserve_quota (upload aborted, failed, or expired)."""
+        if not owner_id or bytes_amount <= 0:
+            return
+        stmt = (
+            update(User)
+            .where(User.id == owner_id)
+            .values(storage_reserved_bytes=func.greatest(0, User.storage_reserved_bytes - bytes_amount))
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+    async def commit_reservation(
+        self,
+        db: AsyncSession,
+        owner_id: Optional[uuid.UUID],
+        reserved_bytes: int,
+        actual_bytes: int
+    ) -> None:
+        """Turn a reservation into real usage once the upload has actually
+        finished (the object exists in MinIO with a known final size)."""
+        if not owner_id:
+            return
+        stmt = (
+            update(User)
+            .where(User.id == owner_id)
+            .values(
+                storage_reserved_bytes=func.greatest(0, User.storage_reserved_bytes - max(0, reserved_bytes)),
+                storage_used_bytes=User.storage_used_bytes + max(0, actual_bytes),
+            )
+        )
+        await db.execute(stmt)
+        await db.commit()
 
     async def record_storage_added(
         self,

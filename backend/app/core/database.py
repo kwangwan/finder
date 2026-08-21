@@ -63,6 +63,7 @@ async def init_db():
             # User storage quota (default 100GB)
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS storage_quota_bytes BIGINT NOT NULL DEFAULT 107374182400;",
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS storage_used_bytes BIGINT NOT NULL DEFAULT 0;",
+            "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS storage_reserved_bytes BIGINT NOT NULL DEFAULT 0;",
             # Workspace columns on folders
             "ALTER TABLE kb_folders ADD COLUMN IF NOT EXISTS workspace_id UUID REFERENCES kb_workspaces(id) ON DELETE CASCADE;",
             "ALTER TABLE kb_folders ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES kb_users(id) ON DELETE SET NULL;",

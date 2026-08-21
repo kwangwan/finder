@@ -21,19 +21,26 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     storage_quota_bytes = Column(BigInteger, default=DEFAULT_STORAGE_QUOTA, nullable=False)
     storage_used_bytes = Column(BigInteger, default=0, nullable=False)
+    # Bytes claimed by uploads that are in progress but not yet complete (see
+    # quota_service.reserve_quota). Without this, two uploads starting around
+    # the same time can each pass a plain "used + this file <= quota" check
+    # and together exceed the quota, since neither is reflected in
+    # storage_used_bytes until it finishes.
+    storage_reserved_bytes = Column(BigInteger, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     last_login_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     @property
     def storage_remaining_bytes(self) -> int:
-        return max(0, self.storage_quota_bytes - self.storage_used_bytes)
+        return max(0, self.storage_quota_bytes - self.storage_used_bytes - self.storage_reserved_bytes)
 
     @property
     def storage_usage_percent(self) -> float:
+        committed = self.storage_used_bytes + self.storage_reserved_bytes
         if self.storage_quota_bytes == 0:
-            return 0.0 if self.storage_used_bytes == 0 else 100.0
-        return round((self.storage_used_bytes / self.storage_quota_bytes) * 100, 1)
+            return 0.0 if committed == 0 else 100.0
+        return round((committed / self.storage_quota_bytes) * 100, 1)
 
     def to_dict(self):
         return {

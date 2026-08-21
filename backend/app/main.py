@@ -19,9 +19,10 @@ async def _periodic_trash_cleanup():
             async with AsyncSessionLocal() as db:
                 await _auto_purge_expired(db)
                 print(f"[{settings.APP_NAME}] Periodic 30-day trash cleanup completed.")
-            removed = cleanup_stale_chunk_sessions(max_age_hours=24)
-            if removed:
-                print(f"[{settings.APP_NAME}] Removed {removed} abandoned chunk-upload sessions.")
+            async with AsyncSessionLocal() as db:
+                removed = await cleanup_stale_chunk_sessions(db, max_age_hours=24)
+                if removed:
+                    print(f"[{settings.APP_NAME}] Removed {removed} abandoned chunk-upload sessions.")
         except asyncio.CancelledError:
             break
         except Exception as e:

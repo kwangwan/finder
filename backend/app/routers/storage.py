@@ -330,7 +330,7 @@ def _abort_chunk_session(session_dir: Path):
     shutil.rmtree(session_dir, ignore_errors=True)
 
 
-def cleanup_stale_chunk_sessions(max_age_hours: int = 24) -> int:
+async def cleanup_stale_chunk_sessions(db: AsyncSession, max_age_hours: int = 24) -> int:
     """
     Remove abandoned chunk-upload sessions (e.g. a browser tab closed mid-upload,
     or a network drop that never reached /chunk/abort) that have not received a
@@ -341,8 +341,8 @@ def cleanup_stale_chunk_sessions(max_age_hours: int = 24) -> int:
     Each part is streamed straight into a MinIO multipart upload as it arrives
     (see /chunk/part), so an abandoned session isn't just a few KB of local
     metadata — it's however many parts the user got through before giving up,
-    sitting in MinIO as an incomplete upload. Without this, those orphaned
-    parts would never be reclaimed.
+    sitting in MinIO as an incomplete upload, plus its quota reservation still
+    held against the owner. Without this, both would never be reclaimed.
     """
     import time
     removed = 0
@@ -356,7 +356,10 @@ def cleanup_stale_chunk_sessions(max_age_hours: int = 24) -> int:
                 default=session_dir.stat().st_mtime
             )
             if newest_mtime < cutoff:
+                meta = _read_chunk_session_meta(session_dir)
                 _abort_chunk_session(session_dir)
+                if meta:
+                    await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
                 removed += 1
         except Exception:
             pass
@@ -378,18 +381,35 @@ async def init_chunk_upload(
     fail even though the file had, in fact, fully uploaded.
     """
     workspace_id = req.workspace_id
-    if not workspace_id and req.folder_id:
+    if req.folder_id:
+        if not await access_service.can_access_folder(db, current_user, req.folder_id):
+            raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
         folder = await db.get(Folder, req.folder_id)
         if folder:
-            workspace_id = folder.workspace_id
-    await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
+            if workspace_id and folder.workspace_id and workspace_id != folder.workspace_id:
+                raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
+            if not workspace_id:
+                workspace_id = folder.workspace_id
+    if workspace_id:
+        if not await access_service.is_workspace_member(db, current_user, workspace_id):
+            raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+
+    # Reserve the declared size up front rather than just checking it, so a
+    # second large upload starting seconds later (possibly from another
+    # browser/device) can't also pass the check before this one finishes and
+    # updates storage_used_bytes — see quota_service.reserve_quota.
+    owner = await quota_service.reserve_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
     s3_key = build_storage_key("uploads", file_uuid, req.filename)
-    minio_upload_id = s3_service.create_multipart_upload(
-        s3_key=s3_key,
-        content_type=req.content_type or "application/octet-stream"
-    )
+    try:
+        minio_upload_id = s3_service.create_multipart_upload(
+            s3_key=s3_key,
+            content_type=req.content_type or "application/octet-stream"
+        )
+    except Exception:
+        await quota_service.release_reservation(db, owner.id, req.size_bytes)
+        raise
 
     upload_id = str(uuid.uuid4())
     session_dir = TEMP_CHUNKS_DIR / upload_id
@@ -402,6 +422,9 @@ async def init_chunk_upload(
         "workspace_id": str(workspace_id) if workspace_id else None,
         "folder_id": str(req.folder_id) if req.folder_id else None,
         "mime_type": req.content_type,
+        "owner_id": str(owner.id),
+        "reserved_bytes": req.size_bytes,
+        "bytes_by_part": {},
     }))
 
     chunk_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
@@ -419,6 +442,7 @@ async def upload_chunk_part(
     upload_id: str = Form(...),
     part_number: int = Form(...),
     chunk: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
     """Stream an individual chunk part (5MB) directly into the session's MinIO
@@ -431,15 +455,38 @@ async def upload_chunk_part(
 
     chunk_bytes = await chunk.read()
 
+    # The quota reservation at /chunk/init was sized to the client-declared
+    # size_bytes. A client could under-declare that and then stream more data
+    # than it reserved, so cap actual bytes received at the reservation (with
+    # one chunk of slack for the final, possibly larger-than-expected part).
+    # Bytes are tracked per part_number (not a running counter) so that a
+    # retried part — e.g. after a Cloudflare Tunnel 502 that the client saw as
+    # a failure even though this endpoint actually finished processing it —
+    # overwrites its own entry instead of being counted twice; an additive
+    # counter double-counts every such retry and can trip this limit on an
+    # upload that never actually exceeded its declared size.
+    bytes_by_part = meta.get("bytes_by_part", {})
+    reserved = meta.get("reserved_bytes", meta.get("size_bytes", 0))
+    chunk_limit_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
+    prospective_total = sum(bytes_by_part.values()) - bytes_by_part.get(str(part_number), 0) + len(chunk_bytes)
+    if reserved and prospective_total > reserved + chunk_limit_bytes:
+        _abort_chunk_session(session_dir)
+        await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
+        raise HTTPException(status_code=413, detail="업로드된 데이터가 선언한 파일 크기를 초과했습니다.")
+
     try:
         etag = s3_service.upload_part(meta["s3_key"], meta["minio_upload_id"], part_number, chunk_bytes)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to store chunk part {part_number} in MinIO: {e}")
 
-    # One small file per part (rather than read-modify-writing a shared meta
-    # file) avoids any write race — parts do arrive sequentially from the
-    # client, but this keeps the endpoint correct even if that ever changes.
+    # Each part's ETag goes in its own file so out-of-order or retried parts
+    # never clobber each other. meta.json is safe to read-modify-write because
+    # the client sends parts for a given upload_id strictly sequentially (see
+    # api/index.js), never concurrently.
     (session_dir / f"part_{part_number:05d}.etag").write_text(etag)
+    bytes_by_part[str(part_number)] = len(chunk_bytes)
+    meta["bytes_by_part"] = bytes_by_part
+    (session_dir / "meta.json").write_text(json.dumps(meta))
 
     return {"upload_id": upload_id, "part_number": part_number, "bytes_received": len(chunk_bytes)}
 
@@ -467,6 +514,7 @@ async def complete_chunk_upload(
         etag_file = session_dir / f"part_{part_num:05d}.etag"
         if not etag_file.exists():
             _abort_chunk_session(session_dir)
+            await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
             raise HTTPException(status_code=400, detail=f"Missing chunk part {part_num}")
         parts.append({"PartNumber": part_num, "ETag": etag_file.read_text().strip()})
 
@@ -474,6 +522,7 @@ async def complete_chunk_upload(
         s3_service.complete_multipart_upload(s3_key=s3_key, upload_id=meta["minio_upload_id"], parts=parts)
     except Exception as e:
         _abort_chunk_session(session_dir)
+        await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
         raise HTTPException(status_code=500, detail=f"Failed to finalize upload in MinIO: {str(e)}")
 
     # The object is now final in MinIO — local session metadata can go.
@@ -508,33 +557,35 @@ async def complete_chunk_upload(
     elif name_lower.endswith((".zip", ".tar", ".gz", ".7z", ".rar")):
         file_type = "archive"
 
-    workspace_id = req.workspace_id
-    if req.folder_id:
-        if not await access_service.can_access_folder(db, current_user, req.folder_id):
-            raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
-        folder = await db.get(Folder, req.folder_id)
-        if folder:
-            if workspace_id and folder.workspace_id and workspace_id != folder.workspace_id:
-                raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
-            if not workspace_id:
-                workspace_id = folder.workspace_id
+    # Use the workspace/folder resolved and permission-checked at /chunk/init
+    # (recorded in meta.json), not whatever req carries now — the quota was
+    # reserved against that workspace's owner, so filing the resulting file
+    # under a different one here would leave that reservation stranded as
+    # phantom "used" storage while the real target workspace's quota was
+    # never checked at all.
+    workspace_id = uuid.UUID(meta["workspace_id"]) if meta.get("workspace_id") else None
+    folder_id = uuid.UUID(meta["folder_id"]) if meta.get("folder_id") else None
 
-    if workspace_id:
-        if not await access_service.is_workspace_member(db, current_user, workspace_id):
-            raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
-
-    # Re-check quota now that the final size is known and the object already
-    # exists in MinIO (the /chunk/init check used the client-reported size,
-    # and other uploads may have completed in the meantime). If it's over,
-    # delete the object rather than leaving an unaccounted-for orphan.
-    try:
-        await quota_service.check_quota(db, workspace_id, current_user, actual_size)
-    except HTTPException:
+    async def _fail_and_cleanup(status_code: int, detail: str):
         try:
             s3_service.delete_object(s3_key)
         except Exception:
             pass
-        raise
+        await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
+        raise HTTPException(status_code=status_code, detail=detail)
+
+    if folder_id and not await access_service.can_access_folder(db, current_user, folder_id):
+        await _fail_and_cleanup(403, "폴더에 접근할 권한이 없습니다.")
+    if workspace_id and not await access_service.is_workspace_member(db, current_user, workspace_id):
+        await _fail_and_cleanup(403, "이 워크스페이스에 접근할 권한이 없습니다.")
+
+    # The quota for this upload was already reserved at /chunk/init (see
+    # quota_service.reserve_quota) and enforced per-part in /chunk/part, so
+    # there's nothing left to check here — just turn the reservation into
+    # real usage now that the final size is known.
+    await quota_service.commit_reservation(
+        db, meta.get("owner_id"), meta.get("reserved_bytes", req.size_bytes), actual_size
+    )
 
     mime_type = req.mime_type or get_media_mime_type(req.filename)
 
@@ -577,7 +628,7 @@ async def complete_chunk_upload(
             pass
 
     file_item = FileItem(
-        folder_id=req.folder_id,
+        folder_id=folder_id,
         workspace_id=workspace_id,
         created_by=current_user.id,
         name=req.filename,
@@ -593,9 +644,6 @@ async def complete_chunk_upload(
     await db.commit()
     await db.refresh(file_item)
 
-    # Record quota
-    await quota_service.record_storage_added(db, workspace_id, current_user, actual_size)
-
     # Index embeddings
     try:
         await document_service.index_file_chunks(db, file_item)
@@ -610,13 +658,18 @@ async def complete_chunk_upload(
 @router.post("/chunk/abort")
 async def abort_chunk_upload(
     req: ChunkAbortRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
     """Abort a chunked upload: cancels the MinIO multipart upload (discarding
-    any parts already streamed to it) and removes the local session."""
+    any parts already streamed to it), releases its quota reservation, and
+    removes the local session."""
     session_dir = TEMP_CHUNKS_DIR / req.upload_id
     if session_dir.exists():
+        meta = _read_chunk_session_meta(session_dir)
         _abort_chunk_session(session_dir)
+        if meta:
+            await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
     return {"status": "aborted"}
 
 
