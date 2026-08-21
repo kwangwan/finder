@@ -853,22 +853,15 @@ body {
   color: var(--text-muted);
 }
 
-.sort-select {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  padding: 0.3rem 0.6rem;
+/* .sort-select is the className passed to the custom <Select> (Select.jsx),
+   which lands on its .select-root wrapper — the actual visible box is the
+   nested .select-trigger button, so sizing has to target that, not the
+   wrapper itself (a plain, unstyled positioning div). */
+.sort-select .select-trigger {
+  height: 32px;
+  padding: 0 0.6rem;
   font-size: 0.8rem;
   font-weight: 500;
-  cursor: pointer;
-  outline: none;
-  transition: all 0.15s ease;
-}
-
-.sort-select:hover, .sort-select:focus {
-  border-color: var(--accent-primary);
-  background: var(--bg-card-hover);
 }
 
 .sort-order-btn {
@@ -989,22 +982,13 @@ body {
   font-size: 0.85rem;
 }
 
-.pagination-size-select select {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  padding: 0.35rem 0.6rem;
+/* Same custom <Select> caveat as .sort-select above — style the nested
+   .select-trigger, not this wrapper. */
+.pagination-size-select .select-trigger {
+  height: 32px;
+  padding: 0 0.55rem;
   font-size: 0.8rem;
   font-weight: 500;
-  cursor: pointer;
-  outline: none;
-  transition: all 0.15s ease;
-}
-
-.pagination-size-select select:hover, .pagination-size-select select:focus {
-  border-color: var(--accent-primary);
-  color: var(--text-primary);
 }
 
 
@@ -1718,11 +1702,13 @@ h1, h2, h3, h4, h5, h6,
   }
 
   .sort-select {
-    padding: 0.2rem 0.4rem !important;
-    font-size: 0.74rem !important;
     max-width: 82px !important;
+  }
+
+  .sort-select .select-trigger {
+    padding: 0 0.4rem !important;
+    font-size: 0.74rem !important;
     height: 28px !important;
-    text-overflow: ellipsis !important;
   }
 
   .sort-order-btn {
