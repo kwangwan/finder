@@ -16,6 +16,22 @@ import {
 } from 'lucide-react';
 
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
+import { listFiles, deleteFile } from '../../api';
+import FileConflictModal from './FileConflictModal';
+
+// "name.ext" -> "name (1).ext", skipping any name already taken
+function generateUniqueName(originalName, takenNames) {
+  const dotIdx = originalName.lastIndexOf('.');
+  const base = dotIdx > 0 ? originalName.slice(0, dotIdx) : originalName;
+  const ext = dotIdx > 0 ? originalName.slice(dotIdx) : '';
+  let n = 1;
+  let candidate = `${base} (${n})${ext}`;
+  while (takenNames.has(candidate)) {
+    n += 1;
+    candidate = `${base} (${n})${ext}`;
+  }
+  return candidate;
+}
 
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
@@ -45,6 +61,7 @@ export default function ChunkedUploadModal({
 }) {
   const [selectedFolder, setSelectedFolder] = useState(currentFolderId || '');
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingConflict, setPendingConflict] = useState(null); // { conflicts, restFiles }
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const dragCounter = useRef(0);
@@ -76,11 +93,72 @@ export default function ChunkedUploadModal({
 
   if (!isOpen) return null;
 
-  const handleFiles = (fileList) => {
-    if (!fileList || fileList.length === 0) return;
-    if (addFilesToQueue) {
+  const enqueueFiles = (fileList) => {
+    if (fileList.length > 0 && addFilesToQueue) {
       addFilesToQueue(fileList, selectedFolder, activeWorkspaceId);
     }
+  };
+
+  const handleFiles = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+
+    // Only files landing directly in the target folder can collide with
+    // something that already exists there — files going into a new
+    // sub-folder (from a folder upload) can't conflict with anything yet.
+    const directFiles = fileList.filter(f => !f.relativePath || !f.relativePath.includes('/'));
+    const nestedFiles = fileList.filter(f => f.relativePath && f.relativePath.includes('/'));
+
+    if (directFiles.length > 0 && activeWorkspaceId) {
+      try {
+        const existing = await listFiles({
+          workspace_id: activeWorkspaceId,
+          folder_id: selectedFolder || null,
+          root_only: !selectedFolder
+        });
+        const existingItems = Array.isArray(existing) ? existing : (existing?.items || []);
+        const existingNames = new Set(existingItems.map(f => f.name));
+        const conflicts = directFiles
+          .filter(f => existingNames.has(f.name))
+          .map(f => ({ file: f, existingId: existingItems.find(e => e.name === f.name)?.id }));
+        const clean = directFiles.filter(f => !existingNames.has(f.name));
+
+        if (conflicts.length > 0) {
+          setPendingConflict({ conflicts, restFiles: [...clean, ...nestedFiles], existingNames });
+          return;
+        }
+      } catch (e) {
+        // If the duplicate check itself fails, don't block the upload over it.
+      }
+    }
+
+    enqueueFiles(fileList);
+  };
+
+  const resolveConflicts = async (resolved) => {
+    const { restFiles, existingNames } = pendingConflict;
+    setPendingConflict(null);
+
+    const takenNames = new Set(existingNames);
+    const finalFiles = [...restFiles];
+
+    for (const { file, existingId, action } of resolved) {
+      if (action === 'skip') continue;
+      if (action === 'replace') {
+        if (existingId) {
+          try { await deleteFile(existingId); } catch (e) { /* proceed with upload regardless */ }
+        }
+        finalFiles.push(file);
+      } else {
+        // keep both: upload alongside the existing file under a new name
+        const newName = generateUniqueName(file.name, takenNames);
+        takenNames.add(newName);
+        const renamed = new File([file], newName, { type: file.type });
+        if (file.relativePath) renamed.relativePath = file.relativePath;
+        finalFiles.push(renamed);
+      }
+    }
+
+    enqueueFiles(finalFiles);
   };
 
   const handleDrop = async (e) => {
@@ -103,6 +181,7 @@ export default function ChunkedUploadModal({
   };
 
   return (
+    <>
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content upload-modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         {/* Header */}
@@ -403,5 +482,13 @@ export default function ChunkedUploadModal({
         </div>
       </div>
     </div>
+
+    <FileConflictModal
+      isOpen={!!pendingConflict}
+      conflicts={pendingConflict?.conflicts || []}
+      onCancel={() => setPendingConflict(null)}
+      onConfirm={resolveConflicts}
+    />
+    </>
   );
 }
