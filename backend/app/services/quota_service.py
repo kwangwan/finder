@@ -92,8 +92,10 @@ class QuotaService:
 
     async def sync_all_users_storage(self, db: AsyncSession) -> None:
         """
-        Recalculate exact total storage used for all users based on active files
-        in the workspaces they own.
+        Recalculate exact total storage used for all users based on files in the
+        workspaces they own. Trashed files are included: they still occupy real
+        storage until permanently purged, matching record_storage_freed which only
+        runs on permanent deletion, not on move-to-trash.
         """
         # Fetch all users
         users_res = await db.execute(select(User))
@@ -104,12 +106,7 @@ class QuotaService:
             ws_owned_stmt = (
                 select(func.coalesce(func.sum(FileItem.size_bytes), 0))
                 .join(Workspace, FileItem.workspace_id == Workspace.id)
-                .where(
-                    and_(
-                        Workspace.owner_id == u.id,
-                        FileItem.is_trashed == False
-                    )
-                )
+                .where(Workspace.owner_id == u.id)
             )
             ws_bytes = (await db.execute(ws_owned_stmt)).scalar_one()
 
@@ -119,8 +116,7 @@ class QuotaService:
                 .where(
                     and_(
                         FileItem.workspace_id.is_(None),
-                        FileItem.created_by == u.id,
-                        FileItem.is_trashed == False
+                        FileItem.created_by == u.id
                     )
                 )
             )

@@ -234,7 +234,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   }, [cancelUpload]);
 
   const retryItem = useCallback((id) => {
-    setQueue(prev => prev.map(it => it.id === id ? { ...item, status: 'pending', percent: 0, statusText: '재시도 대기 중...' } : it));
+    setQueue(prev => prev.map(it => it.id === id ? { ...it, status: 'pending', percent: 0, statusText: '재시도 대기 중...' } : it));
     setTimeout(() => {
       startWorkerPool();
     }, 50);

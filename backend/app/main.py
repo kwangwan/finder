@@ -6,17 +6,22 @@ from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
 from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash
 from app.routers.trash import _auto_purge_expired
+from app.routers.storage import cleanup_stale_chunk_sessions
 
 from app.services.deletion_service import deletion_service
 
 async def _periodic_trash_cleanup():
-    """Periodically purge trashed items older than 30 days every 12 hours."""
+    """Periodically purge trashed items older than 30 days, and abandoned chunk
+    upload sessions older than 24 hours, every 12 hours."""
     while True:
         try:
             await asyncio.sleep(43200) # 12 hours
             async with AsyncSessionLocal() as db:
                 await _auto_purge_expired(db)
                 print(f"[{settings.APP_NAME}] Periodic 30-day trash cleanup completed.")
+            removed = cleanup_stale_chunk_sessions(max_age_hours=24)
+            if removed:
+                print(f"[{settings.APP_NAME}] Removed {removed} abandoned chunk-upload sessions.")
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -47,10 +52,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration: restricted to the app's own known origins. `allow_origins=["*"]`
+# combined with `allow_credentials=True` makes Starlette reflect the caller's actual
+# Origin header, which amounts to "any website may make authenticated requests" —
+# unnecessary here since the frontend only ever calls this API same-origin (via /api).
+def _get_allowed_origins() -> list[str]:
+    origins = [settings.APP_PUBLIC_URL]
+    if settings.CORS_ALLOWED_ORIGINS:
+        origins += [o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
+    if settings.DEBUG:
+        origins += ["http://localhost:5173", "http://127.0.0.1:5173"]
+    return origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

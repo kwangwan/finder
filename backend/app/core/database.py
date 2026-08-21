@@ -93,7 +93,10 @@ async def init_db():
         except Exception as e:
             print(f"[DB Init Index Warning] Could not create HNSW index: {e}")
 
-        # Recalculate each user's storage_used_bytes based on files in their owned workspaces
+        # Recalculate each user's storage_used_bytes based on files in their owned workspaces.
+        # Trashed files still occupy real storage until permanently purged, so they must stay
+        # counted here too, matching the live incremental accounting in quota_service (which
+        # only frees quota on permanent deletion, not on move-to-trash).
         try:
             await conn.execute(text("""
                 UPDATE kb_users u
@@ -101,11 +104,11 @@ async def init_db():
                     SELECT SUM(f.size_bytes)
                     FROM kb_files f
                     JOIN kb_workspaces w ON f.workspace_id = w.id
-                    WHERE w.owner_id = u.id AND (f.is_trashed IS FALSE OR f.is_trashed IS NULL)
+                    WHERE w.owner_id = u.id
                 ), 0) + COALESCE((
                     SELECT SUM(f.size_bytes)
                     FROM kb_files f
-                    WHERE f.workspace_id IS NULL AND f.created_by = u.id AND (f.is_trashed IS FALSE OR f.is_trashed IS NULL)
+                    WHERE f.workspace_id IS NULL AND f.created_by = u.id
                 ), 0);
             """))
         except Exception as e:

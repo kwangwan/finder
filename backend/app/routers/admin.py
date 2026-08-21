@@ -80,16 +80,24 @@ async def delete_user(
     if user.id == admin_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
-    # Clean up MinIO S3 objects for files in workspaces owned by this user
+    # Clean up MinIO S3 objects for files in workspaces owned by this user.
+    # (Deleting the user below cascades to owned workspaces/files at the DB level,
+    # so their S3 objects must be cleaned up here first or they're orphaned forever.)
     owned_ws_res = await db.execute(select(Workspace.id).where(Workspace.owner_id == user_id))
     owned_ws_ids = owned_ws_res.scalars().all()
     if owned_ws_ids:
         files_res = await db.execute(select(FileItem).where(FileItem.workspace_id.in_(owned_ws_ids)))
         for f in files_res.scalars().all():
             if f.s3_key:
-                s3_service.delete_file(f.s3_key)
+                try:
+                    s3_service.delete_object(f.s3_key)
+                except Exception as e:
+                    print(f"[MinIO Warning] Could not delete S3 object {f.s3_key}: {e}")
             if f.thumbnail_s3_key:
-                s3_service.delete_file(f.thumbnail_s3_key)
+                try:
+                    s3_service.delete_object(f.thumbnail_s3_key)
+                except Exception as e:
+                    print(f"[MinIO Warning] Could not delete thumbnail S3 object {f.thumbnail_s3_key}: {e}")
 
     await db.delete(user)
     await db.commit()

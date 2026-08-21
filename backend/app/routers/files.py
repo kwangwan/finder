@@ -18,7 +18,7 @@ from app.schemas.file import (
     BatchDownloadRequest, BatchMoveRequest
 )
 from app.routers.folders import _collect_folder_files_recursive
-from app.services.s3_service import s3_service
+from app.services.s3_service import s3_service, sanitize_filename
 from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services.quota_service import quota_service
@@ -217,7 +217,7 @@ async def create_markdown_note(
     await quota_service.record_storage_added(db, workspace_id, current_user, file_item.size_bytes)
 
     try:
-        s3_key = f"notes/{file_item.id}/{display_name}"
+        s3_key = f"notes/{file_item.id}/{sanitize_filename(display_name)}"
         s3_service.put_object(s3_key, req.content.encode("utf-8"), "text/markdown; charset=utf-8")
         file_item.s3_key = s3_key
         await db.commit()

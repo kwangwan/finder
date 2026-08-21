@@ -44,6 +44,19 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
+MEDIA_TOKEN_EXPIRE_MINUTES = 15
+
+def create_media_access_token(user_id: str) -> str:
+    """
+    Short-lived, purpose-scoped token for URLs that browser tags (<img>, <video>,
+    <a>) hit directly and can't attach an Authorization header to (preview/
+    thumbnail/download). Kept separate from the full session token so a token
+    leaked via browser history, server access logs, or a Referer header is only
+    usable for media endpoints and only for a few minutes, not full API access
+    for the session's remaining lifetime.
+    """
+    return create_access_token({"sub": user_id, "scope": "media"}, expires_delta=timedelta(minutes=MEDIA_TOKEN_EXPIRE_MINUTES))
+
 def decode_access_token(token: str) -> Optional[dict]:
     """Decode and validate JWT Access Token."""
     try:
@@ -86,6 +99,14 @@ async def get_current_user(
             detail="Invalid or expired authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # A media-scoped token (see create_media_access_token) is only ever meant to
+    # authenticate the ?token= query-string path on preview/thumbnail/download
+    # URLs. Without this check it would work as a fully general session token
+    # everywhere else too as long as it's passed via the header instead, which
+    # defeats the point of scoping it down in the first place.
+    if payload.get("scope") == "media":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Media token cannot be used as a session token")
 
     user_id_str = payload.get("sub")
     if not user_id_str:
@@ -131,8 +152,23 @@ async def get_current_approved_user_query_or_header(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
     db: AsyncSession = Depends(get_db)
 ) -> User:
-    """Authenticate user from query parameter ?token= or Authorization header."""
-    raw_token = token or (credentials.credentials if credentials else None)
+    """
+    Authenticate user from query parameter ?token= or Authorization header.
+    A query-string token must be a short-lived media-scoped token (see
+    create_media_access_token) — a full session token is only accepted via the
+    Authorization header, so one leaking out of a media URL can't be used to
+    call the rest of the API for the session's full lifetime.
+    """
+    if credentials:
+        raw_token = credentials.credentials
+        require_media_scope = False
+    elif token:
+        raw_token = token
+        require_media_scope = True
+    else:
+        raw_token = None
+        require_media_scope = False
+
     if not raw_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -146,6 +182,12 @@ async def get_current_approved_user_query_or_header(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if require_media_scope and payload.get("scope") != "media":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="이 URL에는 media-scoped 토큰만 사용할 수 있습니다.",
         )
 
     user_id_str = payload.get("sub")

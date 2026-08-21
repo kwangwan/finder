@@ -1,5 +1,5 @@
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
@@ -9,6 +9,22 @@ from app.core.config import settings
 
 LOCAL_STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "storage_data"
 LOCAL_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def sanitize_filename(filename: Optional[str]) -> str:
+    """
+    Reduce a user-supplied filename to a safe basename before it becomes part of
+    an S3 key / local storage path segment. Without this, a filename like
+    "../../../etc/cron.d/evil" would let an authenticated user write files
+    outside storage_data on the local-disk fallback path (S3 has no real
+    directory hierarchy, but the local filesystem does resolve ".." segments).
+    """
+    name = (filename or "").strip().replace("\\", "/")
+    name = PurePosixPath(name).name
+    name = name.strip()
+    if name in ("", ".", ".."):
+        name = "unnamed_file"
+    return name
 
 class S3Service:
     def __init__(self):
@@ -37,8 +53,17 @@ class S3Service:
             self.client = None
 
     def _get_local_path(self, s3_key: str) -> Path:
-        """Get local filesystem path for a given s3_key."""
-        p = self.local_dir / s3_key
+        """Get local filesystem path for a given s3_key.
+
+        s3_key is frequently built from a user-supplied filename (e.g. "uploads/{uuid}/{filename}").
+        Without this check, a filename containing "../" segments could resolve outside
+        local_dir entirely, allowing an authenticated user to read or overwrite arbitrary
+        files on the server (e.g. the repo's .env). Reject any key that would escape
+        local_dir instead of silently following it.
+        """
+        p = (self.local_dir / s3_key).resolve()
+        if self.local_dir.resolve() not in p.parents and p != self.local_dir.resolve():
+            raise ValueError(f"Refusing to resolve s3_key outside storage directory: {s3_key!r}")
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
 

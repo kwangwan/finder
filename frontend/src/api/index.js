@@ -10,8 +10,10 @@ export function getStoredToken() {
 export function setStoredToken(token) {
   if (token) {
     localStorage.setItem('kb_auth_token', token);
+    ensureMediaToken();
   } else {
     localStorage.removeItem('kb_auth_token');
+    clearMediaToken();
   }
 }
 
@@ -23,6 +25,64 @@ export function authHeaders(extraHeaders = {}) {
   }
   return headers;
 }
+
+/**
+ * Media Token Helpers
+ *
+ * <img>/<video>/<a> tags hit preview/thumbnail/download URLs directly and can't
+ * attach an Authorization header, so those URLs carry a token as a query param
+ * instead. Using the full session token there would mean a URL that leaks via
+ * browser history, a server access log, or a Referer header hands out full API
+ * access for the token's entire (multi-day) lifetime. Instead we keep a
+ * short-lived, media-scoped token (see POST /api/auth/media-token) cached here
+ * and refreshed periodically, so a leaked media URL is only useful for a few
+ * minutes and only for fetching media.
+ */
+let mediaTokenCache = { token: null, expiresAt: 0 };
+let mediaTokenRefreshPromise = null;
+
+async function fetchMediaToken() {
+  const res = await fetch(`${API_BASE}/auth/media-token`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to obtain media token');
+  const data = await res.json();
+  mediaTokenCache = {
+    token: data.media_token,
+    // Refresh a bit before actual expiry so in-flight page views don't race it
+    expiresAt: Date.now() + Math.max(0, data.expires_in * 1000 - 30000)
+  };
+  return mediaTokenCache.token;
+}
+
+export async function ensureMediaToken() {
+  if (!getStoredToken()) return null;
+  if (mediaTokenCache.token && Date.now() < mediaTokenCache.expiresAt) {
+    return mediaTokenCache.token;
+  }
+  if (!mediaTokenRefreshPromise) {
+    mediaTokenRefreshPromise = fetchMediaToken()
+      .catch((err) => { console.warn('[Media Token] refresh failed:', err); return null; })
+      .finally(() => { mediaTokenRefreshPromise = null; });
+  }
+  return mediaTokenRefreshPromise;
+}
+
+function getCachedMediaToken() {
+  return (mediaTokenCache.token && Date.now() < mediaTokenCache.expiresAt) ? mediaTokenCache.token : null;
+}
+
+export function clearMediaToken() {
+  mediaTokenCache = { token: null, expiresAt: 0 };
+}
+
+// Warm the cache on page load for a returning (already-logged-in) session, and
+// keep it fresh for the lifetime of the tab.
+if (getStoredToken()) {
+  ensureMediaToken();
+}
+setInterval(() => { if (getStoredToken()) ensureMediaToken(); }, 5 * 60 * 1000);
 
 export async function getAuthConfig() {
   try {
@@ -613,17 +673,17 @@ export async function emptyTrash(workspaceId = null) {
 }
 
 export function getMediaPreviewUrl(fileId) {
-  const token = getStoredToken();
+  const token = getCachedMediaToken();
   return `${API_BASE}/storage/preview/${fileId}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
 export function getFileDownloadUrl(fileId) {
-  const token = getStoredToken();
+  const token = getCachedMediaToken();
   return `${API_BASE}/storage/download/${fileId}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
 export function getThumbnailUrl(fileId) {
-  const token = getStoredToken();
+  const token = getCachedMediaToken();
   return `${API_BASE}/storage/thumbnail/${fileId}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
@@ -944,6 +1004,52 @@ export async function searchDocuments({
 }
 
 
+const RETRYABLE_HTTP_STATUS = new Set([408, 502, 503, 504, 522, 523, 524]);
+
+/**
+ * fetch() wrapped with a per-attempt timeout and automatic retry for transient
+ * network/gateway failures (e.g. an idle Cloudflare Tunnel connection stalling
+ * mid-transfer). Without this, a single stalled chunk request hangs forever and
+ * the upload appears frozen with no way to recover.
+ *
+ * Only used for idempotent requests (session init, individual chunk parts) where
+ * retrying a request that actually succeeded server-side has no side effect.
+ */
+async function fetchWithTimeout(url, options = {}, { signal, timeoutMs = 30000, retries = 2 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal?.aborted) throw new DOMException('업로드가 취소되었습니다.', 'AbortError');
+
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+    const onUserAbort = () => timeoutController.abort();
+    if (signal) signal.addEventListener('abort', onUserAbort);
+
+    try {
+      const res = await fetch(url, { ...options, signal: timeoutController.signal });
+      if (!res.ok && RETRYABLE_HTTP_STATUS.has(res.status) && attempt < retries) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (signal?.aborted) throw err; // user-initiated cancel: propagate immediately, no retry
+      lastErr = err;
+      if (attempt === retries) {
+        if (err.name === 'AbortError') {
+          throw new Error('서버 응답이 지연되어 요청 시간이 초과되었습니다. 네트워크 상태를 확인 후 다시 시도해주세요.');
+        }
+        throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onUserAbort);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Robust 5MB Chunked Proxy File Uploader (100% Cloudflare Tunnel & Proxy Safe)
  */
@@ -959,7 +1065,7 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
   // Large Chunked Proxy Upload (> 5MB)
   onProgress({ percent: 2, status: '대용량 업로드 세션 초기화...' });
 
-  const initRes = await fetch(`${API_BASE}/storage/chunk/init`, {
+  const initRes = await fetchWithTimeout(`${API_BASE}/storage/chunk/init`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
@@ -969,12 +1075,11 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
       content_type: file.type || 'application/octet-stream',
       size_bytes: fileSize,
     }),
-    signal
-  });
+  }, { signal, timeoutMs: 20000, retries: 2 });
 
   if (!initRes.ok) {
     const errData = await initRes.json().catch(() => ({}));
-    throw new Error(errData.detail || '대용량 업로드 세션 초기화에 실패했습니다.');
+    throw new Error(errData.detail || `대용량 업로드 세션 초기화에 실패했습니다. (HTTP ${initRes.status})`);
   }
 
   const initData = await initRes.json();
@@ -1006,21 +1111,23 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
       formData.append('part_number', partNumber);
       formData.append('chunk', chunkBlob, `part_${partNumber}.bin`);
 
-      const partUploadRes = await fetch(`${API_BASE}/storage/chunk/part`, {
+      const partUploadRes = await fetchWithTimeout(`${API_BASE}/storage/chunk/part`, {
         method: 'POST',
         headers: authHeaders(),
         body: formData,
-        signal
-      });
+      }, { signal, timeoutMs: 60000, retries: 2 });
 
       if (!partUploadRes.ok) {
-        throw new Error(`청크 ${partNumber}/${total_parts} 전송 실패`);
+        throw new Error(`청크 ${partNumber}/${total_parts} 전송 실패 (HTTP ${partUploadRes.status})`);
       }
     }
 
     onProgress({ percent: 94, status: '파일 병합 및 썸네일 생성 중...' });
 
-    const completeRes = await fetch(`${API_BASE}/storage/chunk/complete`, {
+    // Not retried: a lost response here is ambiguous (the merge may have already
+    // succeeded server-side), and retrying could create a duplicate file record.
+    // A generous timeout avoids false failures while thumbnail generation runs.
+    const completeRes = await fetchWithTimeout(`${API_BASE}/storage/chunk/complete`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
@@ -1032,12 +1139,11 @@ export async function uploadFileChunked(file, folderId = null, workspaceId = nul
         size_bytes: fileSize,
         total_parts
       }),
-      signal
-    });
+    }, { signal, timeoutMs: 180000, retries: 0 });
 
     if (!completeRes.ok) {
       const errData = await completeRes.json().catch(() => ({}));
-      throw new Error(errData.detail || '파일 병합 및 저장에 실패했습니다.');
+      throw new Error(errData.detail || `파일 병합 및 저장에 실패했습니다. (HTTP ${completeRes.status})`);
     }
 
     const resultFile = await completeRes.json();

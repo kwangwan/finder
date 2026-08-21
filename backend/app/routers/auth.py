@@ -17,7 +17,7 @@ from app.schemas.auth import (
     DevLoginRequest, TokenResponse, UserResponse
 )
 from app.core.security import (
-    create_access_token, verify_google_token, get_current_user,
+    create_access_token, create_media_access_token, verify_google_token, get_current_user,
     hash_password, verify_password
 )
 
@@ -333,3 +333,18 @@ async def dev_login(req: DevLoginRequest, db: AsyncSession = Depends(get_db)):
 async def get_me(current_user: User = Depends(get_current_user)):
     """Return currently authenticated user and approval status."""
     return current_user
+
+@router.post("/media-token")
+async def issue_media_token(current_user: User = Depends(get_current_user)):
+    """
+    Issue a short-lived, media-scoped token for use in URLs that browser tags
+    (<img>, <video>, <a>) hit directly and can't attach an Authorization header
+    to (preview/thumbnail/download links). Kept separate from the main session
+    token so a URL leaking via browser history or server logs only exposes a
+    few minutes of media-only access, not the full session.
+    """
+    from app.core.security import MEDIA_TOKEN_EXPIRE_MINUTES
+    return {
+        "media_token": create_media_access_token(str(current_user.id)),
+        "expires_in": MEDIA_TOKEN_EXPIRE_MINUTES * 60
+    }

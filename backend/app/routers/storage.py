@@ -20,11 +20,12 @@ from app.schemas.storage import (
     ChunkCompleteRequest, ChunkAbortRequest
 )
 from app.schemas.file import FileResponse
-from app.services.s3_service import s3_service
+from app.services.s3_service import s3_service, sanitize_filename
 from app.services.document_service import document_service
 from app.services.thumbnail_service import thumbnail_service
 from app.services.access_service import access_service
 from app.services.quota_service import quota_service
+from app.services.svg_sanitizer import sanitize_svg
 
 router = APIRouter(prefix="/api/storage", tags=["Storage & Uploads"])
 
@@ -56,7 +57,7 @@ async def get_presigned_upload_url(
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{req.filename}"
+    s3_key = f"uploads/{file_uuid}/{sanitize_filename(req.filename)}"
 
     try:
         url = s3_service.generate_presigned_put_url(
@@ -157,7 +158,7 @@ async def initiate_multipart_upload(
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{req.filename}"
+    s3_key = f"uploads/{file_uuid}/{sanitize_filename(req.filename)}"
     
     chunk_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
     total_parts = math.ceil(req.size_bytes / chunk_bytes) if req.size_bytes > 0 else 1
@@ -303,6 +304,30 @@ async def abort_multipart_upload(
 TEMP_CHUNKS_DIR = Path(__file__).resolve().parent.parent.parent / "storage_data" / "temp_chunks"
 TEMP_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def cleanup_stale_chunk_sessions(max_age_hours: int = 24) -> int:
+    """Remove abandoned chunk-upload session directories (e.g. left behind when a
+    browser tab is closed mid-upload) that have not received a new part in over
+    max_age_hours. An active upload keeps writing parts, so its directory's newest
+    file mtime stays recent and it is never touched by this cleanup."""
+    import time
+    removed = 0
+    cutoff = time.time() - max_age_hours * 3600
+    for session_dir in TEMP_CHUNKS_DIR.iterdir():
+        if not session_dir.is_dir():
+            continue
+        try:
+            newest_mtime = max(
+                (p.stat().st_mtime for p in session_dir.rglob("*") if p.is_file()),
+                default=session_dir.stat().st_mtime
+            )
+            if newest_mtime < cutoff:
+                shutil.rmtree(session_dir, ignore_errors=True)
+                removed += 1
+        except Exception:
+            pass
+    return removed
+
 @router.post("/chunk/init", response_model=ChunkInitResponse)
 async def init_chunk_upload(
     req: ChunkInitRequest,
@@ -363,7 +388,7 @@ async def complete_chunk_upload(
         raise HTTPException(status_code=404, detail="Upload session not found")
 
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{req.filename}"
+    s3_key = f"uploads/{file_uuid}/{sanitize_filename(req.filename)}"
     local_target_path = s3_service._get_local_path(s3_key)
 
     try:
@@ -537,7 +562,7 @@ async def direct_upload(
     # Storage quota check on workspace owner
     await quota_service.check_quota(db, workspace_id, current_user, len(file_bytes))
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{file.filename}"
+    s3_key = f"uploads/{file_uuid}/{sanitize_filename(file.filename)}"
     
     try:
         s3_service.put_object(s3_key, file_bytes, file.content_type or "application/octet-stream")
@@ -650,8 +675,12 @@ async def preview_file(
 
     mime_type = get_media_mime_type(file_item.name, file_item.mime_type)
     safe_name = urllib.parse.quote(file_item.name)
+    is_svg = mime_type == "image/svg+xml"
 
-    if range:
+    # SVG is XML and can carry <script>/event-handler attributes that the browser
+    # executes when rendered inline in the app's own origin. Never serve raw SVG
+    # bytes inline — always sanitize first (small documents, so skip range-serving).
+    if range and not is_svg:
         res = s3_service.get_object_range(file_item.s3_key, range)
         if res:
             headers = {
@@ -673,11 +702,21 @@ async def preview_file(
     if raw_bytes is None:
         raise HTTPException(status_code=404, detail="파일 데이터를 찾을 수 없습니다.")
 
+    content_disposition = f"inline; filename*=UTF-8''{safe_name}"
+    if is_svg:
+        sanitized = sanitize_svg(raw_bytes)
+        if sanitized is None:
+            # Couldn't safely parse/sanitize it — fall back to a forced download
+            # instead of ever rendering unsanitized SVG inline.
+            content_disposition = f"attachment; filename*=UTF-8''{safe_name}"
+        else:
+            raw_bytes = sanitized
+
     return Response(
         content=raw_bytes,
         status_code=status.HTTP_200_OK,
         headers={
-            "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
+            "Content-Disposition": content_disposition,
             "Content-Type": mime_type,
             "Accept-Ranges": "bytes",
             "Content-Length": str(len(raw_bytes)),

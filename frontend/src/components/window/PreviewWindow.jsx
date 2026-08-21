@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
+import { createMarkdownLinkComponents } from '../../utils/markdownLinkComponents';
+import { useDialog } from '../../context/DialogContext';
 import VideoPlayer from '../common/VideoPlayer';
 
 export default function PreviewWindow({
@@ -43,6 +45,9 @@ export default function PreviewWindow({
   onEditFile
 }) {
   const { id, file, isMinimized, isMaximized, position, size, zIndex } = windowState;
+
+  const { showAlert } = useDialog();
+  const markdownLinkComponents = createMarkdownLinkComponents({ showAlert });
 
   const [fileDetail, setFileDetail] = useState(file);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
@@ -519,7 +524,7 @@ export default function PreviewWindow({
         ) : isMarkdown ? (
           <div className="os-markdown-viewport markdown-body">
             {displayContent ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownLinkComponents}>
                 {displayContent}
               </ReactMarkdown>
             ) : (

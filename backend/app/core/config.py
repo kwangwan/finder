@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     APP_PUBLIC_URL: str = "https://finder.proj.run"
+    # Comma-separated list of additional origins allowed to make credentialed
+    # cross-origin requests (beyond APP_PUBLIC_URL, and localhost in DEBUG mode).
+    CORS_ALLOWED_ORIGINS: str = ""
     
     # MinIO
     MINIO_PUBLIC_URL: str = "https://public-storage.proj.run"

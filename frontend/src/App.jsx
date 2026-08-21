@@ -645,10 +645,13 @@ export default function App() {
   }, [activeWorkspace?.id, workspaces]);
 
   // Fetch Files for active workspace with sorting and pagination
+  const refreshFilesRequestIdRef = useRef(0);
+
   const refreshFiles = useCallback(async (silent = false) => {
     if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
     if (!isWorkspacesLoaded) return;
     if (!activeWorkspace?.id) {
+      refreshFilesRequestIdRef.current += 1;
       setFiles([]);
       setPaginationMeta({
         total_count: 0,
@@ -661,6 +664,11 @@ export default function App() {
     if (!silent) {
       setIsLoading(true);
     }
+    // Guard against out-of-order responses: if several refreshes overlap (e.g. many
+    // background uploads completing in quick succession), only the response for the
+    // most recently issued request is allowed to update the visible file list, so a
+    // slower/stale response can't overwrite it with an outdated (or empty) result.
+    const requestId = ++refreshFilesRequestIdRef.current;
     try {
       let params = {
         workspace_id: activeWorkspace.id,
@@ -681,6 +689,8 @@ export default function App() {
       }
 
       const res = await listFiles(params);
+      if (requestId !== refreshFilesRequestIdRef.current) return; // a newer refresh superseded this one
+
       if (res && res.items) {
         setFiles(res.items);
         setPaginationMeta({
@@ -701,7 +711,7 @@ export default function App() {
     } catch (err) {
       console.error('Error fetching files:', err);
     } finally {
-      if (!silent) {
+      if (!silent && requestId === refreshFilesRequestIdRef.current) {
         setIsLoading(false);
       }
     }
