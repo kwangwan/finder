@@ -79,6 +79,15 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     const nextItem = currentQueue.find(it => it.status === 'pending');
     if (!nextItem) return;
 
+    // Claim this item in the ref synchronously, before any `await` or React
+    // state update settles. setQueue()/updateItem() below are async/batched,
+    // so without this a second worker calling processNextItem() in the same
+    // tick would still see this item as 'pending' via queueRef and pick it up
+    // too, uploading (and creating) the same file twice.
+    queueRef.current = queueRef.current.map(it =>
+      it.id === nextItem.id ? { ...it, status: 'uploading' } : it
+    );
+
     activeWorkersRef.current += 1;
     const controller = new AbortController();
     abortControllersRef.current.set(nextItem.id, controller);
