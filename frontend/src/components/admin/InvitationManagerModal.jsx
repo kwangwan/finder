@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { listInvitations, createInvitation, cancelInvitation } from '../../api';
 import { useDialog } from '../../context/DialogContext';
+import Select from '../common/Select';
 
 export default function InvitationManagerModal({
   isOpen,
@@ -284,61 +285,33 @@ export default function InvitationManagerModal({
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
                   대상 워크스페이스
                 </label>
-                <select
+                <Select
                   value={workspaceId}
-                  onChange={e => setWorkspaceId(e.target.value)}
-                  style={{
-                    width: '100%',
-                    height: 40,
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '0 0.75rem',
-                    fontSize: '0.85rem',
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  {currentUser?.is_admin && <option value="">전체 서비스 (기본)</option>}
-                  {manageableWorkspaces.map(w => {
-                    const isOwner = currentUser?.is_admin || w.owner_id === currentUser?.id || w.role === 'owner';
-                    return (
-                      <option key={w.id} value={w.id}>
-                        {w.name} ({isOwner ? '소유자' : '관리자'})
-                      </option>
-                    );
-                  })}
-                </select>
+                  onChange={setWorkspaceId}
+                  options={[
+                    ...(currentUser?.is_admin ? [{ value: '', label: '전체 서비스 (기본)' }] : []),
+                    ...manageableWorkspaces.map(w => {
+                      const isOwner = currentUser?.is_admin || w.owner_id === currentUser?.id || w.role === 'owner';
+                      return { value: w.id, label: `${w.name} (${isOwner ? '소유자' : '관리자'})` };
+                    }),
+                  ]}
+                />
               </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
                   역할 권한
                 </label>
-                <select
+                <Select
                   value={role}
-                  onChange={e => setRole(e.target.value)}
-                  style={{
-                    width: '100%',
-                    height: 40,
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '0 0.65rem',
-                    fontSize: '0.85rem',
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  <option value="member">멤버</option>
-                  {isOwnerOfSelectedWs ? (
-                    <option value="admin">관리자</option>
-                  ) : (
-                    <option value="admin" disabled>관리자 (소유자 전용)</option>
-                  )}
-                </select>
+                  onChange={setRole}
+                  options={[
+                    { value: 'member', label: '멤버' },
+                    isOwnerOfSelectedWs
+                      ? { value: 'admin', label: '관리자' }
+                      : { value: 'admin', label: '관리자 (소유자 전용)', disabled: true },
+                  ]}
+                />
               </div>
             </div>
 

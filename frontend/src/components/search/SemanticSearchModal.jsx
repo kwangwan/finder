@@ -18,6 +18,7 @@ import {
   Film
 } from 'lucide-react';
 import { searchDocuments } from '../../api';
+import Select from '../common/Select';
 
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
@@ -249,51 +250,25 @@ export default function SemanticSearchModal({
                 <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
                   문서/파일 형식
                 </label>
-                <select
+                <Select
                   value={fileType}
-                  onChange={e => handleFilterChange(folderId, e.target.value, datePreset, minSimilarity)}
-                  style={{
-                    width: '100%',
-                    background: 'var(--bg-card)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '0.4rem 0.6rem',
-                    fontSize: '0.82rem',
-                    outline: 'none'
-                  }}
-                >
-                  {FILE_TYPE_FILTERS.map(f => (
-                    <option key={f.id} value={f.id}>{f.label}</option>
-                  ))}
-                </select>
+                  onChange={(v) => handleFilterChange(folderId, v, datePreset, minSimilarity)}
+                  options={FILE_TYPE_FILTERS.map(f => ({ value: f.id, label: f.label }))}
+                />
               </div>
 
               <div>
                 <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4, fontWeight: 600 }}>
                   폴더 범위
                 </label>
-                <select
+                <Select
                   value={folderId}
-                  onChange={e => handleFilterChange(e.target.value, fileType, datePreset, minSimilarity)}
-                  style={{
-                    width: '100%',
-                    background: 'var(--bg-card)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '0.4rem 0.6rem',
-                    fontSize: '0.82rem',
-                    outline: 'none'
-                  }}
-                >
-                  <option value="">(전체 폴더)</option>
-                  {flattenFolderTree(folders).map(f => (
-                    <option key={f.id} value={f.id}>
-                      {f.displayName}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => handleFilterChange(v, fileType, datePreset, minSimilarity)}
+                  options={[
+                    { value: '', label: '(전체 폴더)' },
+                    ...flattenFolderTree(folders).map(f => ({ value: f.id, label: f.displayName })),
+                  ]}
+                />
               </div>
             </div>
 

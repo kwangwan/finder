@@ -26,8 +26,9 @@ import {
   listWorkspaceMembers, 
   inviteWorkspaceMember, 
   updateWorkspaceMemberRole, 
-  removeWorkspaceMember 
+  removeWorkspaceMember
 } from '../../api';
+import Select from '../common/Select';
 import { useDialog } from '../../context/DialogContext';
 
 const ICONS = [
@@ -481,23 +482,15 @@ export default function WorkspaceSettingsModal({
                     }}
                   />
                   <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                    <select
+                    <Select
                       value={inviteRole}
-                      onChange={e => setInviteRole(e.target.value)}
-                      style={{
-                        background: 'var(--bg-card)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '0.45rem 0.35rem',
-                        fontSize: '0.8rem',
-                        color: 'var(--text-primary)',
-                        outline: 'none',
-                        width: 82
-                      }}
-                    >
-                      <option value="member">멤버</option>
-                      {(isOwner || currentUser?.is_admin) && <option value="admin">관리자</option>}
-                    </select>
+                      onChange={setInviteRole}
+                      style={{ width: 96 }}
+                      options={[
+                        { value: 'member', label: '멤버' },
+                        ...((isOwner || currentUser?.is_admin) ? [{ value: 'admin', label: '관리자' }] : []),
+                      ]}
+                    />
                     <button
                       type="submit"
                       className="btn-primary"
@@ -558,22 +551,15 @@ export default function WorkspaceSettingsModal({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
                       {/* Role Selector or Badge */}
                       {isOwner && !isMemberOwner ? (
-                        <select
+                        <Select
                           value={m.role}
-                          onChange={e => handleRoleChange(m.user_id, e.target.value)}
-                          style={{
-                            background: 'var(--bg-card)',
-                            border: '1px solid var(--border-subtle)',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '0.2rem 0.35rem',
-                            fontSize: '0.74rem',
-                            color: 'var(--text-primary)',
-                            outline: 'none'
-                          }}
-                        >
-                          <option value="member">멤버</option>
-                          <option value="admin">관리자</option>
-                        </select>
+                          onChange={(v) => handleRoleChange(m.user_id, v)}
+                          style={{ width: 96 }}
+                          options={[
+                            { value: 'member', label: '멤버' },
+                            { value: 'admin', label: '관리자' },
+                          ]}
+                        />
                       ) : (
                         <span style={{
                           fontSize: '0.7rem',

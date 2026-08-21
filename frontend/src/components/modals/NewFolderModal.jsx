@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FolderPlus, X, Palette, Check } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
+import Select from '../common/Select';
 
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
@@ -155,18 +156,14 @@ export default function NewFolderModal({
             <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.45rem' }}>
               상위 폴더 위치
             </label>
-            <select
+            <Select
               value={selectedParent}
-              onChange={e => setSelectedParent(e.target.value)}
-              className="select-primary"
-            >
-              <option value="">(최상위 루트 폴더)</option>
-              {flatFolders.map(f => (
-                <option key={f.id} value={f.id}>
-                  {f.displayName}
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedParent}
+              options={[
+                { value: '', label: '(최상위 루트 폴더)' },
+                ...flatFolders.map(f => ({ value: f.id, label: f.displayName })),
+              ]}
+            />
           </div>
 
           <div>

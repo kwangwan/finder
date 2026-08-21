@@ -37,6 +37,7 @@ import {
 import { downloadFileChunked, getThumbnailUrl } from '../../api';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
+import Select from '../common/Select';
 
 function getPageNumbers(currentPage, totalPages) {
   if (!totalPages || totalPages <= 1) return [1];
@@ -471,18 +472,20 @@ export default function FolderExplorer({
               <ArrowUpDown size={13} />
               <span>정렬:</span>
             </span>
-            <select
+            <Select
               className="sort-select"
               value={sortBy}
-              onChange={(e) => onSortByChange && onSortByChange(e.target.value)}
+              onChange={(v) => onSortByChange && onSortByChange(v)}
               title="정렬 기준"
-            >
-              <option value="updated_at">최근 수정일순</option>
-              <option value="created_at">생성일순</option>
-              <option value="name">이름순 (가나다/ABC)</option>
-              <option value="file_type">종류순 (확장자)</option>
-              <option value="size_bytes">크기순 (용량)</option>
-            </select>
+              style={{ width: 160 }}
+              options={[
+                { value: 'updated_at', label: '최근 수정일순' },
+                { value: 'created_at', label: '생성일순' },
+                { value: 'name', label: '이름순 (가나다/ABC)' },
+                { value: 'file_type', label: '종류순 (확장자)' },
+                { value: 'size_bytes', label: '크기순 (용량)' },
+              ]}
+            />
             <button
               className={`sort-order-btn ${sortOrder === 'asc' ? 'active' : ''}`}
               onClick={() => onToggleSortOrder && onToggleSortOrder()}
@@ -1062,16 +1065,18 @@ export default function FolderExplorer({
           </div>
 
           <div className="pagination-size-select">
-            <select
+            <Select
               value={pageSize}
-              onChange={(e) => onPageSizeChange && onPageSizeChange(Number(e.target.value))}
+              onChange={(v) => onPageSizeChange && onPageSizeChange(Number(v))}
               title="페이지당 표시 개수"
-            >
-              <option value={10}>10개씩</option>
-              <option value={20}>20개씩</option>
-              <option value={50}>50개씩</option>
-              <option value={100}>100개씩</option>
-            </select>
+              style={{ width: 110 }}
+              options={[
+                { value: 10, label: '10개씩' },
+                { value: 20, label: '20개씩' },
+                { value: 50, label: '50개씩' },
+                { value: 100, label: '100개씩' },
+              ]}
+            />
           </div>
         </div>
       )}

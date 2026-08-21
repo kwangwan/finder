@@ -18,6 +18,7 @@ import {
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
 import { listFiles, deleteFile } from '../../api';
 import FileConflictModal from './FileConflictModal';
+import Select from '../common/Select';
 
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
@@ -193,23 +194,14 @@ export default function ChunkedUploadModal({
             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
               업로드 대상 폴더
             </label>
-            <select
+            <Select
               value={selectedFolder}
-              onChange={(e) => setSelectedFolder(e.target.value)}
-              className="custom-select"
-              style={{
-                width: '100%',
-                padding: '0.55rem 2rem 0.55rem 0.75rem',
-                fontSize: '0.85rem'
-              }}
-            >
-              <option value="">📁 최상위 루트 (기본 위치)</option>
-              {flattenFolderTree(folders).map(f => (
-                <option key={f.id} value={f.id}>
-                  {f.displayName}
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedFolder}
+              options={[
+                { value: '', label: '📁 최상위 루트 (기본 위치)' },
+                ...flattenFolderTree(folders).map(f => ({ value: f.id, label: f.displayName })),
+              ]}
+            />
           </div>
 
           {/* Drag & Drop Upload Zone */}
