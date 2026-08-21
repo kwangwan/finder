@@ -1,5 +1,7 @@
 import uuid
 import math
+import json
+import tempfile
 import urllib.parse
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
@@ -305,11 +307,43 @@ TEMP_CHUNKS_DIR = Path(__file__).resolve().parent.parent.parent / "storage_data"
 TEMP_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _read_chunk_session_meta(session_dir: Path) -> Optional[dict]:
+    meta_path = session_dir / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text())
+    except Exception:
+        return None
+
+
+def _abort_chunk_session(session_dir: Path):
+    """Abort the underlying MinIO multipart upload (freeing any parts already
+    streamed to it) and remove the local session directory. Safe to call on a
+    session that was never fully initialized."""
+    meta = _read_chunk_session_meta(session_dir)
+    if meta and meta.get("s3_key") and meta.get("minio_upload_id"):
+        try:
+            s3_service.abort_multipart_upload(meta["s3_key"], meta["minio_upload_id"])
+        except Exception as e:
+            print(f"[Chunk Upload Warning] Could not abort MinIO multipart upload: {e}")
+    shutil.rmtree(session_dir, ignore_errors=True)
+
+
 def cleanup_stale_chunk_sessions(max_age_hours: int = 24) -> int:
-    """Remove abandoned chunk-upload session directories (e.g. left behind when a
-    browser tab is closed mid-upload) that have not received a new part in over
-    max_age_hours. An active upload keeps writing parts, so its directory's newest
-    file mtime stays recent and it is never touched by this cleanup."""
+    """
+    Remove abandoned chunk-upload sessions (e.g. a browser tab closed mid-upload,
+    or a network drop that never reached /chunk/abort) that have not received a
+    new part in over max_age_hours. An active upload keeps writing parts, so its
+    session directory's newest file mtime stays recent and it is never touched
+    by this cleanup.
+
+    Each part is streamed straight into a MinIO multipart upload as it arrives
+    (see /chunk/part), so an abandoned session isn't just a few KB of local
+    metadata — it's however many parts the user got through before giving up,
+    sitting in MinIO as an incomplete upload. Without this, those orphaned
+    parts would never be reclaimed.
+    """
     import time
     removed = 0
     cutoff = time.time() - max_age_hours * 3600
@@ -322,7 +356,7 @@ def cleanup_stale_chunk_sessions(max_age_hours: int = 24) -> int:
                 default=session_dir.stat().st_mtime
             )
             if newest_mtime < cutoff:
-                shutil.rmtree(session_dir, ignore_errors=True)
+                _abort_chunk_session(session_dir)
                 removed += 1
         except Exception:
             pass
@@ -334,7 +368,15 @@ async def init_chunk_upload(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Initialize a proxy chunked upload session (5MB per chunk, 100% Cloudflare Tunnel safe)."""
+    """
+    Initialize a proxy chunked upload session (5MB per chunk, 100% Cloudflare
+    Tunnel safe). Immediately opens a matching MinIO multipart upload, so each
+    part can be streamed straight to storage as it arrives (see /chunk/part)
+    instead of accumulating on local disk to be re-uploaded as one object at
+    completion time — for a large file, that re-upload was slow enough to
+    exceed the Cloudflare Tunnel's request timeout, making /chunk/complete
+    fail even though the file had, in fact, fully uploaded.
+    """
     workspace_id = req.workspace_id
     if not workspace_id and req.folder_id:
         folder = await db.get(Folder, req.folder_id)
@@ -342,9 +384,25 @@ async def init_chunk_upload(
             workspace_id = folder.workspace_id
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
+    file_uuid = uuid.uuid4()
+    s3_key = build_storage_key("uploads", file_uuid, req.filename)
+    minio_upload_id = s3_service.create_multipart_upload(
+        s3_key=s3_key,
+        content_type=req.content_type or "application/octet-stream"
+    )
+
     upload_id = str(uuid.uuid4())
     session_dir = TEMP_CHUNKS_DIR / upload_id
     session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "meta.json").write_text(json.dumps({
+        "s3_key": s3_key,
+        "minio_upload_id": minio_upload_id,
+        "filename": req.filename,
+        "size_bytes": req.size_bytes,
+        "workspace_id": str(workspace_id) if workspace_id else None,
+        "folder_id": str(req.folder_id) if req.folder_id else None,
+        "mime_type": req.content_type,
+    }))
 
     chunk_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
     total_parts = math.ceil(req.size_bytes / chunk_bytes) if req.size_bytes > 0 else 1
@@ -363,16 +421,25 @@ async def upload_chunk_part(
     chunk: UploadFile = File(...),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Save an individual chunk part (5MB) into temporary session storage."""
+    """Stream an individual chunk part (5MB) directly into the session's MinIO
+    multipart upload — never touches local disk, so completion doesn't need to
+    re-upload the whole file (see /chunk/init)."""
     session_dir = TEMP_CHUNKS_DIR / upload_id
-    if not session_dir.exists():
+    meta = _read_chunk_session_meta(session_dir)
+    if not meta:
         raise HTTPException(status_code=404, detail="Upload session expired or not found")
 
-    part_file = session_dir / f"part_{part_number:05d}.bin"
     chunk_bytes = await chunk.read()
 
-    with open(part_file, "wb") as f:
-        f.write(chunk_bytes)
+    try:
+        etag = s3_service.upload_part(meta["s3_key"], meta["minio_upload_id"], part_number, chunk_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to store chunk part {part_number} in MinIO: {e}")
+
+    # One small file per part (rather than read-modify-writing a shared meta
+    # file) avoids any write race — parts do arrive sequentially from the
+    # client, but this keeps the endpoint correct even if that ever changes.
+    (session_dir / f"part_{part_number:05d}.etag").write_text(etag)
 
     return {"upload_id": upload_id, "part_number": part_number, "bytes_received": len(chunk_bytes)}
 
@@ -382,32 +449,40 @@ async def complete_chunk_upload(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Merge all chunk parts, save file, generate thumbnail, and record in PostgreSQL."""
+    """
+    Finalize a chunked upload: complete the MinIO multipart upload from the
+    ETags collected in /chunk/part (no local merge — every part is already in
+    MinIO), generate a thumbnail, extract text content, and record the file.
+    """
     session_dir = TEMP_CHUNKS_DIR / req.upload_id
-    if not session_dir.exists():
+    meta = _read_chunk_session_meta(session_dir)
+    if not meta:
         raise HTTPException(status_code=404, detail="Upload session not found")
 
-    file_uuid = uuid.uuid4()
-    s3_key = build_storage_key("uploads", file_uuid, req.filename)
-    local_target_path = s3_service._get_local_path(s3_key)
+    s3_key = meta["s3_key"]
+    file_uuid = uuid.UUID(s3_key.split("/")[1])
+
+    parts = []
+    for part_num in range(1, req.total_parts + 1):
+        etag_file = session_dir / f"part_{part_num:05d}.etag"
+        if not etag_file.exists():
+            _abort_chunk_session(session_dir)
+            raise HTTPException(status_code=400, detail=f"Missing chunk part {part_num}")
+        parts.append({"PartNumber": part_num, "ETag": etag_file.read_text().strip()})
 
     try:
-        # Merge all part files in order
-        with open(local_target_path, "wb") as out_f:
-            for part_num in range(1, req.total_parts + 1):
-                part_file = session_dir / f"part_{part_num:05d}.bin"
-                if not part_file.exists():
-                    raise HTTPException(status_code=400, detail=f"Missing chunk part {part_num}")
-                with open(part_file, "rb") as in_f:
-                    shutil.copyfileobj(in_f, out_f)
+        s3_service.complete_multipart_upload(s3_key=s3_key, upload_id=meta["minio_upload_id"], parts=parts)
+    except Exception as e:
+        _abort_chunk_session(session_dir)
+        raise HTTPException(status_code=500, detail=f"Failed to finalize upload in MinIO: {str(e)}")
 
-        # Cleanup temporary chunk parts
-        shutil.rmtree(session_dir, ignore_errors=True)
-    except Exception as merge_err:
-        shutil.rmtree(session_dir, ignore_errors=True)
-        if local_target_path.exists():
-            local_target_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Failed to merge file chunks: {str(merge_err)}")
+    # The object is now final in MinIO — local session metadata can go.
+    shutil.rmtree(session_dir, ignore_errors=True)
+
+    try:
+        actual_size = s3_service.client.head_object(Bucket=s3_service.bucket_name, Key=s3_key)["ContentLength"]
+    except Exception:
+        actual_size = req.size_bytes
 
     # Detect file type
     name_lower = req.filename.lower()
@@ -448,48 +523,58 @@ async def complete_chunk_upload(
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
-    # Generate thumbnail for media files
-    thumbnail_s3_key = None
-    if file_type in ("image", "video"):
+    # Re-check quota now that the final size is known and the object already
+    # exists in MinIO (the /chunk/init check used the client-reported size,
+    # and other uploads may have completed in the meantime). If it's over,
+    # delete the object rather than leaving an unaccounted-for orphan.
+    try:
+        await quota_service.check_quota(db, workspace_id, current_user, actual_size)
+    except HTTPException:
         try:
+            s3_service.delete_object(s3_key)
+        except Exception:
+            pass
+        raise
+
+    mime_type = req.mime_type or get_media_mime_type(req.filename)
+
+    # Generate thumbnail for media files. Images are small enough to load
+    # fully; a video is downloaded to a temp file first so OpenCV can seek a
+    # frame without pulling the whole thing into memory.
+    thumbnail_s3_key = None
+    if file_type == "image":
+        try:
+            image_bytes = s3_service.get_object_content(s3_key)
+            if image_bytes:
+                thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail(
+                    file_uuid=str(file_uuid), filename=req.filename, file_bytes=image_bytes, file_type=file_type
+                )
+        except Exception as thumb_err:
+            print(f"[Thumbnail Warning] Chunk thumbnail generation failed: {thumb_err}")
+    elif file_type == "video":
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(req.filename).suffix) as tmp:
+                tmp_path = tmp.name
+            s3_service.client.download_file(Bucket=s3_service.bucket_name, Key=s3_key, Filename=tmp_path)
             thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail_from_path(
-                file_uuid=str(file_uuid),
-                filename=req.filename,
-                file_path=str(local_target_path),
-                file_type=file_type
+                file_uuid=str(file_uuid), filename=req.filename, file_path=tmp_path, file_type=file_type
             )
         except Exception as thumb_err:
             print(f"[Thumbnail Warning] Chunk thumbnail generation failed: {thumb_err}")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     # Read content for text/markdown
     content = None
     if is_markdown or file_type == "text":
         try:
-            with open(local_target_path, "rb") as f:
-                content_bytes = f.read()
-            content = content_bytes.decode("utf-8", errors="ignore")
+            content_bytes = s3_service.get_object_content(s3_key)
+            if content_bytes:
+                content = content_bytes.decode("utf-8", errors="ignore")
         except Exception:
             pass
-
-    actual_size = local_target_path.stat().st_size if local_target_path.exists() else req.size_bytes
-    mime_type = req.mime_type or get_media_mime_type(req.filename)
-
-    # Stream upload merged file to MinIO S3
-    if s3_service.client and local_target_path.exists():
-        try:
-            uploaded_to_s3 = s3_service.upload_file(
-                s3_key=s3_key,
-                local_path=str(local_target_path),
-                content_type=mime_type
-            )
-            if uploaded_to_s3:
-                # Successfully stored in MinIO! Delete local server disk copy to save disk space
-                try:
-                    local_target_path.unlink()
-                except Exception as unl_err:
-                    print(f"[Storage Warning] Could not delete local merged copy: {unl_err}")
-        except Exception as upload_err:
-            print(f"[MinIO Upload Error] Failed to upload chunked file to S3: {upload_err}")
 
     file_item = FileItem(
         folder_id=req.folder_id,
@@ -527,10 +612,11 @@ async def abort_chunk_upload(
     req: ChunkAbortRequest,
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Abort proxy chunk upload and delete temporary chunk parts."""
+    """Abort a chunked upload: cancels the MinIO multipart upload (discarding
+    any parts already streamed to it) and removes the local session."""
     session_dir = TEMP_CHUNKS_DIR / req.upload_id
     if session_dir.exists():
-        shutil.rmtree(session_dir, ignore_errors=True)
+        _abort_chunk_session(session_dir)
     return {"status": "aborted"}
 
 

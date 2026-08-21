@@ -158,6 +158,24 @@ class S3Service:
             print(f"[S3 Error] create_multipart_upload: {e}")
             raise
 
+    def upload_part(self, s3_key: str, upload_id: str, part_number: int, data: bytes) -> str:
+        """
+        Stream a single part directly into an in-progress multipart upload
+        and return its ETag. Used by the backend-proxied chunk upload route
+        so each part reaches MinIO as it arrives, instead of accumulating on
+        local disk and being re-uploaded as one giant object at the end (the
+        latter is what made completing a large upload take long enough to
+        hit the Cloudflare Tunnel's request timeout).
+        """
+        resp = self.client.upload_part(
+            Bucket=self.bucket_name,
+            Key=s3_key,
+            UploadId=upload_id,
+            PartNumber=part_number,
+            Body=data,
+        )
+        return resp["ETag"]
+
     def generate_multipart_presigned_urls(
         self, s3_key: str, upload_id: str, part_numbers: List[int], expires_in: int = 3600
     ) -> List[Dict[str, any]]:
