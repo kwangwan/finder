@@ -401,28 +401,6 @@ export default function ChunkedUploadModal({
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div style={{
-          padding: '0.85rem 1.25rem',
-          borderTop: '1px solid var(--border-subtle)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          background: 'var(--bg-tertiary)',
-          flexShrink: 0
-        }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            {isUploading ? '창을 닫아도 업로드가 계속 진행됩니다.' : '업로드할 준비가 완료되었습니다.'}
-          </div>
-          <button 
-            type="button"
-            className="btn-primary" 
-            onClick={onClose}
-          >
-            닫기
-          </button>
-        </div>
       </div>
     </div>
   );

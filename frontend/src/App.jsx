@@ -162,6 +162,19 @@ export default function App() {
       return 'all';
     }
   });
+
+  const activeFolderIdRef = useRef(activeFolderId);
+  const activeViewRef = useRef(activeView);
+  const isInitialFolderRestoredRef = useRef(false);
+
+  useEffect(() => {
+    activeFolderIdRef.current = activeFolderId;
+  }, [activeFolderId]);
+
+  useEffect(() => {
+    activeViewRef.current = activeView;
+  }, [activeView]);
+
   const [files, setFiles] = useState([]);
   const [activeFile, setActiveFile] = useState(null);
   const [stats, setStats] = useState(null);
@@ -559,32 +572,44 @@ export default function App() {
       setFolders(tree);
       setStats(systemStats);
 
-      // Verify if current activeFolderId (from URL or state) exists in this workspace
-      const urlParams = new URLSearchParams(window.location.search);
-      const targetFolderId = activeFolderId || urlParams.get('folder');
+      // On first load after workspace loads, restore folder from URL if present
+      if (!isInitialFolderRestoredRef.current) {
+        isInitialFolderRestoredRef.current = true;
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlFolderId = urlParams.get('folder');
+        const urlView = urlParams.get('view');
 
-      if (targetFolderId) {
-        const found = findFolderById(tree, targetFolderId);
-        if (found) {
-          setActiveFolderId(targetFolderId);
-          setActiveView('folder');
-          updateUrlParams({ folderId: targetFolderId, view: 'folder' });
-        } else {
-          // Folder not found in this workspace (deleted or wrong ID) -> gracefully fallback to root view
+        if (urlFolderId) {
+          const found = findFolderById(tree, urlFolderId);
+          if (found) {
+            setActiveFolderId(urlFolderId);
+            setActiveView('folder');
+            updateUrlParams({ folderId: urlFolderId, view: 'folder' });
+          } else {
+            // Folder not found in this workspace (deleted or wrong ID) -> gracefully fallback to root view
+            setActiveFolderId(null);
+            setActiveView('all');
+            updateUrlParams({ folderId: null, view: 'all' });
+          }
+        } else if (urlView && urlView !== 'folder') {
+          setActiveView(urlView);
+          setActiveFolderId(null);
+        }
+      } else {
+        // On subsequent refreshes (e.g. background uploads or stats sync):
+        // Only if the currently active folder was deleted from tree, fallback to root.
+        // NEVER force-navigate or change user's active view while uploading.
+        const currentFolderId = activeFolderIdRef.current;
+        if (currentFolderId && !findFolderById(tree, currentFolderId)) {
           setActiveFolderId(null);
           setActiveView('all');
           updateUrlParams({ folderId: null, view: 'all' });
-        }
-      } else {
-        const urlView = urlParams.get('view');
-        if (urlView && urlView !== 'folder') {
-          setActiveView(urlView);
         }
       }
     } catch (err) {
       console.error('Error loading folders/stats:', err);
     }
-  }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, activeFolderId, updateUrlParams]);
+  }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, updateUrlParams]);
 
   useEffect(() => {
     refreshFoldersAndStats();
