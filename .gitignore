@@ -58,6 +58,7 @@ pnpm-debug.log*
 backend/storage_data/uploads/*
 backend/storage_data/notes/*
 backend/storage_data/thumbnails/*
+backend/storage_data/temp_chunks/*
 !backend/storage_data/uploads/.gitkeep
 !backend/storage_data/notes/.gitkeep
 !backend/storage_data/thumbnails/.gitkeep

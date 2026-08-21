@@ -15,9 +15,10 @@ import {
   Clock, 
   Info, 
   ExternalLink, 
-  Calendar, 
+  Calendar,
   Lock,
-  Eye
+  Eye,
+  Loader2
 } from 'lucide-react';
 import { 
   listTrash, 
@@ -472,22 +473,26 @@ export default function TrashExplorer({
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                    <button 
-                      className="btn-icon" 
+                    <button
+                      className="btn-icon"
                       onClick={() => handleRestoreFolder(folder)}
                       title="원래 위치로 복구"
                       disabled={actionLoadingId === folder.id}
                     >
-                      <RotateCcw size={15} color="var(--accent-emerald)" />
+                      {actionLoadingId === folder.id
+                        ? <Loader2 size={15} className="spin" color="var(--accent-emerald)" />
+                        : <RotateCcw size={15} color="var(--accent-emerald)" />}
                     </button>
                     {canPurgeFolder ? (
-                      <button 
-                        className="btn-icon" 
+                      <button
+                        className="btn-icon"
                         onClick={() => handleDeletePermanentFolder(folder)}
                         title={isMyFolder ? "영구 삭제 (내가 생성한 폴더)" : "영구 삭제 (소유자/관리자)"}
                         disabled={actionLoadingId === folder.id}
                       >
-                        <Trash2 size={15} color="var(--accent-rose)" />
+                        {actionLoadingId === folder.id
+                          ? <Loader2 size={15} className="spin" color="var(--accent-rose)" />
+                          : <Trash2 size={15} color="var(--accent-rose)" />}
                       </button>
                     ) : (
                       <button 
@@ -593,22 +598,26 @@ export default function TrashExplorer({
                     >
                       <Eye size={15} color="var(--accent-primary)" />
                     </button>
-                    <button 
-                      className="btn-icon" 
+                    <button
+                      className="btn-icon"
                       onClick={() => handleRestoreFile(file)}
                       title="원래 위치로 복구"
                       disabled={actionLoadingId === file.id}
                     >
-                      <RotateCcw size={15} color="var(--accent-emerald)" />
+                      {actionLoadingId === file.id
+                        ? <Loader2 size={15} className="spin" color="var(--accent-emerald)" />
+                        : <RotateCcw size={15} color="var(--accent-emerald)" />}
                     </button>
                     {canPurgeFile ? (
-                      <button 
-                        className="btn-icon" 
+                      <button
+                        className="btn-icon"
                         onClick={() => handleDeletePermanentFile(file)}
                         title={isMyFile ? "영구 삭제 (내가 올린 파일)" : "영구 삭제 (소유자/관리자)"}
                         disabled={actionLoadingId === file.id}
                       >
-                        <Trash2 size={15} color="var(--accent-rose)" />
+                        {actionLoadingId === file.id
+                          ? <Loader2 size={15} className="spin" color="var(--accent-rose)" />
+                          : <Trash2 size={15} color="var(--accent-rose)" />}
                       </button>
                     ) : (
                       <button 

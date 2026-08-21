@@ -53,6 +53,7 @@ export default function ChunkedUploadModal({
   const {
     queue = [],
     isUploading,
+    isCheckingConflicts,
     activeCount,
     completedCount,
     errorCount,
@@ -121,9 +122,14 @@ export default function ChunkedUploadModal({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <UploadCloud size={20} color="var(--accent-primary)" />
             <h2 style={{ fontSize: '1.05rem', fontWeight: 700 }}>파일 및 폴더 업로드</h2>
+            {isCheckingConflicts && (
+              <span className="upload-header-active-badge">
+                <Loader2 size={12} className="spin" /> 중복 파일 확인 중...
+              </span>
+            )}
             {isUploading && (
               <span className="upload-header-active-badge">
-                <Loader2 size={12} className="spin-anim" /> {activeCount}개 전송 중
+                <Loader2 size={12} className="spin" /> {activeCount}개 전송 중
               </span>
             )}
           </div>

@@ -11,6 +11,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
   const folderIdCacheRef = useRef(new Map());
   const folderInFlightPromisesRef = useRef(new Map());
   const [pendingConflict, setPendingConflict] = useState(null); // { conflicts, restFiles, targetFolderId, activeWorkspaceId }
+  const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
 
   useEffect(() => {
     queueRef.current = queue;
@@ -257,6 +258,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     const allConflicts = [];
     const cleanFiles = [];
 
+    setIsCheckingConflicts(true);
     try {
       if (directFiles.length > 0) {
         const [conflicts, clean] = await findConflictsInFolder(activeWorkspaceId, targetFolderId, directFiles);
@@ -294,6 +296,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
       // If the duplicate check itself fails, don't block the upload over it.
       addFilesToQueue(files, targetFolderId, activeWorkspaceId);
       return;
+    } finally {
+      setIsCheckingConflicts(false);
     }
 
     if (allConflicts.length > 0) {
@@ -399,6 +403,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     addFilesToQueue,
     checkAndQueueFiles,
     pendingConflict,
+    isCheckingConflicts,
     resolveFileConflicts,
     cancelFileConflict,
     cancelUpload,

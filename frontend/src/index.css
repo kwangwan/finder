@@ -1352,8 +1352,12 @@ body {
   transition: width 0.2s ease;
 }
 
-/* Spinner */
-.spin {
+/* Spinner — .spin-anim/.animate-spin are aliases used across the app
+   alongside .spin; keep all three defined so none of them silently render
+   as a static, non-spinning icon. */
+.spin,
+.spin-anim,
+.animate-spin {
   animation: spin 1s linear infinite;
 }
 

@@ -215,7 +215,7 @@ export default function TrashPreviewModal({
                 }}
                 title="영구 삭제"
               >
-                <Trash2 size={14} />
+                {isActionLoading ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
                 <span>영구 삭제</span>
               </button>
             )}
