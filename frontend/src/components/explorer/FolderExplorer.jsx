@@ -82,7 +82,7 @@ export default function FolderExplorer({
   sortBy = 'updated_at',
   onSortByChange,
   sortOrder = 'desc',
-  onSortOrderChange,
+  onToggleSortOrder,
   currentPage = 1,
   onPageChange,
   pageSize = 20,
@@ -485,7 +485,7 @@ export default function FolderExplorer({
             </select>
             <button
               className={`sort-order-btn ${sortOrder === 'asc' ? 'active' : ''}`}
-              onClick={() => onSortOrderChange && onSortOrderChange(sortOrder === 'asc' ? 'desc' : 'asc')}
+              onClick={() => onToggleSortOrder && onToggleSortOrder()}
               title={sortOrder === 'asc' ? '오름차순 (클릭시 내림차순)' : '내림차순 (클릭시 오름차순)'}
             >
               {sortOrder === 'asc' ? '▲ 오름차순' : '▼ 내림차순'}
