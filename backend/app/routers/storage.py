@@ -438,6 +438,8 @@ async def init_chunk_upload(
             raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
         folder = await db.get(Folder, req.folder_id)
         if folder:
+            if folder.is_trashed:
+                raise HTTPException(status_code=400, detail="업로드 대상 폴더가 휴지통으로 이동되어 업로드할 수 없습니다.")
             if workspace_id and folder.workspace_id and workspace_id != folder.workspace_id:
                 raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
             if not workspace_id:
@@ -630,6 +632,15 @@ async def complete_chunk_upload(
         await _fail_and_cleanup(403, "폴더에 접근할 권한이 없습니다.")
     if workspace_id and not await access_service.is_workspace_member(db, current_user, workspace_id):
         await _fail_and_cleanup(403, "이 워크스페이스에 접근할 권한이 없습니다.")
+    if folder_id:
+        # A large upload's parts can take a while — long enough for the user
+        # to trash the target folder before /chunk/complete runs. Without
+        # this, the resulting FileItem would have is_trashed=False sitting
+        # invisibly under a trashed parent: not in the folder view, not in
+        # trash, still counted in stats.
+        target_folder = await db.get(Folder, folder_id)
+        if target_folder and target_folder.is_trashed:
+            await _fail_and_cleanup(400, "업로드 대상 폴더가 휴지통으로 이동되어 업로드할 수 없습니다.")
 
     # The quota for this upload was already reserved at /chunk/init (see
     # quota_service.reserve_quota) and enforced per-part in /chunk/part, so
@@ -753,6 +764,14 @@ async def direct_upload(
             raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
         folder = await db.get(Folder, folder_id)
         if folder:
+            # A folder trashed while this file was still mid-upload (e.g. a
+            # large background batch racing against the user deleting its
+            # target folder) would otherwise leave a FileItem with
+            # is_trashed=False sitting invisibly under a trashed parent —
+            # not shown in the folder view, not shown in trash, still
+            # counted in stats.
+            if folder.is_trashed:
+                raise HTTPException(status_code=400, detail="업로드 대상 폴더가 휴지통으로 이동되어 업로드할 수 없습니다.")
             if workspace_id and folder.workspace_id and workspace_id != folder.workspace_id:
                 raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
             if not workspace_id:

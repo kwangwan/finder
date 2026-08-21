@@ -45,6 +45,36 @@ async def _set_folder_trash_recursive(db: AsyncSession, folder: Folder, is_trash
         await _set_folder_trash_recursive(db, child, is_trashed, trashed_at)
 
 
+async def reconcile_orphaned_trashed_files(db: AsyncSession) -> int:
+    """
+    Fix FileItem rows with is_trashed=False sitting under an is_trashed=True
+    folder — invisible in the normal folder view (parent is trashed), absent
+    from the trash view (their own flag says not trashed), yet still counted
+    in stats. This happens when a file is still mid-upload (a large
+    background batch) at the exact moment its target folder gets trashed —
+    the recursive trash cascade only catches rows that existed at that
+    instant. Upload endpoints now reject writing into an already-trashed
+    folder, but this repairs anything created in that race before the fix,
+    or by any other path that doesn't go through the same check. Inherits
+    the parent folder's trashed_at so these files enter the normal 30-day
+    trash-purge cycle like everything else, instead of staying stuck.
+    """
+    stmt = (
+        select(FileItem)
+        .join(Folder, FileItem.folder_id == Folder.id)
+        .where(FileItem.is_trashed == False, Folder.is_trashed == True)
+    )
+    res = await db.execute(stmt)
+    files = res.scalars().all()
+    for f in files:
+        folder = await db.get(Folder, f.folder_id)
+        f.is_trashed = True
+        f.trashed_at = folder.trashed_at or datetime.utcnow()
+    if files:
+        await db.commit()
+    return len(files)
+
+
 @router.get("", response_model=Union[PagedFolderResponse, List[FolderResponse]])
 async def list_folders(
     workspace_id: Optional[uuid.UUID] = None,

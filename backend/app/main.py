@@ -7,15 +7,16 @@ from app.core.database import init_db, AsyncSessionLocal
 from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash
 from app.routers.trash import _auto_purge_expired
 from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files
+from app.routers.folders import reconcile_orphaned_trashed_files
 
 from app.services.deletion_service import deletion_service
 
 async def _periodic_trash_cleanup():
     """Periodically purge trashed items older than 30 days, abandoned chunk
-    upload sessions older than 24 hours, and phantom file rows (a FileItem
-    whose storage object doesn't actually exist — e.g. from a write that
-    failed after the row was already committed) younger than 48 hours, every
-    12 hours."""
+    upload sessions older than 24 hours, phantom file rows (a FileItem whose
+    storage object doesn't actually exist — e.g. from a write that failed
+    after the row was already committed) younger than 48 hours, and files
+    left behind under an already-trashed folder, every 12 hours."""
     while True:
         try:
             await asyncio.sleep(43200) # 12 hours
@@ -30,6 +31,10 @@ async def _periodic_trash_cleanup():
                 removed = await cleanup_phantom_files(db, max_age_hours=48)
                 if removed:
                     print(f"[{settings.APP_NAME}] Removed {removed} phantom file rows with no matching storage object.")
+            async with AsyncSessionLocal() as db:
+                fixed = await reconcile_orphaned_trashed_files(db)
+                if fixed:
+                    print(f"[{settings.APP_NAME}] Marked {fixed} files trashed to match their already-trashed parent folder.")
         except asyncio.CancelledError:
             break
         except Exception as e:
