@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
-import { listFiles, deleteFile } from '../../api';
+import { listFiles, deleteFile, ensureFolderPath } from '../../api';
 import FileConflictModal from './FileConflictModal';
 import Select from '../common/Select';
 
@@ -86,39 +86,82 @@ export default function ChunkedUploadModal({
     }
   };
 
+  // Checks one folder's existing files for name collisions against the files
+  // headed there, returning [conflicts, clean].
+  const findConflictsInFolder = async (folderId, files) => {
+    const existing = await listFiles({
+      workspace_id: activeWorkspaceId,
+      folder_id: folderId || null,
+      root_only: !folderId
+    });
+    const existingItems = Array.isArray(existing) ? existing : (existing?.items || []);
+    const existingNames = new Set(existingItems.map(f => f.name));
+    const conflicts = files
+      .filter(f => existingNames.has(f.name))
+      .map(f => ({ file: f, existingId: existingItems.find(e => e.name === f.name)?.id }));
+    const clean = files.filter(f => !existingNames.has(f.name));
+    return [conflicts, clean];
+  };
+
   const handleFiles = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
 
-    // Only files landing directly in the target folder can collide with
-    // something that already exists there — files going into a new
-    // sub-folder (from a folder upload) can't conflict with anything yet.
+    if (!activeWorkspaceId) {
+      enqueueFiles(fileList);
+      return;
+    }
+
     const directFiles = fileList.filter(f => !f.relativePath || !f.relativePath.includes('/'));
     const nestedFiles = fileList.filter(f => f.relativePath && f.relativePath.includes('/'));
 
-    if (directFiles.length > 0 && activeWorkspaceId) {
-      try {
-        const existing = await listFiles({
-          workspace_id: activeWorkspaceId,
-          folder_id: selectedFolder || null,
-          root_only: !selectedFolder
-        });
-        const existingItems = Array.isArray(existing) ? existing : (existing?.items || []);
-        const existingNames = new Set(existingItems.map(f => f.name));
-        const conflicts = directFiles
-          .filter(f => existingNames.has(f.name))
-          .map(f => ({ file: f, existingId: existingItems.find(e => e.name === f.name)?.id }));
-        const clean = directFiles.filter(f => !existingNames.has(f.name));
+    const allConflicts = [];
+    const cleanFiles = [];
 
-        if (conflicts.length > 0) {
-          setPendingConflict({ conflicts, restFiles: [...clean, ...nestedFiles] });
-          return;
-        }
-      } catch (e) {
-        // If the duplicate check itself fails, don't block the upload over it.
+    try {
+      if (directFiles.length > 0) {
+        const [conflicts, clean] = await findConflictsInFolder(selectedFolder, directFiles);
+        allConflicts.push(...conflicts);
+        cleanFiles.push(...clean);
       }
+
+      // Nested files (from a folder upload) land in a sub-folder that may
+      // already exist and already contain files of its own — merging into
+      // an existing sub-folder doesn't mean its contents are new. Resolve
+      // each unique sub-folder path once (find-or-create, same as the real
+      // upload does) and check that folder's existing files too.
+      if (nestedFiles.length > 0) {
+        const byFolderPath = new Map();
+        nestedFiles.forEach(f => {
+          const parts = f.relativePath.split('/');
+          parts.pop();
+          const folderPath = parts.join('/');
+          if (!byFolderPath.has(folderPath)) byFolderPath.set(folderPath, []);
+          byFolderPath.get(folderPath).push(f);
+        });
+
+        for (const [folderPath, filesInFolder] of byFolderPath) {
+          if (!folderPath) {
+            cleanFiles.push(...filesInFolder);
+            continue;
+          }
+          const ensured = await ensureFolderPath(activeWorkspaceId, selectedFolder || null, folderPath);
+          const [conflicts, clean] = await findConflictsInFolder(ensured.folder_id, filesInFolder);
+          allConflicts.push(...conflicts);
+          cleanFiles.push(...clean);
+        }
+      }
+    } catch (e) {
+      // If the duplicate check itself fails, don't block the upload over it.
+      enqueueFiles(fileList);
+      return;
     }
 
-    enqueueFiles(fileList);
+    if (allConflicts.length > 0) {
+      setPendingConflict({ conflicts: allConflicts, restFiles: cleanFiles });
+      return;
+    }
+
+    enqueueFiles(cleanFiles);
   };
 
   const resolveConflicts = async (resolved) => {
