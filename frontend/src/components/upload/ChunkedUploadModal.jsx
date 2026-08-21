@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  UploadCloud, 
-  X, 
-  File, 
-  CheckCircle2, 
+import {
+  UploadCloud,
+  X,
+  File as FileIcon,
+  CheckCircle2,
   AlertCircle, 
   Folder, 
   FolderPlus, 
@@ -18,20 +18,6 @@ import {
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
 import { listFiles, deleteFile } from '../../api';
 import FileConflictModal from './FileConflictModal';
-
-// "name.ext" -> "name (1).ext", skipping any name already taken
-function generateUniqueName(originalName, takenNames) {
-  const dotIdx = originalName.lastIndexOf('.');
-  const base = dotIdx > 0 ? originalName.slice(0, dotIdx) : originalName;
-  const ext = dotIdx > 0 ? originalName.slice(dotIdx) : '';
-  let n = 1;
-  let candidate = `${base} (${n})${ext}`;
-  while (takenNames.has(candidate)) {
-    n += 1;
-    candidate = `${base} (${n})${ext}`;
-  }
-  return candidate;
-}
 
 // Helper to flatten nested folder tree for dropdown options with indentations
 function flattenFolderTree(nodeList, depth = 0) {
@@ -123,7 +109,7 @@ export default function ChunkedUploadModal({
         const clean = directFiles.filter(f => !existingNames.has(f.name));
 
         if (conflicts.length > 0) {
-          setPendingConflict({ conflicts, restFiles: [...clean, ...nestedFiles], existingNames });
+          setPendingConflict({ conflicts, restFiles: [...clean, ...nestedFiles] });
           return;
         }
       } catch (e) {
@@ -135,27 +121,20 @@ export default function ChunkedUploadModal({
   };
 
   const resolveConflicts = async (resolved) => {
-    const { restFiles, existingNames } = pendingConflict;
+    const { restFiles } = pendingConflict;
     setPendingConflict(null);
 
-    const takenNames = new Set(existingNames);
     const finalFiles = [...restFiles];
 
     for (const { file, existingId, action } of resolved) {
       if (action === 'skip') continue;
-      if (action === 'replace') {
-        if (existingId) {
-          try { await deleteFile(existingId); } catch (e) { /* proceed with upload regardless */ }
-        }
-        finalFiles.push(file);
-      } else {
-        // keep both: upload alongside the existing file under a new name
-        const newName = generateUniqueName(file.name, takenNames);
-        takenNames.add(newName);
-        const renamed = new File([file], newName, { type: file.type });
-        if (file.relativePath) renamed.relativePath = file.relativePath;
-        finalFiles.push(renamed);
+      if (action === 'replace' && existingId) {
+        try { await deleteFile(existingId); } catch (e) { /* proceed with upload regardless */ }
       }
+      // Both 'replace' and 'keep' upload the file as-is under its original
+      // name — this app already allows duplicate filenames in one folder
+      // (like Google Drive), so "keep both" needs no renaming.
+      finalFiles.push(file);
     }
 
     enqueueFiles(finalFiles);
@@ -326,7 +305,7 @@ export default function ChunkedUploadModal({
                 }}
                 style={{ fontSize: '0.82rem', padding: '0.45rem 0.9rem' }}
               >
-                <File size={15} />
+                <FileIcon size={15} />
                 <span>파일 선택</span>
               </button>
 
@@ -401,7 +380,7 @@ export default function ChunkedUploadModal({
                         {item.relativePath && item.relativePath.includes('/') ? (
                           <Folder size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
                         ) : (
-                          <File size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                          <FileIcon size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
                         )}
                         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>
                           {item.name}
