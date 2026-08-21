@@ -20,7 +20,7 @@ from app.schemas.storage import (
     ChunkCompleteRequest, ChunkAbortRequest
 )
 from app.schemas.file import FileResponse
-from app.services.s3_service import s3_service, sanitize_filename
+from app.services.s3_service import s3_service, sanitize_filename, build_storage_key
 from app.services.document_service import document_service
 from app.services.thumbnail_service import thumbnail_service
 from app.services.access_service import access_service
@@ -57,7 +57,7 @@ async def get_presigned_upload_url(
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{sanitize_filename(req.filename)}"
+    s3_key = build_storage_key("uploads", file_uuid, req.filename)
 
     try:
         url = s3_service.generate_presigned_put_url(
@@ -158,7 +158,7 @@ async def initiate_multipart_upload(
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{sanitize_filename(req.filename)}"
+    s3_key = build_storage_key("uploads", file_uuid, req.filename)
     
     chunk_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
     total_parts = math.ceil(req.size_bytes / chunk_bytes) if req.size_bytes > 0 else 1
@@ -388,7 +388,7 @@ async def complete_chunk_upload(
         raise HTTPException(status_code=404, detail="Upload session not found")
 
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{sanitize_filename(req.filename)}"
+    s3_key = build_storage_key("uploads", file_uuid, req.filename)
     local_target_path = s3_service._get_local_path(s3_key)
 
     try:
@@ -562,7 +562,7 @@ async def direct_upload(
     # Storage quota check on workspace owner
     await quota_service.check_quota(db, workspace_id, current_user, len(file_bytes))
     file_uuid = uuid.uuid4()
-    s3_key = f"uploads/{file_uuid}/{sanitize_filename(file.filename)}"
+    s3_key = build_storage_key("uploads", file_uuid, file.filename)
     
     try:
         s3_service.put_object(s3_key, file_bytes, file.content_type or "application/octet-stream")

@@ -26,6 +26,26 @@ def sanitize_filename(filename: Optional[str]) -> str:
         name = "unnamed_file"
     return name
 
+
+def build_storage_key(prefix: str, object_id, original_filename: Optional[str]) -> str:
+    """
+    Build a storage key of the form "{prefix}/{object_id}/{object_id}{ext}" —
+    deliberately excluding the original filename (beyond its extension).
+    FileItem.name (the user-visible name) can be renamed at any time via
+    /api/files/{id}/rename, but a key built from the original filename would
+    keep that old name baked into the storage path forever (visible in
+    presigned URLs, DB s3_key values, etc.), which does not match a user's
+    expectation that renaming a file changes it everywhere. Keeping the
+    extension lets Content-Type/tooling still infer the file kind.
+    """
+    safe_name = sanitize_filename(original_filename)
+    ext = ""
+    if "." in safe_name:
+        candidate_ext = safe_name.rsplit(".", 1)[-1]
+        if candidate_ext and len(candidate_ext) <= 15:
+            ext = f".{candidate_ext}"
+    return f"{prefix}/{object_id}/{object_id}{ext}"
+
 class S3Service:
     def __init__(self):
         endpoint = settings.MINIO_INTERNAL_URL if settings.MINIO_INTERNAL_URL else settings.MINIO_PUBLIC_URL
