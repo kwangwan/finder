@@ -62,6 +62,7 @@ export default function ChunkedUploadModal({
     cancelAll,
     removeItem,
     retryItem,
+    retryAll,
     clearCompleted,
     clearAll
   } = uploadManager || {};
@@ -282,10 +283,20 @@ export default function ChunkedUploadModal({
                       전체 중단
                     </button>
                   )}
-                  {completedCount > 0 && (
-                    <button 
+                  {errorCount > 0 && (
+                    <button
                       type="button"
-                      className="upload-clear-btn" 
+                      className="upload-clear-btn"
+                      onClick={retryAll}
+                      title="실패/취소된 모든 파일 재시도"
+                    >
+                      일괄 재시도 ({errorCount})
+                    </button>
+                  )}
+                  {completedCount > 0 && (
+                    <button
+                      type="button"
+                      className="upload-clear-btn"
                       onClick={clearCompleted}
                     >
                       완료 정리 ({completedCount})

@@ -1,11 +1,15 @@
 import uuid
 import math
 import json
+import asyncio
 import tempfile
 import urllib.parse
+from datetime import datetime, timedelta
 from typing import Optional
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import os
@@ -367,6 +371,52 @@ async def cleanup_stale_chunk_sessions(db: AsyncSession, max_age_hours: int = 24
             pass
     return removed
 
+
+async def cleanup_phantom_files(db: AsyncSession, max_age_hours: int = 48) -> int:
+    """
+    Delete FileItem rows whose s3_key doesn't actually exist in storage — a
+    file that's counted in listings/stats but can never be opened. This can
+    happen if the storage write fails after the row was already committed
+    (e.g. a mid-request crash) or, historically, from a since-fixed bug where
+    a failed S3 put was silently swallowed and the row got created anyway.
+
+    Scoped to recently-created rows (not the whole table) so this stays cheap
+    as the table grows — anything older has already been checked by a
+    previous run of this same periodic job.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+    res = await db.execute(
+        select(FileItem).where(FileItem.created_at >= cutoff, FileItem.s3_key.isnot(None))
+    )
+    files = res.scalars().all()
+
+    async def _is_missing(f) -> bool:
+        try:
+            await run_in_threadpool(s3_service.client.head_object, Bucket=s3_service.bucket_name, Key=f.s3_key)
+            return False
+        except ClientError as e:
+            # Only treat a definitive "not found" as phantom — a transient
+            # network/API error here must not delete a perfectly good file.
+            return e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey")
+        except Exception:
+            return False
+
+    removed = 0
+    batch_size = 20
+    for i in range(0, len(files), batch_size):
+        batch = files[i:i + batch_size]
+        missing_flags = await asyncio.gather(*(_is_missing(f) for f in batch))
+        for f, is_missing in zip(batch, missing_flags):
+            if not is_missing:
+                continue
+            await quota_service.record_storage_freed(
+                db=db, workspace_id=f.workspace_id, creator_id=f.created_by, bytes_freed=f.size_bytes or 0
+            )
+            await db.delete(f)
+            await db.commit()
+            removed += 1
+    return removed
+
 @router.post("/chunk/init", response_model=ChunkInitResponse)
 async def init_chunk_upload(
     req: ChunkInitRequest,
@@ -647,7 +697,15 @@ async def complete_chunk_upload(
         is_markdown=is_markdown
     )
     db.add(file_item)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # The object is already finalized in S3 with nothing pointing to it —
+        # clean it up rather than leaving an orphaned blob nothing references.
+        await run_in_threadpool(s3_service.delete_object, s3_key)
+        if thumbnail_s3_key:
+            await run_in_threadpool(s3_service.delete_object, thumbnail_s3_key)
+        raise
     await db.refresh(file_item)
 
     # Index embeddings
@@ -712,7 +770,11 @@ async def direct_upload(
     try:
         await run_in_threadpool(s3_service.put_object, s3_key, file_bytes, file.content_type or "application/octet-stream")
     except Exception as e:
-        print(f"[MinIO Warning] Direct upload to S3 failed: {e}")
+        # Storage write failed — do not create a FileItem row for content that
+        # doesn't actually exist in S3. Swallowing this here (as it used to)
+        # left a phantom file counted in stats/listings with a s3_key nothing
+        # was ever written to.
+        raise HTTPException(status_code=502, detail=f"파일을 스토리지에 저장하지 못했습니다: {e}")
 
     name_lower = file.filename.lower()
     is_markdown = name_lower.endswith(".md")
@@ -769,7 +831,15 @@ async def direct_upload(
         is_markdown=is_markdown
     )
     db.add(file_item)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # The object is already sitting in S3 with nothing pointing to it —
+        # clean it up rather than leaving an orphaned blob nothing references.
+        await run_in_threadpool(s3_service.delete_object, s3_key)
+        if thumbnail_s3_key:
+            await run_in_threadpool(s3_service.delete_object, thumbnail_s3_key)
+        raise
     await db.refresh(file_item)
 
     # Update workspace owner storage usage

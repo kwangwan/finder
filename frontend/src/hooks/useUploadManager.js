@@ -365,6 +365,17 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     }, 50);
   }, [startWorkerPool]);
 
+  const retryAll = useCallback(() => {
+    setQueue(prev => prev.map(it =>
+      (it.status === 'error' || it.status === 'canceled')
+        ? { ...it, status: 'pending', percent: 0, statusText: '재시도 대기 중...' }
+        : it
+    ));
+    setTimeout(() => {
+      startWorkerPool();
+    }, 50);
+  }, [startWorkerPool]);
+
   const clearCompleted = useCallback(() => {
     setQueue(prev => prev.filter(it => it.status !== 'completed'));
   }, []);
@@ -394,6 +405,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     cancelAll,
     removeItem,
     retryItem,
+    retryAll,
     clearCompleted,
     clearAll
   };

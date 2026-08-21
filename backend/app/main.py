@@ -6,13 +6,16 @@ from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
 from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash
 from app.routers.trash import _auto_purge_expired
-from app.routers.storage import cleanup_stale_chunk_sessions
+from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files
 
 from app.services.deletion_service import deletion_service
 
 async def _periodic_trash_cleanup():
-    """Periodically purge trashed items older than 30 days, and abandoned chunk
-    upload sessions older than 24 hours, every 12 hours."""
+    """Periodically purge trashed items older than 30 days, abandoned chunk
+    upload sessions older than 24 hours, and phantom file rows (a FileItem
+    whose storage object doesn't actually exist — e.g. from a write that
+    failed after the row was already committed) younger than 48 hours, every
+    12 hours."""
     while True:
         try:
             await asyncio.sleep(43200) # 12 hours
@@ -23,6 +26,10 @@ async def _periodic_trash_cleanup():
                 removed = await cleanup_stale_chunk_sessions(db, max_age_hours=24)
                 if removed:
                     print(f"[{settings.APP_NAME}] Removed {removed} abandoned chunk-upload sessions.")
+            async with AsyncSessionLocal() as db:
+                removed = await cleanup_phantom_files(db, max_age_hours=48)
+                if removed:
+                    print(f"[{settings.APP_NAME}] Removed {removed} phantom file rows with no matching storage object.")
         except asyncio.CancelledError:
             break
         except Exception as e:
