@@ -78,9 +78,11 @@
 knowledge-base/
 ├── README.md                      # 서비스 실행 가이드 및 요약
 ├── DEVELOPMENT.md                 # 본 개발 및 아키텍처 문서
-├── .env                           # 전체 환경 설정 파일
+├── .env                           # 전체 환경 설정 파일 (git에는 커밋하지 않음)
+├── docker-compose.yml             # 운영 배포용 (backend + frontend 컨테이너)
 │
 ├── backend/                       # 백엔드 (FastAPI)
+│   ├── Dockerfile                 # 운영 이미지 빌드 (python:3.10-slim + uv)
 │   ├── app/
 │   │   ├── core/                  # 설정, DB 비동기 엔진, 보안(JWT/비밀번호)
 │   │   ├── models/                # SQLAlchemy 모델 (User, Workspace, Folder, FileItem 등)
@@ -90,9 +92,12 @@ knowledge-base/
 │   │   └── utils/                 # 이메일 발송(SES), 썸네일 생성기 등 유틸리티
 │   ├── tests/                     # Pytest 테스트 스위트 (22개 테스트 케이스)
 │   ├── pyproject.toml             # Python 종속성 정의
+│   ├── .venv/                     # 로컬 개발용 venv (uv sync, Docker 이미지와는 별개)
 │   └── run.py                     # 백엔드 실행 엔트리포인트 (Uvicorn)
 │
 └── frontend/                      # 프론트엔드 (React + Vite)
+    ├── Dockerfile                 # 운영 이미지 빌드 (node build → nginx serve)
+    ├── nginx.conf                 # /api/ 를 backend 컨테이너로 프록시
     ├── src/
     │   ├── api/                   # 백엔드 통신 API 클라이언트 모듈
     │   ├── components/
@@ -137,13 +142,11 @@ knowledge-base/
 1. **디버그 모드 비활성화**:
    - `backend/app/core/config.py`의 `DEBUG` 기본값이 `False`로 설정되어 프로덕션 모드로 동작합니다.
    - 테스트 전용 엔드포인트(`/api/auth/dev-login`)는 프로덕션에서 자동 차단(404)됩니다.
-2. **프론트엔드 프로덕션 빌드**:
-   - `cd frontend && npm run build` 실행 시 최적화된 정적 자산이 `frontend/dist/`에 생성됩니다.
-3. **Nginx / Reverse Proxy 설정**:
-   - `/api/` 경로는 `http://localhost:8001`로 프록시 전달.
-   - 나머지 경로는 `frontend/dist/`의 `index.html`로 SPA 라우팅 지원.
-4. **PM2 프로세스 매니저 상시 가동 (`ecosystem.config.cjs`)**:
-   - 백엔드(`finder-backend`) 및 프론트엔드(`finder-frontend`)를 단일 설정으로 관리합니다.
-   - 장애 발생 시 자동 복구(`autorestart: true`, `restart_delay: 2000`)를 지원합니다.
-   - 부팅 시 자동 실행 등록: `pm2 startup` 후 생성된 명령어를 터미널에서 1회 실행하고 `pm2 save`로 저장합니다.
+2. **컨테이너 빌드/배포**: 백엔드(`backend/Dockerfile`)와 프론트엔드(`frontend/Dockerfile`, 멀티스테이지: `npm run build` → nginx가 정적 자산 서빙 + `/api/`를 백엔드 컨테이너로 프록시)를 `docker-compose.yml`로 함께 관리합니다. 실행/버전관리 명령은 `README.md`의 "운영 배포"·"버전 관리 & 배포" 절 참고.
+3. **왜 PM2/launchd가 아니라 Docker인가 (macOS 전용 함정)**:
+   - 이 서버는 macOS(Mac mini)에서 돌고, Postgres(`192.168.0.25`)는 같은 LAN의 다른 호스트에 있습니다.
+   - macOS는 **GUI 로그인 세션에 붙어있지 않은 백그라운드 프로세스의 사설 IP(LAN) 접속을 "로컬 네트워크" 권한 체계로 조용히 차단**합니다. 이 권한은 사람이 직접 보고 있는 포그라운드 터미널에서 실행한 프로세스에만 부여될 수 있고, `pm2`/`launchd`처럼 데몬화되어 세션에서 분리된 프로세스는 **어떤 방법으로도 이 권한을 받을 수 없습니다** (재시작, launchd 세션 도메인 변경, 코드사이닝 등 모두 시도했지만 전부 실패 — `[Errno 65] No route to host`).
+   - 반면 `curl`/`nc`/`ssh` 같은 애플 서명 시스템 바이너리와 **Docker Desktop이 만드는 컨테이너 네트워크**는 이 검사에서 예외입니다 (Docker Desktop 앱 자체가 이미 로컬 네트워크 권한을 갖고 있고, 컨테이너 트래픽은 그 권한 하에 나갑니다). 그래서 백엔드를 Docker 컨테이너로 옮기는 것이 근본적인 해결책이었습니다.
+   - **결론**: 이 프로젝트에서 LAN(사설 IP) 리소스(Postgres 등)에 접속해야 하는 백그라운드 서비스는 항상 Docker 컨테이너로 실행하세요. 네이티브 `pm2`/`launchd` 데몬으로 되돌리지 마세요 — 재현 가능하게 막힙니다.
+4. **버전 관리**: `docker commit` 대신 `Dockerfile`에서 매번 다시 빌드하고, git 커밋의 짧은 SHA를 이미지 태그로 사용합니다 (`TAG=$(git rev-parse --short HEAD)`). 롤백은 예전 SHA 태그로 `docker compose up -d`. 자세한 명령은 `README.md` 참고.
 

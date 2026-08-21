@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: ./backend
+    image: knowledge-base-backend:${TAG:-latest}
+    env_file: .env
+    volumes:
+      - ./backend/storage_data:/app/storage_data
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: knowledge-base-frontend:${TAG:-latest}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

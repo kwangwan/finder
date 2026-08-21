@@ -6,90 +6,75 @@
 
 ## 1. 서비스 실행 방법 (Quick Start)
 
-### 1) 백엔드 (Backend - FastAPI)
-- **경로**: `/Users/ori/Projects/knowledge-base/backend`
-- **포트**: `8001`
+### 1) 로컬 개발 (Docker 없이, 핫리로드)
+운영은 Docker로 하지만, 개발 중에는 각자 네이티브로 띄우는 게 훨씬 빠릅니다(코드 변경 즉시 반영, `.venv` 기반 디버깅/IDE 자동완성).
 
+**백엔드** — `/Users/ori/Projects/knowledge-base/backend`, 포트 `8001`
 ```bash
-# 디렉토리 이동
 cd /Users/ori/Projects/knowledge-base/backend
-
-# 가상환경 패키지 동기화 (최초 1회 또는 패키지 추가 시)
-uv sync
-
-# 백엔드 서버 실행
+uv sync                # 최초 1회 또는 의존성 추가 시
 uv run python run.py
 ```
-> 백엔드 API 문서(Swagger UI): [http://localhost:8001/docs](http://localhost:8001/docs)
+> Swagger UI: [http://localhost:8001/docs](http://localhost:8001/docs)
 
----
-
-### 2) 프론트엔드 (Frontend - React & Vite)
-- **경로**: `/Users/ori/Projects/knowledge-base/frontend`
-- **포트**: `5173`
-
+**프론트엔드** — `/Users/ori/Projects/knowledge-base/frontend`, 포트 `5173`
 ```bash
-# 디렉토리 이동
 cd /Users/ori/Projects/knowledge-base/frontend
-
-# 패키지 설치 (최초 1회)
-npm install
-
-# [개발 모드] 로컬 개발 서버 실행
-npm run dev
-
-# [운영 모드] 프로덕션 번들 빌드
-npm run build
+npm install             # 최초 1회
+npm run dev              # vite dev 서버 (HMR)
 ```
-> 프론트엔드 접속 URL: [http://localhost:5173](http://localhost:5173) 또는 [https://finder.proj.run](https://finder.proj.run)
+> 접속: [http://localhost:5173](http://localhost:5173)
+
+둘 다 리포 루트의 공용 `.env`를 읽습니다 (`frontend/vite.config.js`의 `envDir: '..'`). `frontend/.env`를 따로 만들지 마세요.
 
 ---
 
-### 3) PM2 백그라운드 상시 구동 및 자동 재시작 (운영 권장)
-프로세스 비정상 종료 시 자동 복구 및 백그라운드 상시 유지를 위해 **PM2** 프로세스 매니저 설정을 제공합니다:
+### 2) 운영 배포 (Docker Compose)
+운영은 `docker-compose.yml`로 백엔드/프론트엔드 둘 다 컨테이너로 띄웁니다. **PM2/launchd 같은 네이티브 백그라운드 프로세스는 쓰지 않습니다** — macOS가 GUI 세션에 붙어있지 않은 백그라운드 프로세스의 LAN(사설 IP) 접속을 조용히 차단하기 때문입니다(`192.168.0.25` Postgres 접속 불가 → `[Errno 65] No route to host`). Docker Desktop 앱 자체는 로컬 네트워크 권한을 정상적으로 갖고 있어서, 컨테이너 트래픽은 이 문제에 걸리지 않습니다. 자세한 배경은 `DEVELOPMENT.md` 5장 참고.
 
 ```bash
-# PM2로 백엔드 & 프론트엔드 일괄 실행
-pm2 start ecosystem.config.cjs
+# 이미지 빌드 (버전 태그, 아래 "버전 관리" 참고)
+TAG=v1 docker compose build
 
-# 서비스 상태 확인
-pm2 status
+# 백그라운드로 기동 (재부팅 시에도 Docker Desktop 자동 실행 + restart: unless-stopped 로 자동 복구)
+TAG=v1 docker compose up -d
 
-# 실시간 로그 확인
-pm2 logs
+# 상태 확인 / 로그
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f frontend
 
-# 서비스 전체 재시작 / 중지
-pm2 restart all
-pm2 stop all
-
-# 현재 실행 상태 저장 (재부팅 대비)
-pm2 save
-
-# [선택] Mac/서버 부팅 시 자동 시작 등록
-pm2 startup
-# (출력되는 sudo env PATH=... 명령어를 터미널에 1회 복사/실행)
+# 중지
+docker compose down
 ```
+
+> ⚠️ Docker Desktop 설정 → General → **"Start Docker Desktop when you sign in"** 이 켜져 있어야 재부팅 후 자동으로 서비스가 살아납니다.
 
 ---
 
-### 4) 코드 수정 후 운영 반영 (Deploy Workflow)
-소스 코드 수정과 운영 환경이 분리되어 있으므로, 코드 변경 후 운영에 반영할 때는 아래 명령을 실행합니다:
+### 3) 버전 관리 & 배포 (Deploy Workflow)
+이미지에 버전 태그를 붙여서 관리합니다 (`docker commit`은 재현 불가능해서 쓰지 않습니다 — 항상 `Dockerfile`에서 다시 빌드).
 
 ```bash
-# 프론트엔드 변경 시: 프로덕션 빌드 후 PM2 재시작
-cd /Users/ori/Projects/knowledge-base/frontend && npm run build
-pm2 restart finder-frontend
+# 1. 코드 수정 후 커밋
+git add -A && git commit -m "..."
 
-# 백엔드 변경 시: PM2 재시작
-pm2 restart finder-backend
+# 2. 현재 커밋의 짧은 SHA를 태그로 새 이미지 빌드
+TAG=$(git rev-parse --short HEAD) docker compose build
 
-# 전체 변경 시 일괄 재시작
-pm2 restart all
+# 3. 배포 (이전 태그 이미지는 그대로 로컬에 남아있음)
+TAG=$(git rev-parse --short HEAD) docker compose up -d
+
+# 롤백: 문제가 생기면 예전 커밋의 SHA 태그로 다시 up (이미지가 로컬에 남아있는 동안은 재빌드 불필요)
+TAG=<이전 SHA> docker compose up -d
 ```
+- `TAG`를 지정하지 않으면 `latest`로 빌드/실행됩니다 — 로컬에서 빠르게 확인만 할 때 사용하고, 실제 배포에는 항상 SHA 태그를 쓰세요.
+- 롤백 가능하려면 오래된 이미지를 함부로 지우지 마세요 (`docker image prune`은 태그 없는 이미지만 지우므로 SHA 태그가 붙은 이미지는 안전합니다).
+- 소스는 `git`이 버전 관리하고, 이미지 태그는 "그 커밋을 빌드한 결과물"이라는 1:1 대응만 유지하면 됩니다.
 
 ---
 
-### 5) 테스트 실행 (Backend Test Suite)
+### 4) 테스트 실행 (Backend Test Suite)
 ```bash
 cd /Users/ori/Projects/knowledge-base/backend
 uv run pytest
@@ -126,9 +111,9 @@ MINIO_BUCKET_NAME=knowledge-base
 POSTGRES_HOST=192.168.0.25
 POSTGRES_PORT=5432
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=secretpassword
+POSTGRES_PASSWORD=your_postgres_password
 POSTGRES_DB=postgres
-DATABASE_URL=postgresql://postgres:secretpassword@192.168.0.25:5432/postgres
+DATABASE_URL=postgresql://postgres:your_postgres_password@192.168.0.25:5432/postgres
 
 # OpenWebUI / LLM & Vector Embeddings
 OPENWEBUI_URL=http://localhost:3000/
