@@ -2888,11 +2888,13 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .os-markdown-viewport {
+  width: 100%;
   padding: 1.5rem 1.75rem;
   overflow-y: auto;
   line-height: 1.65;
   color: var(--text-primary);
   -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 
 .os-code-viewport {
