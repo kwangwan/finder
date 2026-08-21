@@ -114,9 +114,11 @@ export default function WorkspaceSwitcher({
             }}>
               {activeWorkspace?.name || '워크스페이스 선택'}
             </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.2 }}>
-              멤버 {activeWorkspace?.member_count || 1}명
-            </div>
+            {activeWorkspace && (
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.2 }}>
+                멤버 {activeWorkspace.member_count || 1}명
+              </div>
+            )}
           </div>
         </div>
 

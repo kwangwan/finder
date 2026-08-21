@@ -78,6 +78,8 @@ async def init_db():
             "ALTER TABLE kb_folders ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMP;",
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS is_trashed BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMP;",
+            # Default (non-deletable, always-fallback) workspace per user
+            "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;",
         ]
         for sql in migrations:
             try:
@@ -114,4 +116,26 @@ async def init_db():
             """))
         except Exception as e:
             print(f"[DB Migration Warning] Could not sync user storage_used_bytes: {e}")
+
+        # Backfill is_default for users whose workspace(s) predate that column:
+        # their single oldest owned workspace becomes the default. Idempotent —
+        # once an owner has any workspace marked default, this is a no-op for them.
+        try:
+            await conn.execute(text("""
+                WITH earliest AS (
+                    SELECT DISTINCT ON (owner_id) id, owner_id
+                    FROM kb_workspaces
+                    ORDER BY owner_id, created_at ASC
+                )
+                UPDATE kb_workspaces w
+                SET is_default = TRUE
+                FROM earliest e
+                WHERE w.id = e.id
+                AND NOT EXISTS (
+                    SELECT 1 FROM kb_workspaces w2
+                    WHERE w2.owner_id = w.owner_id AND w2.is_default = TRUE
+                );
+            """))
+        except Exception as e:
+            print(f"[DB Migration Warning] Could not backfill default workspaces: {e}")
 

@@ -512,23 +512,22 @@ export default function App() {
       const urlWsId = urlParams.get('ws') || urlParams.get('workspace_id');
       const savedWsId = urlWsId || localStorage.getItem('kb_active_ws_id');
       const matched = wsList.find(w => w.id === savedWsId);
+      // Every user always owns exactly one non-deletable default workspace
+      // (see backend Workspace.is_default), so falling back to it — rather
+      // than just wsList[0] — means a stale/deleted saved workspace id never
+      // leaves the app without an active workspace to show.
+      const fallback = wsList.find(w => w.is_default) || wsList[0];
+      const resolved = matched || fallback || null;
 
-      if (matched) {
-        setActiveWorkspace(matched);
-        localStorage.setItem('kb_active_ws_id', matched.id);
-        localStorage.setItem('kb_active_ws_data', JSON.stringify(matched));
-        updateUrlParams({ wsId: matched.id });
-      } else if (wsList.length > 0) {
-        setActiveWorkspace(wsList[0]);
-        localStorage.setItem('kb_active_ws_id', wsList[0].id);
-        localStorage.setItem('kb_active_ws_data', JSON.stringify(wsList[0]));
-        updateUrlParams({ wsId: wsList[0].id });
+      setActiveWorkspace(resolved);
+      if (resolved) {
+        localStorage.setItem('kb_active_ws_id', resolved.id);
+        localStorage.setItem('kb_active_ws_data', JSON.stringify(resolved));
       } else {
-        setActiveWorkspace(null);
         localStorage.removeItem('kb_active_ws_id');
         localStorage.removeItem('kb_active_ws_data');
-        updateUrlParams({ wsId: null });
       }
+      updateUrlParams({ wsId: resolved?.id || null });
     } catch (err) {
       console.error('Error loading workspaces:', err);
     } finally {
@@ -659,6 +658,7 @@ export default function App() {
         page: 1,
         page_size: pageSize
       });
+      setIsLoading(false);
       return;
     }
     if (!silent) {

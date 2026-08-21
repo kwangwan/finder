@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -15,6 +15,12 @@ class Workspace(Base):
     slug = Column(String(100), unique=True, index=True, nullable=False)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="CASCADE"), nullable=False)
     icon = Column(String(50), default="briefcase", nullable=True)
+    # The workspace auto-created for a user on first login (see
+    # ensure_user_default_workspace). Every user always has exactly one of
+    # these and it can't be deleted, so the app never has to render a
+    # "no workspace selected" state — the frontend falls back to it whenever
+    # the previously active workspace is missing or unset.
+    is_default = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -41,6 +47,7 @@ class Workspace(Base):
             "owner_name": self.owner.name if self.owner else None,
             "owner_email": self.owner.email if self.owner else None,
             "icon": self.icon,
+            "is_default": self.is_default,
             "member_count": len(self.members) if self.members else 0,
             "role": user_role,
             "created_at": self.created_at.isoformat() if self.created_at else None,

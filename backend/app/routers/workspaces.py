@@ -246,6 +246,12 @@ async def delete_workspace(
         db, workspace_id, current_user, require_role=["owner"]
     )
 
+    if workspace.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="기본 워크스페이스는 삭제할 수 없습니다."
+        )
+
     files_res = await db.execute(select(FileItem).where(FileItem.workspace_id == workspace_id))
     files_to_delete = files_res.scalars().all()
 

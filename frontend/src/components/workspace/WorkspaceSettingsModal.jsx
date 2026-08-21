@@ -426,26 +426,31 @@ export default function WorkspaceSettingsModal({
               <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(244, 63, 94, 0.2)', paddingTop: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--accent-rose)' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: workspace.is_default ? 'var(--text-muted)' : 'var(--accent-rose)' }}>
                       워크스페이스 삭제
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      포함된 모든 데이터가 영구 삭제됩니다.
+                      {workspace.is_default
+                        ? '기본 워크스페이스는 삭제할 수 없습니다.'
+                        : '포함된 모든 데이터가 영구 삭제됩니다.'}
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleDeleteWorkspace}
+                    disabled={workspace.is_default}
+                    title={workspace.is_default ? '기본 워크스페이스는 삭제할 수 없습니다.' : undefined}
                     style={{
-                      background: 'rgba(244, 63, 94, 0.15)',
-                      border: '1px solid rgba(244, 63, 94, 0.3)',
+                      background: workspace.is_default ? 'var(--bg-tertiary)' : 'rgba(244, 63, 94, 0.15)',
+                      border: workspace.is_default ? '1px solid var(--border-subtle)' : '1px solid rgba(244, 63, 94, 0.3)',
                       borderRadius: 'var(--radius-md)',
-                      color: 'var(--accent-rose)',
+                      color: workspace.is_default ? 'var(--text-muted)' : 'var(--accent-rose)',
                       padding: '0.35rem 0.75rem',
                       fontSize: '0.78rem',
                       fontWeight: 600,
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap'
+                      cursor: workspace.is_default ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      opacity: workspace.is_default ? 0.7 : 1
                     }}
                   >
                     워크스페이스 삭제

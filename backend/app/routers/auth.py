@@ -44,7 +44,8 @@ async def ensure_user_default_workspace(db: AsyncSession, user: User):
             description="개인 기본 워크스페이스",
             slug=slug,
             owner_id=user.id,
-            icon="briefcase"
+            icon="briefcase",
+            is_default=True
         )
         db.add(workspace)
         await db.commit()
