@@ -447,6 +447,24 @@ async def complete_chunk_upload(
             pass
 
     actual_size = local_target_path.stat().st_size if local_target_path.exists() else req.size_bytes
+    mime_type = req.mime_type or get_media_mime_type(req.filename)
+
+    # Stream upload merged file to MinIO S3
+    if s3_service.client and local_target_path.exists():
+        try:
+            uploaded_to_s3 = s3_service.upload_file(
+                s3_key=s3_key,
+                local_path=str(local_target_path),
+                content_type=mime_type
+            )
+            if uploaded_to_s3:
+                # Successfully stored in MinIO! Delete local server disk copy to save disk space
+                try:
+                    local_target_path.unlink()
+                except Exception as unl_err:
+                    print(f"[Storage Warning] Could not delete local merged copy: {unl_err}")
+        except Exception as upload_err:
+            print(f"[MinIO Upload Error] Failed to upload chunked file to S3: {upload_err}")
 
     file_item = FileItem(
         folder_id=req.folder_id,
@@ -454,7 +472,7 @@ async def complete_chunk_upload(
         created_by=current_user.id,
         name=req.filename,
         file_type=file_type,
-        mime_type=req.mime_type or "application/octet-stream",
+        mime_type=mime_type,
         size_bytes=actual_size,
         s3_key=s3_key,
         thumbnail_s3_key=thumbnail_s3_key,

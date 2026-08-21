@@ -4,6 +4,7 @@ from app.models.chunk import DocumentChunk
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.invitation import Invitation
+from app.models.deletion_queue import DeletionQueueItem
 
 __all__ = [
     "Folder", 
@@ -13,4 +14,5 @@ __all__ = [
     "Workspace",
     "WorkspaceMember",
     "Invitation",
+    "DeletionQueueItem",
 ]

@@ -22,6 +22,7 @@ from app.services.s3_service import s3_service
 from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services.quota_service import quota_service
+from app.services.deletion_service import deletion_service
 
 router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
 
@@ -455,7 +456,7 @@ async def delete_file(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Delete file, chunks, and MinIO object."""
+    """Permanently delete file via asynchronous deletion queue."""
     if not await access_service.can_access_file(db, current_user, file_id):
         raise HTTPException(status_code=403, detail="파일을 삭제할 권한이 없습니다.")
 
@@ -463,20 +464,9 @@ async def delete_file(
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if file_item.s3_key:
-        try:
-            s3_service.delete_object(file_item.s3_key)
-        except Exception as e:
-            print(f"[MinIO Warning] Could not delete S3 object {file_item.s3_key}: {e}")
+    await deletion_service.enqueue_file(db, file_item)
 
-    if file_item.thumbnail_s3_key:
-        try:
-            s3_service.delete_object(file_item.thumbnail_s3_key)
-            print(f"[MinIO] Deleted thumbnail object: {file_item.thumbnail_s3_key}")
-        except Exception as e:
-            print(f"[MinIO Warning] Could not delete thumbnail S3 object {file_item.thumbnail_s3_key}: {e}")
-
-    # Reclaim storage quota from workspace owner
+    # Reclaim storage quota from workspace owner immediately
     await quota_service.record_storage_freed(
         db=db,
         workspace_id=file_item.workspace_id,

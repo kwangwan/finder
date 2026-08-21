@@ -262,6 +262,21 @@ class S3Service:
 
         return None
 
+    def upload_file(self, s3_key: str, local_path: str, content_type: str = "application/octet-stream") -> bool:
+        """Upload a local file directly to MinIO S3."""
+        if self.client:
+            try:
+                self.client.upload_file(
+                    Filename=str(local_path),
+                    Bucket=self.bucket_name,
+                    Key=s3_key,
+                    ExtraArgs={"ContentType": content_type}
+                )
+                return True
+            except Exception as e:
+                print(f"[S3 Error] upload_file to S3 failed: {e}")
+        return False
+
     def delete_object(self, s3_key: str):
         """Delete object from MinIO and local storage."""
         # 1. Delete from S3
@@ -278,6 +293,32 @@ class S3Service:
                 local_path.unlink()
         except Exception as e:
             print(f"[Local Storage Warning] Could not delete local file: {e}")
+
+    def delete_objects_batch(self, s3_keys: List[str]):
+        """Delete multiple objects from S3 and local storage in batch."""
+        if not s3_keys:
+            return
+        
+        # 1. Delete from S3 in batches of up to 1000
+        if self.client:
+            for i in range(0, len(s3_keys), 1000):
+                batch = s3_keys[i:i+1000]
+                try:
+                    self.client.delete_objects(
+                        Bucket=self.bucket_name,
+                        Delete={"Objects": [{"Key": k} for k in batch]}
+                    )
+                except Exception as e:
+                    print(f"[S3 Error] delete_objects batch failed: {e}")
+
+        # 2. Delete from local storage
+        for k in s3_keys:
+            try:
+                local_path = self._get_local_path(k)
+                if local_path.exists():
+                    local_path.unlink()
+            except Exception as e:
+                print(f"[Local Storage Warning] Could not delete local file: {e}")
 
     def _format_public_url(self, presigned_url: str) -> str:
         """Ensure the presigned URL points to the public URL domain."""

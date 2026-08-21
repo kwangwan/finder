@@ -7,6 +7,8 @@ from app.core.database import init_db, AsyncSessionLocal
 from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash
 from app.routers.trash import _auto_purge_expired
 
+from app.services.deletion_service import deletion_service
+
 async def _periodic_trash_cleanup():
     """Periodically purge trashed items older than 30 days every 12 hours."""
     while True:
@@ -29,11 +31,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[{settings.APP_NAME} Error] DB initialization error: {e}")
     
+    # Start background deletion queue worker & periodic 30-day trash cleanup
+    deletion_service.start_worker()
     cleanup_task = asyncio.create_task(_periodic_trash_cleanup())
     
     yield
     
     cleanup_task.cancel()
+    await deletion_service.stop_worker()
     print(f"[{settings.APP_NAME}] Shutting down...")
 
 app = FastAPI(

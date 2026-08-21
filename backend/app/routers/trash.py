@@ -12,6 +12,7 @@ from app.core.security import get_current_approved_user
 from app.services.access_service import access_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
+from app.services.deletion_service import deletion_service
 
 router = APIRouter(prefix="/api/trash", tags=["Trash / Recycle Bin"])
 
@@ -50,43 +51,20 @@ class TrashResponse(BaseModel):
 
 
 async def _purge_file(db: AsyncSession, file_item: FileItem):
-    """Helper to permanently delete S3 objects and database record for a file."""
-    if file_item.s3_key:
-        try:
-            s3_service.delete_object(file_item.s3_key)
-        except Exception as e:
-            print(f"[MinIO Warning] Could not delete S3 object {file_item.s3_key}: {e}")
-
-    if file_item.thumbnail_s3_key:
-        try:
-            s3_service.delete_object(file_item.thumbnail_s3_key)
-        except Exception as e:
-            print(f"[MinIO Warning] Could not delete thumbnail S3 object {file_item.thumbnail_s3_key}: {e}")
-
-    # Reclaim quota from workspace owner
+    """Enqueue file for background deletion, reclaim quota, and remove DB record immediately."""
+    await deletion_service.enqueue_file(db, file_item)
     await quota_service.record_storage_freed(
         db=db,
         workspace_id=file_item.workspace_id,
         creator_id=file_item.created_by,
         bytes_freed=file_item.size_bytes or 0
     )
-
     await db.delete(file_item)
 
 
 async def _purge_folder_recursive(db: AsyncSession, folder: Folder):
-    """Helper to permanently delete a folder and all contents recursively."""
-    # 1. Purge all files in this folder
-    files_res = await db.execute(select(FileItem).where(FileItem.folder_id == folder.id))
-    for f in files_res.scalars().all():
-        await _purge_file(db, f)
-
-    # 2. Purge child folders
-    children_res = await db.execute(select(Folder).where(Folder.parent_id == folder.id))
-    for child in children_res.scalars().all():
-        await _purge_folder_recursive(db, child)
-
-    await db.delete(folder)
+    """Recursively enqueue folder contents for background deletion and remove DB records immediately."""
+    await deletion_service.enqueue_folder_recursive(db, folder)
 
 
 async def _auto_purge_expired(db: AsyncSession):
