@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import List, Optional
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
@@ -92,11 +93,11 @@ class DeletionService:
                 try:
                     # 1. Delete main file from S3 & local cache
                     if item.s3_key:
-                        s3_service.delete_object(item.s3_key)
+                        await run_in_threadpool(s3_service.delete_object, item.s3_key)
 
                     # 2. Delete thumbnail from S3 & local cache
                     if item.thumbnail_s3_key:
-                        s3_service.delete_object(item.thumbnail_s3_key)
+                        await run_in_threadpool(s3_service.delete_object, item.thumbnail_s3_key)
 
                     deleted_ids.append(item.id)
                 except Exception as e:

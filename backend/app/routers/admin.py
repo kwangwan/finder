@@ -1,6 +1,7 @@
 import uuid
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
@@ -90,12 +91,12 @@ async def delete_user(
         for f in files_res.scalars().all():
             if f.s3_key:
                 try:
-                    s3_service.delete_object(f.s3_key)
+                    await run_in_threadpool(s3_service.delete_object, f.s3_key)
                 except Exception as e:
                     print(f"[MinIO Warning] Could not delete S3 object {f.s3_key}: {e}")
             if f.thumbnail_s3_key:
                 try:
-                    s3_service.delete_object(f.thumbnail_s3_key)
+                    await run_in_threadpool(s3_service.delete_object, f.thumbnail_s3_key)
                 except Exception as e:
                     print(f"[MinIO Warning] Could not delete thumbnail S3 object {f.thumbnail_s3_key}: {e}")
 

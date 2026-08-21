@@ -1,5 +1,6 @@
 import uuid
 from typing import Optional
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete
 from app.models import FileItem, DocumentChunk
@@ -22,25 +23,25 @@ class DocumentService:
         
         # 2. Extract from PDF
         elif file_name_lower.endswith(".pdf") or file_item.file_type == "pdf":
-            pdf_bytes = raw_bytes or (s3_service.get_object_content(file_item.s3_key) if file_item.s3_key else None)
+            pdf_bytes = raw_bytes or (await run_in_threadpool(s3_service.get_object_content, file_item.s3_key) if file_item.s3_key else None)
             if pdf_bytes:
-                content_to_index = chunking_service.extract_text_from_pdf(pdf_bytes)
+                content_to_index = await run_in_threadpool(chunking_service.extract_text_from_pdf, pdf_bytes)
                 if not file_item.content and content_to_index:
                     file_item.content = content_to_index[:50000]
 
         # 3. Extract from Word (.docx)
         elif file_name_lower.endswith(".docx") or file_item.file_type in ["docx", "word"]:
-            doc_bytes = raw_bytes or (s3_service.get_object_content(file_item.s3_key) if file_item.s3_key else None)
+            doc_bytes = raw_bytes or (await run_in_threadpool(s3_service.get_object_content, file_item.s3_key) if file_item.s3_key else None)
             if doc_bytes:
-                content_to_index = chunking_service.extract_text_from_docx(doc_bytes)
+                content_to_index = await run_in_threadpool(chunking_service.extract_text_from_docx, doc_bytes)
                 if not file_item.content and content_to_index:
                     file_item.content = content_to_index[:50000]
 
         # 4. Extract from Excel (.xlsx, .xls)
         elif file_name_lower.endswith(".xlsx") or file_name_lower.endswith(".xls") or file_item.file_type in ["xlsx", "excel", "sheet"]:
-            xls_bytes = raw_bytes or (s3_service.get_object_content(file_item.s3_key) if file_item.s3_key else None)
+            xls_bytes = raw_bytes or (await run_in_threadpool(s3_service.get_object_content, file_item.s3_key) if file_item.s3_key else None)
             if xls_bytes:
-                content_to_index = chunking_service.extract_text_from_excel(xls_bytes)
+                content_to_index = await run_in_threadpool(chunking_service.extract_text_from_excel, xls_bytes)
                 if not file_item.content and content_to_index:
                     file_item.content = content_to_index[:50000]
 

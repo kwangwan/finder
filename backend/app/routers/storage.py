@@ -5,6 +5,7 @@ import tempfile
 import urllib.parse
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import os
@@ -124,7 +125,7 @@ async def download_file_chunk(
         raise HTTPException(status_code=404, detail="File not found")
 
     range_header = range or f"bytes=0-{file_item.size_bytes - 1}"
-    res = s3_service.get_object_range(file_item.s3_key, range_header)
+    res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range_header)
     
     if not res:
         raise HTTPException(status_code=500, detail="Failed to fetch byte chunk from storage")
@@ -252,10 +253,11 @@ async def complete_multipart_upload(
     if file_type in ("image", "video"):
         try:
             # Download bytes from S3 (or range for video) to generate thumbnail
-            media_bytes = s3_service.get_object_content(req.s3_key)
+            media_bytes = await run_in_threadpool(s3_service.get_object_content, req.s3_key)
             if media_bytes:
                 file_uuid = req.s3_key.split("/")[1] if "/" in req.s3_key else str(uuid.uuid4())
-                thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail(
+                thumbnail_s3_key = await run_in_threadpool(
+                    thumbnail_service.create_and_store_thumbnail,
                     file_uuid=file_uuid,
                     filename=req.filename,
                     file_bytes=media_bytes,
@@ -568,7 +570,7 @@ async def complete_chunk_upload(
 
     async def _fail_and_cleanup(status_code: int, detail: str):
         try:
-            s3_service.delete_object(s3_key)
+            await run_in_threadpool(s3_service.delete_object, s3_key)
         except Exception:
             pass
         await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
@@ -595,9 +597,10 @@ async def complete_chunk_upload(
     thumbnail_s3_key = None
     if file_type == "image":
         try:
-            image_bytes = s3_service.get_object_content(s3_key)
+            image_bytes = await run_in_threadpool(s3_service.get_object_content, s3_key)
             if image_bytes:
-                thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail(
+                thumbnail_s3_key = await run_in_threadpool(
+                    thumbnail_service.create_and_store_thumbnail,
                     file_uuid=str(file_uuid), filename=req.filename, file_bytes=image_bytes, file_type=file_type
                 )
         except Exception as thumb_err:
@@ -607,8 +610,11 @@ async def complete_chunk_upload(
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=Path(req.filename).suffix) as tmp:
                 tmp_path = tmp.name
-            s3_service.client.download_file(Bucket=s3_service.bucket_name, Key=s3_key, Filename=tmp_path)
-            thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail_from_path(
+            await run_in_threadpool(
+                s3_service.client.download_file, Bucket=s3_service.bucket_name, Key=s3_key, Filename=tmp_path
+            )
+            thumbnail_s3_key = await run_in_threadpool(
+                thumbnail_service.create_and_store_thumbnail_from_path,
                 file_uuid=str(file_uuid), filename=req.filename, file_path=tmp_path, file_type=file_type
             )
         except Exception as thumb_err:
@@ -621,7 +627,7 @@ async def complete_chunk_upload(
     content = None
     if is_markdown or file_type == "text":
         try:
-            content_bytes = s3_service.get_object_content(s3_key)
+            content_bytes = await run_in_threadpool(s3_service.get_object_content, s3_key)
             if content_bytes:
                 content = content_bytes.decode("utf-8", errors="ignore")
         except Exception:
@@ -704,7 +710,7 @@ async def direct_upload(
     s3_key = build_storage_key("uploads", file_uuid, file.filename)
     
     try:
-        s3_service.put_object(s3_key, file_bytes, file.content_type or "application/octet-stream")
+        await run_in_threadpool(s3_service.put_object, s3_key, file_bytes, file.content_type or "application/octet-stream")
     except Exception as e:
         print(f"[MinIO Warning] Direct upload to S3 failed: {e}")
 
@@ -739,7 +745,8 @@ async def direct_upload(
     thumbnail_s3_key = None
     if file_type in ("image", "video"):
         try:
-            thumbnail_s3_key = thumbnail_service.create_and_store_thumbnail(
+            thumbnail_s3_key = await run_in_threadpool(
+                thumbnail_service.create_and_store_thumbnail,
                 file_uuid=str(file_uuid),
                 filename=file.filename,
                 file_bytes=file_bytes,
@@ -820,7 +827,7 @@ async def preview_file(
     # executes when rendered inline in the app's own origin. Never serve raw SVG
     # bytes inline — always sanitize first (small documents, so skip range-serving).
     if range and not is_svg:
-        res = s3_service.get_object_range(file_item.s3_key, range)
+        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range)
         if res:
             headers = {
                 "Content-Range": res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}",
@@ -837,7 +844,7 @@ async def preview_file(
                 media_type=mime_type
             )
 
-    raw_bytes = s3_service.get_object_content(file_item.s3_key)
+    raw_bytes = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
     if raw_bytes is None:
         raise HTTPException(status_code=404, detail="파일 데이터를 찾을 수 없습니다.")
 
@@ -884,7 +891,7 @@ async def direct_file_download(
     safe_name = urllib.parse.quote(file_item.name)
 
     if range:
-        res = s3_service.get_object_range(file_item.s3_key, range)
+        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range)
         if res:
             headers = {
                 "Content-Range": res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}",
@@ -900,7 +907,7 @@ async def direct_file_download(
                 media_type="application/octet-stream"
             )
 
-    raw_bytes = s3_service.get_object_content(file_item.s3_key)
+    raw_bytes = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
     if raw_bytes is None:
         raise HTTPException(status_code=404, detail="파일 데이터를 찾을 수 없습니다.")
 
@@ -932,7 +939,7 @@ async def get_file_thumbnail(
     if not file_item or not file_item.thumbnail_s3_key:
         raise HTTPException(status_code=404, detail="썸네일이 존재하지 않습니다.")
 
-    thumb_bytes = s3_service.get_object_content(file_item.thumbnail_s3_key)
+    thumb_bytes = await run_in_threadpool(s3_service.get_object_content, file_item.thumbnail_s3_key)
     if not thumb_bytes:
         raise HTTPException(status_code=404, detail="썸네일 데이터를 불러올 수 없습니다.")
 

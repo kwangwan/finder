@@ -114,12 +114,18 @@ export default function FolderExplorer({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // A queue item's targetFolderId is re-resolved from its original drop
+  // target (baseFolderId) down to the actual nested subfolder as folder-tree
+  // resolution completes in the background (see useUploadManager). Matching
+  // only targetFolderId undercounts: files already resolved into a subfolder
+  // no longer match the folder the whole batch was dropped into, even though
+  // they're still uploading "into" that folder's subtree. Match either end.
+  const matchesCurrentFolder = (folderId) => (
+    currentFolder?.id ? folderId === currentFolder.id : (!folderId || folderId === '')
+  );
   const currentFolderUploads = (uploadManager?.queue || []).filter(
     it => (it.status === 'uploading' || it.status === 'pending') &&
-    (
-      (currentFolder?.id && it.targetFolderId === currentFolder.id) ||
-      (!currentFolder?.id && (!it.targetFolderId || it.targetFolderId === ''))
-    )
+    (matchesCurrentFolder(it.targetFolderId) || matchesCurrentFolder(it.baseFolderId))
   );
 
   const toggleFileSelection = (fileId, e) => {

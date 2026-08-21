@@ -3,6 +3,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from sqlalchemy.orm import selectinload
@@ -132,7 +133,8 @@ async def create_invitation(
 
     # Send invitation email via AWS SES (or console fallback)
     try:
-        email_service.send_invitation_email(
+        await run_in_threadpool(
+            email_service.send_invitation_email,
             to_email=email,
             invite_token=token,
             inviter_name=current_user.name or current_user.email.split("@")[0],

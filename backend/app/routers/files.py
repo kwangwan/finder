@@ -3,6 +3,7 @@ import math
 from datetime import datetime
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, desc, asc, func
 import urllib.parse
@@ -218,7 +219,7 @@ async def create_markdown_note(
 
     try:
         s3_key = build_storage_key("notes", file_item.id, display_name)
-        s3_service.put_object(s3_key, req.content.encode("utf-8"), "text/markdown; charset=utf-8")
+        await run_in_threadpool(s3_service.put_object, s3_key, req.content.encode("utf-8"), "text/markdown; charset=utf-8")
         file_item.s3_key = s3_key
         await db.commit()
         await db.refresh(file_item)
@@ -290,7 +291,7 @@ async def update_markdown_note(
 
     if content_changed and file_item.s3_key:
         try:
-            s3_service.put_object(file_item.s3_key, file_item.content.encode("utf-8"), "text/markdown; charset=utf-8")
+            await run_in_threadpool(s3_service.put_object, file_item.s3_key, file_item.content.encode("utf-8"), "text/markdown; charset=utf-8")
         except Exception as e:
             print(f"[MinIO Backup Warning] Could not update MinIO note: {e}")
 
