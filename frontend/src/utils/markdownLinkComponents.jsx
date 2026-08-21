@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Folder, ExternalLink, Download } from 'lucide-react';
-import { getPresignedDownloadUrl } from '../api';
+import { getPresignedDownloadUrl, ensureMediaToken, getMediaPreviewUrl } from '../api';
 
 // Extract YouTube video ID from a URL (watch, share, or embed link forms)
 export function extractYouTubeId(url) {
@@ -11,13 +11,50 @@ export function extractYouTubeId(url) {
 }
 
 /**
- * Shared react-markdown `a` renderer: folder navigation links, presigned-download
- * links, and YouTube URLs embedded as a responsive iframe player.
- * Used by both the note editor's preview pane and the standalone preview window,
- * so both surfaces render attachments identically.
+ * An inserted image's markdown (`![name](/api/storage/preview/{id}?token=...)`)
+ * has the media token baked into the stored text at insert time, but that
+ * token expires after 15 minutes (see MEDIA_TOKEN_EXPIRE_MINUTES) — so the
+ * literal URL saved in the note goes dead well before anyone reopens it.
+ * This strips whatever token the src carries (fresh or stale, doesn't matter)
+ * and asks for a current one before rendering, every time the image mounts.
+ */
+function MarkdownImage({ src, alt }) {
+  const [resolvedSrc, setResolvedSrc] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const idMatch = src && src.match(/\/api\/storage\/preview\/([^/?]+)/);
+    if (!idMatch) {
+      setResolvedSrc(src);
+      return undefined;
+    }
+    setResolvedSrc(null);
+    ensureMediaToken().then(() => {
+      if (!cancelled) setResolvedSrc(getMediaPreviewUrl(idMatch[1]));
+    });
+    return () => { cancelled = true; };
+  }, [src]);
+
+  if (!resolvedSrc) return null;
+  return (
+    <img
+      src={resolvedSrc}
+      alt={alt || ''}
+      style={{ maxWidth: '100%', borderRadius: 'var(--radius-md)' }}
+    />
+  );
+}
+
+/**
+ * Shared react-markdown `a`/`img` renderers: folder navigation links,
+ * presigned-download links, YouTube URLs embedded as a responsive iframe
+ * player, and images re-authenticated with a fresh media token on every
+ * render. Used by both the note editor's preview pane and the standalone
+ * preview window, so both surfaces render attachments identically.
  */
 export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {}) {
   return {
+    img: ({ src, alt }) => <MarkdownImage src={src} alt={alt} />,
     a: ({ href, children, ...props }) => {
       // 1. Folder Navigation Link: folder:FOLDER_ID
       if (href && href.startsWith('folder:') && onNavigateFolder) {

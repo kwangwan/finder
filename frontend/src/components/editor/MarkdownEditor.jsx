@@ -52,6 +52,7 @@ export default function MarkdownEditor({
   const [viewMode, setViewMode] = useState('split'); // 'split' | 'edit' | 'preview'
   const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   const textareaRef = useRef(null);
   const saveTimeoutRef = useRef(null);
@@ -188,6 +189,22 @@ export default function MarkdownEditor({
     URL.revokeObjectURL(url);
   };
 
+  const handleExportPdf = async () => {
+    if (isExportingPdf) return;
+    setIsExportingPdf(true);
+    try {
+      await exportMarkdownToPdf(title, content);
+    } catch (err) {
+      await showAlert({
+        title: 'PDF 내보내기 실패',
+        message: 'PDF를 생성하는 중 오류가 발생했습니다: ' + err.message,
+        type: 'error'
+      });
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   // Custom Markdown Component Renderers (folder links, presigned downloads, YouTube embeds)
   const customMarkdownComponents = createMarkdownLinkComponents({ onNavigateFolder, showAlert });
 
@@ -250,12 +267,17 @@ export default function MarkdownEditor({
             <Download size={16} />
           </button>
 
-          <button 
-            className="btn-icon" 
-            onClick={() => exportMarkdownToPdf(title, content)} 
+          <button
+            className="btn-icon"
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
             title="PDF로 내보내기 / 인쇄"
           >
-            <FileText size={16} color="var(--accent-rose)" />
+            {isExportingPdf ? (
+              <Loader2 size={16} className="spin" color="var(--accent-rose)" />
+            ) : (
+              <FileText size={16} color="var(--accent-rose)" />
+            )}
           </button>
 
           {file && (

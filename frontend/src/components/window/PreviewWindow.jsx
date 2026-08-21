@@ -26,7 +26,8 @@ import {
   RefreshCw,
   Sun,
   Moon,
-  Layers
+  Layers,
+  Loader2
 } from 'lucide-react';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
@@ -53,6 +54,7 @@ export default function PreviewWindow({
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [mediaUrl, setMediaUrl] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   // Image viewer controls
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -345,13 +347,30 @@ export default function PreviewWindow({
             <button
               type="button"
               className="window-action-btn"
-              onClick={(e) => {
+              disabled={isExportingPdf}
+              onClick={async (e) => {
                 e.stopPropagation();
-                exportMarkdownToPdf(file.name, displayContent);
+                if (isExportingPdf) return;
+                setIsExportingPdf(true);
+                try {
+                  await exportMarkdownToPdf(file.name, displayContent);
+                } catch (err) {
+                  await showAlert({
+                    title: 'PDF 내보내기 실패',
+                    message: 'PDF를 생성하는 중 오류가 발생했습니다: ' + err.message,
+                    type: 'error'
+                  });
+                } finally {
+                  setIsExportingPdf(false);
+                }
               }}
               title="PDF로 내보내기 / 인쇄"
             >
-              <FileText size={13} color="var(--accent-rose)" />
+              {isExportingPdf ? (
+                <Loader2 size={13} className="spin" color="var(--accent-rose)" />
+              ) : (
+                <FileText size={13} color="var(--accent-rose)" />
+              )}
               <span>PDF</span>
             </button>
           )}
