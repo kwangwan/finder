@@ -7,9 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, and_, or_, desc, asc
 
-import io
 import re
-import zipfile
 import urllib.parse
 from fastapi.responses import StreamingResponse
 from app.core.database import get_db
@@ -23,6 +21,8 @@ from app.schemas.file import FileRenameRequest
 from app.services.access_service import access_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
+from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
+from app.core.config import settings
 
 router = APIRouter(prefix="/api/folders", tags=["Folders"])
 
@@ -533,37 +533,35 @@ async def download_folder_zip(
     # Collect all files recursively
     files_with_paths = await _collect_folder_files_recursive(db, folder.id, "")
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        # If folder is empty, create an empty folder entry
-        if not files_with_paths:
-            zip_file.writestr(f"{folder.name}/.keep", b"")
+    total_bytes = sum(f.size_bytes or 0 for f, _ in files_with_paths)
+    if total_bytes > settings.MAX_ZIP_DOWNLOAD_BYTES:
+        limit_gb = round(settings.MAX_ZIP_DOWNLOAD_BYTES / (1024 ** 3), 1)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"폴더 용량이 ZIP 다운로드 제한({limit_gb}GB)을 초과합니다. 파일을 나눠서 다운로드해주세요."
+        )
 
-        for file_item, rel_path in files_with_paths:
-            full_rel_path = f"{folder.name}/{rel_path}"
-            
-            # Read content
-            file_bytes = None
-            if file_item.is_markdown and file_item.content:
-                file_bytes = file_item.content.encode("utf-8")
-            elif file_item.s3_key:
-                file_bytes = s3_service.get_object_content(file_item.s3_key)
+    # Same-named files are allowed side by side in this app, but a ZIP can't
+    # hold two entries at the same path — disambiguate before writing.
+    archive_paths = dedupe_archive_paths([f"{folder.name}/{rel_path}" for _, rel_path in files_with_paths])
 
-            if file_bytes is not None:
-                zip_file.writestr(full_rel_path, file_bytes)
+    entries = []
+    if not files_with_paths:
+        entries.append((f"{folder.name}/.keep", b"", None))
+    for (file_item, _), archive_path in zip(files_with_paths, archive_paths):
+        if file_item.is_markdown and file_item.content:
+            entries.append((archive_path, file_item.content.encode("utf-8"), None))
+        elif file_item.s3_key:
+            entries.append((archive_path, None, file_item.s3_key))
 
-    zip_buffer.seek(0)
-    zip_size = zip_buffer.getbuffer().nbytes
     safe_filename = urllib.parse.quote(f"{folder.name}.zip")
-
     headers = {
         "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
-        "Content-Length": str(zip_size),
-        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length"
+        "Access-Control-Expose-Headers": "Content-Disposition"
     }
 
     return StreamingResponse(
-        zip_buffer,
+        stream_zip(entries),
         media_type="application/zip",
         headers=headers
     )

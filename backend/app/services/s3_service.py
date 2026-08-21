@@ -272,6 +272,36 @@ class S3Service:
 
         return None
 
+    def stream_object(self, s3_key: str, chunk_size: int = 1024 * 1024):
+        """
+        Yield an object's bytes in chunks instead of loading it fully into
+        memory — used by ZIP downloads, which may otherwise need to hold an
+        entire multi-GB file in RAM at once (see routers/folders.py, files.py).
+        """
+        if self.client:
+            try:
+                body = self.client.get_object(Bucket=self.bucket_name, Key=s3_key)["Body"]
+                while True:
+                    chunk = body.read(chunk_size)
+                    if not chunk:
+                        return
+                    yield chunk
+                return
+            except Exception as e:
+                print(f"[S3 Error] stream_object: {e}")
+
+        local_path = self._get_local_path(s3_key)
+        if local_path.exists() and local_path.is_file():
+            try:
+                with open(local_path, "rb") as f:
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            return
+                        yield chunk
+            except Exception as e:
+                print(f"[Local Storage Error] Could not stream local file: {e}")
+
     def get_object_range(self, s3_key: str, range_header: str) -> Optional[dict]:
         """Download a byte range of an object from S3 or local storage."""
         # Try S3 first

@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     MINIO_PUBLIC_ROOT_USER: str = "project-run"
     MINIO_PUBLIC_ROOT_PASSWORD: str = ""
     MINIO_MAX_CHUNK_SIZE_MB: int = 5
+    # Total uncompressed size across all files in one ZIP download request.
+    # Building/streaming a ZIP is CPU- and I/O-bound work tied up for the
+    # whole request; without a cap a single request for a huge folder could
+    # still run long enough to be impractical even though it no longer
+    # buffers everything in memory.
+    MAX_ZIP_DOWNLOAD_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
     MINIO_BUCKET_NAME: str = "knowledge-base"
     MINIO_REGION: str = "us-east-1"
     

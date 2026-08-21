@@ -5,8 +5,6 @@ from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, desc, asc, func
-import io
-import zipfile
 import urllib.parse
 from fastapi.responses import StreamingResponse
 from app.core.database import get_db
@@ -23,6 +21,8 @@ from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
+from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
+from app.core.config import settings
 
 router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
 
@@ -491,47 +491,50 @@ async def batch_download_files(
     if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
         raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        # 1. Direct files
-        if req.file_ids:
-            files_q = select(FileItem).where(
-                and_(
-                    FileItem.id.in_(req.file_ids),
-                    FileItem.workspace_id == req.workspace_id,
-                    FileItem.is_trashed == False
-                )
+    # Gather everything to include first (as plain (archive_path, FileItem)
+    # pairs) so total size can be checked and duplicate names across files
+    # and folders can be disambiguated together, before any bytes are fetched.
+    pending: List[tuple] = []  # (archive_path, FileItem)
+    empty_folder_paths: List[str] = []
+
+    if req.file_ids:
+        files_q = select(FileItem).where(
+            and_(
+                FileItem.id.in_(req.file_ids),
+                FileItem.workspace_id == req.workspace_id,
+                FileItem.is_trashed == False
             )
-            files_res = await db.execute(files_q)
-            for f in files_res.scalars().all():
-                file_bytes = None
-                if f.is_markdown and f.content:
-                    file_bytes = f.content.encode("utf-8")
-                elif f.s3_key:
-                    file_bytes = s3_service.get_object_content(f.s3_key)
-                if file_bytes is not None:
-                    zip_file.writestr(f.name, file_bytes)
+        )
+        files_res = await db.execute(files_q)
+        for f in files_res.scalars().all():
+            pending.append((f.name, f))
 
-        # 2. Folders
-        if req.folder_ids:
-            for fid in req.folder_ids:
-                folder = await db.get(Folder, fid)
-                if folder and folder.workspace_id == req.workspace_id and not folder.is_trashed:
-                    files_with_paths = await _collect_folder_files_recursive(db, folder.id, "")
-                    if not files_with_paths:
-                        zip_file.writestr(f"{folder.name}/.keep", b"")
-                    for file_item, rel_path in files_with_paths:
-                        full_rel_path = f"{folder.name}/{rel_path}"
-                        file_bytes = None
-                        if file_item.is_markdown and file_item.content:
-                            file_bytes = file_item.content.encode("utf-8")
-                        elif file_item.s3_key:
-                            file_bytes = s3_service.get_object_content(file_item.s3_key)
-                        if file_bytes is not None:
-                            zip_file.writestr(full_rel_path, file_bytes)
+    if req.folder_ids:
+        for fid in req.folder_ids:
+            folder = await db.get(Folder, fid)
+            if folder and folder.workspace_id == req.workspace_id and not folder.is_trashed:
+                files_with_paths = await _collect_folder_files_recursive(db, folder.id, "")
+                if not files_with_paths:
+                    empty_folder_paths.append(f"{folder.name}/.keep")
+                for file_item, rel_path in files_with_paths:
+                    pending.append((f"{folder.name}/{rel_path}", file_item))
 
-    zip_buffer.seek(0)
-    zip_size = zip_buffer.getbuffer().nbytes
+    total_bytes = sum(f.size_bytes or 0 for _, f in pending)
+    if total_bytes > settings.MAX_ZIP_DOWNLOAD_BYTES:
+        limit_gb = round(settings.MAX_ZIP_DOWNLOAD_BYTES / (1024 ** 3), 1)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"선택한 항목의 용량이 ZIP 다운로드 제한({limit_gb}GB)을 초과합니다. 항목을 나눠서 다운로드해주세요."
+        )
+
+    archive_paths = dedupe_archive_paths([p for p, _ in pending])
+    entries = [(p, b"", None) for p in empty_folder_paths]
+    for (_, file_item), archive_path in zip(pending, archive_paths):
+        if file_item.is_markdown and file_item.content:
+            entries.append((archive_path, file_item.content.encode("utf-8"), None))
+        elif file_item.s3_key:
+            entries.append((archive_path, None, file_item.s3_key))
+
     archive_name = req.archive_name or "download_archive.zip"
     if not archive_name.lower().endswith(".zip"):
         archive_name += ".zip"
@@ -539,12 +542,11 @@ async def batch_download_files(
 
     headers = {
         "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
-        "Content-Length": str(zip_size),
-        "Access-Control-Expose-Headers": "Content-Disposition, Content-Length"
+        "Access-Control-Expose-Headers": "Content-Disposition"
     }
 
     return StreamingResponse(
-        zip_buffer,
+        stream_zip(entries),
         media_type="application/zip",
         headers=headers
     )
