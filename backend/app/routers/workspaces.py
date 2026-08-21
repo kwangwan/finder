@@ -10,8 +10,8 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.models import User, Workspace, WorkspaceMember, FileItem
 from app.core.security import get_current_approved_user
-from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
+from app.services.deletion_service import deletion_service
 
 router = APIRouter(prefix="/api/workspaces", tags=["Workspaces"])
 
@@ -230,33 +230,35 @@ async def delete_workspace(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """Delete a workspace (owner only). Deletes all folders, files, MinIO objects, thumbnails, and members."""
+    """
+    Delete a workspace (owner only).
+
+    Folders, files, members, and invitations are removed immediately via the
+    DB's ON DELETE CASCADE foreign keys (see kb_folders/kb_files/kb_workspace_members/
+    kb_invitations). The underlying MinIO objects are NOT deleted synchronously
+    here — deleting a large workspace one S3 call at a time would block this
+    request (and, on this single-worker backend, every other request) for as
+    long as it takes to walk every file. Instead every file/thumbnail key is
+    hand off to the same background deletion queue used by trash purges, and
+    this endpoint returns as soon as the DB-level delete commits.
+    """
     workspace = await _get_workspace_with_member_check(
         db, workspace_id, current_user, require_role=["owner"]
     )
 
-    # Find all files in this workspace and clean up S3 objects and thumbnails
     files_res = await db.execute(select(FileItem).where(FileItem.workspace_id == workspace_id))
     files_to_delete = files_res.scalars().all()
-    for f in files_to_delete:
-        if f.s3_key:
-            try:
-                s3_service.delete_object(f.s3_key)
-            except Exception as e:
-                print(f"[MinIO Warning] Could not delete S3 object {f.s3_key}: {e}")
-        if f.thumbnail_s3_key:
-            try:
-                s3_service.delete_object(f.thumbnail_s3_key)
-            except Exception as e:
-                print(f"[MinIO Warning] Could not delete thumbnail S3 object {f.thumbnail_s3_key}: {e}")
 
-        # Reclaim quota from workspace owner
+    total_bytes_freed = sum(f.size_bytes or 0 for f in files_to_delete)
+    if total_bytes_freed > 0:
         await quota_service.record_storage_freed(
             db=db,
-            workspace_id=f.workspace_id,
-            creator_id=f.created_by,
-            bytes_freed=f.size_bytes or 0
+            workspace_id=workspace_id,
+            creator_id=workspace.owner_id,
+            bytes_freed=total_bytes_freed
         )
+
+    await deletion_service.enqueue_files_batch(db, files_to_delete)
 
     await db.delete(workspace)
     await db.commit()
