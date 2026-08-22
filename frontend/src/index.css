@@ -99,6 +99,19 @@
   
   --font-sans: 'Galmuri11', 'JetBrains Mono', monospace;
   --font-mono: 'Galmuri11', 'JetBrains Mono', monospace;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+}
+
+/* Smooth CSS border-radius arcs read as anti-aliased curves, which clash with
+   the matrix theme's pixel-art look — square everything off, including the
+   ~150 spots across the app that set border-radius via inline style rather
+   than the --radius-* variables above (border-radius:50% avatars/dots too). */
+[data-theme='matrix'] * {
+  border-radius: 0 !important;
 }
 
 * {
