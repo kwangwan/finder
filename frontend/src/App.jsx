@@ -1304,6 +1304,7 @@ export default function App() {
         ) : (
           <FolderExplorer
             workspaceName={activeWorkspace?.name || ''}
+            theme={theme}
             isLoading={isLoading || !isWorkspacesLoaded || isAuthLoading}
             activeView={activeView}
             onSelectView={handleSelectView}

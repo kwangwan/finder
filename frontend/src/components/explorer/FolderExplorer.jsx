@@ -36,6 +36,12 @@ import {
   RefreshCw,
   Info
 } from 'lucide-react';
+import {
+  Trash as PixelTrash,
+  Download as PixelDownload,
+  Eye as PixelEye,
+  Star as PixelStar
+} from 'pixelarticons/react';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
@@ -58,6 +64,7 @@ function getPageNumbers(currentPage, totalPages) {
 
 export default function FolderExplorer({
   workspaceName = '',
+  theme = 'dark',
   isLoading = false,
   activeView = 'all',
   onSelectView,
@@ -100,6 +107,20 @@ export default function FolderExplorer({
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [infoFile, setInfoFile] = useState(null);
+
+  // Trial run of pixel-art icons (matrix theme only) for a handful of the
+  // most-visible actions — swap the `pixel` prop's icon set wider once this
+  // small batch has been reviewed, not before.
+  const Icon = ({ lucide: LucideIcon, pixel: PixelIcon, size = 14, color, fill, style, ...rest }) => {
+    if (theme === 'matrix' && PixelIcon) {
+      // Pixel icons are a single solid shape (no hollow/outline variant like
+      // lucide's fill="none"), so an "unfavorited" outline star just falls
+      // back to the plain color instead of trying to render hollow.
+      const pixelColor = (fill && fill !== 'none') ? fill : color;
+      return <PixelIcon width={size} height={size} style={{ color: pixelColor, ...style }} {...rest} />;
+    }
+    return <LucideIcon size={size} color={color} fill={fill} style={style} {...rest} />;
+  };
   const [downloadProgress, setDownloadProgress] = useState(null); // { fileId, percent, status }
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
   const breadcrumbRef = useRef(null);
@@ -339,7 +360,7 @@ export default function FolderExplorer({
             <>
               <ChevronRight size={13} className="breadcrumb-sep" />
               <span className="breadcrumb-item active" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <Star size={14} color="var(--accent-amber)" fill="var(--accent-amber)" />
+                <Icon lucide={Star} pixel={PixelStar} size={14} color="var(--accent-amber)" fill="var(--accent-amber)" />
                 <span>즐겨찾기</span>
               </span>
             </>
@@ -753,7 +774,7 @@ export default function FolderExplorer({
                 justifyContent: 'center',
                 margin: '0 auto 1.25rem'
               }}>
-                <Star size={28} color="var(--accent-amber)" fill="var(--accent-amber)" />
+                <Icon lucide={Star} pixel={PixelStar} size={28} color="var(--accent-amber)" fill="var(--accent-amber)" />
               </div>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
                 즐겨찾기한 항목이 없습니다
@@ -867,7 +888,7 @@ export default function FolderExplorer({
                           onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
                           title="파일 미리보기"
                         >
-                          <Eye size={14} color="var(--accent-primary)" />
+                          <Icon lucide={Eye} pixel={PixelEye} size={14} color="var(--accent-primary)" />
                         </button>
                       )}
                       <button 
@@ -875,10 +896,12 @@ export default function FolderExplorer({
                         onClick={(e) => { e.stopPropagation(); onToggleFavorite(file); }}
                         title="즐겨찾기"
                       >
-                        <Star 
-                          size={14} 
-                          color={file.is_favorite ? 'var(--accent-amber)' : 'var(--text-muted)'} 
-                          fill={file.is_favorite ? 'var(--accent-amber)' : 'none'} 
+                        <Icon
+                          lucide={Star}
+                          pixel={PixelStar}
+                          size={14}
+                          color={file.is_favorite ? 'var(--accent-amber)' : 'var(--text-muted)'}
+                          fill={file.is_favorite ? 'var(--accent-amber)' : 'none'}
                         />
                       </button>
                       <button 
@@ -886,7 +909,7 @@ export default function FolderExplorer({
                         onClick={(e) => handleDownload(file, e)}
                         title="다운로드"
                       >
-                        <Download size={14} />
+                        <Icon lucide={Download} pixel={PixelDownload} size={14} />
                       </button>
                       <button
                         className="btn-icon card-action-btn"
@@ -900,7 +923,7 @@ export default function FolderExplorer({
                         onClick={(e) => { e.stopPropagation(); onDeleteFile(file.id); }}
                         title="삭제"
                       >
-                        <Trash2 size={14} color="var(--accent-rose)" />
+                        <Icon lucide={Trash2} pixel={PixelTrash} size={14} color="var(--accent-rose)" />
                       </button>
                     </div>
                   </div>
@@ -934,7 +957,7 @@ export default function FolderExplorer({
                         }}
                       />
                       <div className="thumbnail-overlay">
-                        <Eye size={16} color="#fff" />
+                        <Icon lucide={Eye} pixel={PixelEye} size={16} color="#fff" />
                       </div>
                     </div>
                   ) : (
@@ -1058,7 +1081,7 @@ export default function FolderExplorer({
             onClick={() => onBatchDownload && onBatchDownload(selectedFileIds)}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
-            <Download size={15} />
+            <Icon lucide={Download} pixel={PixelDownload} size={15} />
             <span>ZIP 다운로드</span>
           </button>
 
@@ -1068,7 +1091,7 @@ export default function FolderExplorer({
             onClick={() => onBatchDelete && onBatchDelete(selectedFileIds)}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent-rose)', whiteSpace: 'nowrap' }}
           >
-            <Trash2 size={15} />
+            <Icon lucide={Trash2} pixel={PixelTrash} size={15} />
             <span>삭제</span>
           </button>
 
