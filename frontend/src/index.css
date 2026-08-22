@@ -752,15 +752,19 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 260px;
-  display: inline-flex;
-  align-items: center;
+  min-width: 0;
+  /* inline-block, not inline-flex: text-overflow:ellipsis is unreliable on a
+     flex container's own (anonymous) text content in Chromium — items that
+     need icon+text alignment (홈/문서/즐겨찾기) set their own inline-flex via
+     a style prop instead, so this stays plain for the common plain-text
+     folder-name case where ellipsis actually needs to work. */
+  display: inline-block;
+  vertical-align: middle;
   height: 32px;
+  line-height: 32px;
   padding: 0 8px;
-  gap: 6px;
   border-radius: var(--radius-sm);
   flex-shrink: 1;
-  line-height: 1;
 }
 
 .breadcrumb-item:hover {
@@ -774,8 +778,7 @@ body {
   color: var(--text-primary);
   font-weight: 700;
   font-size: 0.95rem;
-  max-width: 500px;
-  flex-shrink: 0;
+  flex-shrink: 1;
 }
 
 .breadcrumb-sep {
@@ -1755,21 +1758,20 @@ h1, h2, h3, h4, h5, h6,
   }
 
   .breadcrumb-item {
-    max-width: 110px !important;
+    min-width: 0 !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     font-size: 0.82rem !important;
     padding: 0 4px !important;
     height: 28px !important;
-    line-height: 1 !important;
+    line-height: 28px !important;
     flex-shrink: 1 !important;
   }
 
   .breadcrumb-item.active {
-    max-width: 140px !important;
     font-weight: 700 !important;
-    flex-shrink: 0 !important;
+    flex-shrink: 1 !important;
   }
 
   .breadcrumb-item:hover,
@@ -2380,11 +2382,7 @@ h1, h2, h3, h4, h5, h6,
   }
 
   .breadcrumb-item {
-    max-width: 80px !important;
-  }
-
-  .breadcrumb-item.active {
-    max-width: 100px !important;
+    min-width: 0 !important;
   }
 }
 
@@ -2953,7 +2951,8 @@ h1, h2, h3, h4, h5, h6,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 260px;
+  flex: 1;
+  min-width: 0;
 }
 
 .badge-embedded-tiny {

@@ -187,7 +187,7 @@ export default function MoveFilesModal({
                       color={isSelected ? '#fff' : folder.color || 'var(--accent-primary)'} 
                       style={{ flexShrink: 0 }} 
                     />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span title={folder.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {folder.name}
                     </span>
                   </div>

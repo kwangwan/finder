@@ -352,13 +352,14 @@ export default function FolderExplorer({
       {/* Explorer Header: Breadcrumb & Actions */}
       <div className="explorer-header">
         <div className="breadcrumb-nav">
-          <span 
+          <span
             className={`breadcrumb-item ${(!currentFolder && activeView === 'all') ? 'active' : ''}`}
             onClick={() => {
               if (onSelectView) onSelectView('all');
               else if (onSelectFolder) onSelectFolder(null);
             }}
             title="홈"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
           >
             <Home size={15} />
             <span>홈</span>
@@ -669,7 +670,7 @@ export default function FolderExplorer({
                 }}
               >
                 <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
-                <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span title={sub.name} style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sub.name}
                 </span>
 
