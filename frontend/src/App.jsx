@@ -171,6 +171,7 @@ export default function App() {
   const activeFolderIdRef = useRef(activeFolderId);
   const activeViewRef = useRef(activeView);
   const isInitialFolderRestoredRef = useRef(false);
+  const refreshFoldersRequestIdRef = useRef(0);
 
   useEffect(() => {
     activeFolderIdRef.current = activeFolderId;
@@ -603,16 +604,26 @@ export default function App() {
     if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
     if (!isWorkspacesLoaded) return;
     if (!activeWorkspace?.id) {
+      refreshFoldersRequestIdRef.current += 1;
       setFolders([]);
       setStats(null);
       return;
     }
+    // Guard against out-of-order responses: an upload completing in the
+    // background (or any other trigger) can call this for a workspace the
+    // user has since switched away from — if that slower request resolved
+    // last, it would otherwise overwrite the correctly-loaded folder tree
+    // with the previous workspace's, which is exactly what made switching
+    // workspaces mid-upload briefly (or persistently) show the wrong
+    // workspace's folders. Same pattern as refreshFiles's request-id guard.
+    const requestId = ++refreshFoldersRequestIdRef.current;
     try {
       const wsId = activeWorkspace.id;
       const [tree, systemStats] = await Promise.all([
         getFolderTree(wsId),
         getSystemStats(wsId)
       ]);
+      if (requestId !== refreshFoldersRequestIdRef.current) return; // a newer refresh superseded this one
       setFolders(tree);
       setStats(systemStats);
 
@@ -1396,6 +1407,7 @@ export default function App() {
         activeWorkspaceId={activeWorkspace?.id || null}
         currentFolderId={activeFolderId}
         folders={folders}
+        workspaces={workspaces}
         uploadManager={uploadManager}
       />
 
@@ -1411,6 +1423,8 @@ export default function App() {
         <UploadProgressBanner
           uploadManager={uploadManager}
           onOpenModal={() => setIsUploadOpen(true)}
+          activeWorkspaceId={activeWorkspace?.id || null}
+          workspaces={workspaces}
         />
       )}
 

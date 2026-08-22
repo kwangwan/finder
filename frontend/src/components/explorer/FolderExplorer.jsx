@@ -166,10 +166,16 @@ export default function FolderExplorer({
   const matchesCurrentFolder = (folderId) => (
     currentFolder?.id ? folderId === currentFolder.id : (!folderId || folderId === '')
   );
-  const currentFolderUploads = (uploadManager?.queue || []).filter(
+  // 'notes'/'favorites' are virtual filtered views, not real upload
+  // destinations — without this guard, an upload targeting the root folder
+  // (currentFolder == null) would also "match" these views (since they have
+  // no currentFolder either) and incorrectly show/lock them as if the
+  // upload were going into 문서/즐겨찾기 itself.
+  const isFolderBrowsingView = activeView !== 'notes' && activeView !== 'favorites';
+  const currentFolderUploads = isFolderBrowsingView ? (uploadManager?.queue || []).filter(
     it => (it.status === 'uploading' || it.status === 'pending') &&
     (matchesCurrentFolder(it.targetFolderId) || matchesCurrentFolder(it.baseFolderId))
-  );
+  ) : [];
 
   const toggleFileSelection = (fileId, e) => {
     if (e) e.stopPropagation();

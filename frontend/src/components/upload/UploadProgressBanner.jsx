@@ -11,7 +11,9 @@ import {
 
 export default function UploadProgressBanner({
   uploadManager,
-  onOpenModal
+  onOpenModal,
+  activeWorkspaceId,
+  workspaces = []
 }) {
   const {
     queue,
@@ -79,6 +81,9 @@ export default function UploadProgressBanner({
           {currentItem && isUploading && (
             <div className="upload-banner-current-file">
               {currentItem.name} ({currentItem.percent || 0}%)
+              {currentItem.activeWorkspaceId && currentItem.activeWorkspaceId !== activeWorkspaceId && (
+                <> · {workspaces.find(w => w.id === currentItem.activeWorkspaceId)?.name || '다른 워크스페이스'}</>
+              )}
             </div>
           )}
         </div>

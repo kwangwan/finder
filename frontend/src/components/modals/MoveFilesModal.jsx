@@ -152,7 +152,7 @@ export default function MoveFilesModal({
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 <Home size={16} />
-                <span>(최상위 루트 저장소)</span>
+                <span>홈 (최상위 폴더)</span>
               </div>
               {selectedTargetId === null && <Check size={16} />}
             </div>

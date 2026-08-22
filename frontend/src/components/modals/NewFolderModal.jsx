@@ -160,7 +160,7 @@ export default function NewFolderModal({
               value={selectedParent}
               onChange={setSelectedParent}
               options={[
-                { value: '', label: '(최상위 루트 폴더)' },
+                { value: '', label: '🏠 홈 (최상위 폴더)' },
                 ...flatFolders.map(f => ({ value: f.id, label: f.displayName })),
               ]}
             />

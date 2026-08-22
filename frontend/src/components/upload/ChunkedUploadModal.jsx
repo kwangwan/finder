@@ -42,8 +42,10 @@ export default function ChunkedUploadModal({
   activeWorkspaceId,
   currentFolderId,
   folders = [],
+  workspaces = [],
   uploadManager
 }) {
+  const workspaceName = (wsId) => workspaces.find(w => w.id === wsId)?.name || '알 수 없는 워크스페이스';
   const [selectedFolder, setSelectedFolder] = useState(currentFolderId || '');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
@@ -149,7 +151,7 @@ export default function ChunkedUploadModal({
               value={selectedFolder}
               onChange={setSelectedFolder}
               options={[
-                { value: '', label: '📁 최상위 루트 (기본 위치)' },
+                { value: '', label: '🏠 홈 (기본 위치)' },
                 ...flattenFolderTree(folders).map(f => ({ value: f.id, label: f.displayName })),
               ]}
             />
@@ -338,6 +340,24 @@ export default function ChunkedUploadModal({
                         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>
                           {item.name}
                         </span>
+                        {item.activeWorkspaceId && item.activeWorkspaceId !== activeWorkspaceId && (
+                          <span
+                            title={`업로드 대상 워크스페이스: ${workspaceName(item.activeWorkspaceId)}`}
+                            style={{
+                              flexShrink: 0,
+                              fontSize: '0.68rem',
+                              fontWeight: 600,
+                              color: 'var(--accent-primary)',
+                              background: 'rgba(59, 130, 246, 0.12)',
+                              border: '1px solid rgba(59, 130, 246, 0.3)',
+                              borderRadius: 'var(--radius-full)',
+                              padding: '0.05rem 0.5rem',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {workspaceName(item.activeWorkspaceId)}
+                          </span>
+                        )}
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
