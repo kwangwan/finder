@@ -107,6 +107,15 @@
   box-sizing: border-box;
 }
 
+/* Browsers don't inherit font-family into form controls by default (they use
+   a platform UI font instead) — without this, every <button>/<select>/
+   <input>/<textarea> silently ignores the theme font (this is why some
+   buttons and select boxes kept the system font after the matrix theme's
+   font change, even though everything else correctly inherited it). */
+button, input, select, textarea, optgroup {
+  font-family: inherit;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--bg-primary);
