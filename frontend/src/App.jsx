@@ -1202,12 +1202,14 @@ export default function App() {
         onFolderContextMenu={handleFolderContextMenu}
         stats={stats}
         isCollapsed={isSidebarCollapsed}
+        onToggleSidebar={() => setIsSidebarCollapsed(true)}
       />
 
       <div className="main-content">
         <TopBar
           currentUser={currentUser}
-          onToggleSidebar={() => setIsSidebarCollapsed(prev => !prev)}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={() => setIsSidebarCollapsed(false)}
           onOpenSearch={() => setIsSearchOpen(true)}
           onNewNote={handleNewNote}
           onOpenUpload={() => setIsUploadOpen(true)}

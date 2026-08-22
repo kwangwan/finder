@@ -13,7 +13,8 @@ import {
   Sparkles, 
   Layers,
   Settings,
-  Trash2
+  Trash2,
+  ChevronsLeft
 } from 'lucide-react';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 
@@ -35,6 +36,7 @@ export default function Sidebar({
   onFolderContextMenu,
   stats,
   isCollapsed,
+  onToggleSidebar,
 }) {
   const [expandedFolders, setExpandedFolders] = useState({});
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -210,6 +212,14 @@ export default function Sidebar({
             </div>
           </div>
         </div>
+        <button
+          className="btn-icon"
+          onClick={onToggleSidebar}
+          title="사이드바 숨기기"
+          style={{ flexShrink: 0 }}
+        >
+          <ChevronsLeft size={16} />
+        </button>
       </div>
 
       {/* Slack-style Workspace Switcher */}

@@ -277,8 +277,12 @@ export default function FolderExplorer({
     return 0;
   });
 
-  const totalPages = paginationMeta?.total_pages || Math.ceil((paginationMeta?.total_items || files.length) / pageSize) || 1;
-  const totalItemCount = paginationMeta?.total_items ?? (files.length + subfolders.length);
+  // paginationMeta comes from the backend's PagedFileResponse — total_count,
+  // not total_items. Falling back to files.length (this page's loaded count)
+  // when paginationMeta is unavailable, not files.length + subfolders.length;
+  // this represents the file list's total, matching what pagination governs.
+  const totalItemCount = paginationMeta?.total_count ?? files.length;
+  const totalPages = paginationMeta?.total_pages || Math.ceil(totalItemCount / pageSize) || 1;
 
   return (
     <div 
@@ -451,11 +455,12 @@ export default function FolderExplorer({
       {/* Explorer Secondary Toolbar: Sort & Count Controls */}
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <span className="explorer-item-count">
-            <span>전체</span>
-            <strong className="item-count-number">{totalItemCount}개</strong>
-            <span>항목</span>
-          </span>
+          {selectedFileIds.length > 0 && (
+            <span className="explorer-item-count">
+              <strong className="item-count-number">{selectedFileIds.length}개</strong>
+              <span>선택됨</span>
+            </span>
+          )}
           {files.length > 0 && (
             <button
               type="button"
@@ -659,7 +664,7 @@ export default function FolderExplorer({
       {/* 2. Files Grid Section */}
       <div>
         <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-          {activeView === 'notes' ? `마크다운 노트 (${files.length})` : activeView === 'favorites' ? `즐겨찾기 항목 (${files.length})` : `문서 및 파일 (${files.length})`}
+          {activeView === 'notes' ? `마크다운 노트 (${totalItemCount})` : activeView === 'favorites' ? `즐겨찾기 항목 (${totalItemCount})` : `문서 및 파일 (${totalItemCount})`}
         </div>
 
         {files.length === 0 && (activeView === 'notes' || activeView === 'favorites' || sortedSubfolders.length === 0) ? (

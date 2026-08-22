@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Search, 
-  Menu, 
-  Sun, 
+import {
+  Search,
+  ChevronsRight,
+  Sun,
   Moon, 
   FilePlus, 
   UploadCloud, 
@@ -27,6 +27,7 @@ const formatBytes = (bytes) => {
 
 export default function TopBar({
   currentUser,
+  isSidebarCollapsed,
   onToggleSidebar,
   onOpenSearch,
   onNewNote,
@@ -62,13 +63,16 @@ export default function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <button className="btn-icon" onClick={onToggleSidebar} title="사이드바 열기/닫기">
-          <Menu size={18} />
-        </button>
-
-        <span className="topbar-brand" onClick={onNavigateHome} title="홈으로 이동">
-          Finder
-        </span>
+        {isSidebarCollapsed && (
+          <>
+            <button className="btn-icon" onClick={onToggleSidebar} title="사이드바 펼치기">
+              <ChevronsRight size={16} />
+            </button>
+            <span className="topbar-brand" onClick={onNavigateHome} title="홈으로 이동">
+              Finder
+            </span>
+          </>
+        )}
       </div>
 
       {/* Center Search Trigger */}
