@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from typing import Optional
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -17,7 +17,7 @@ import os
 import shutil
 from pathlib import Path
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, AsyncSessionLocal
 from app.models import FileItem, User, Folder
 from app.core.security import get_current_approved_user, get_current_approved_user_query_or_header
 from app.schemas.storage import (
@@ -629,9 +629,43 @@ async def upload_chunk_part(
 
     return {"upload_id": upload_id, "part_number": part_number, "bytes_received": len(chunk_bytes)}
 
+async def _generate_and_save_video_thumbnail(file_id: uuid.UUID, s3_key: str, filename: str):
+    """Runs as a FastAPI BackgroundTask, after /chunk/complete's response has
+    already been sent. Video thumbnailing needs the whole object downloaded
+    back from MinIO so OpenCV can seek a frame — for a large video that can
+    take far longer than the reverse proxy sitting in front of this app is
+    willing to wait, which was turning into an outright upload failure (a 504)
+    even though the upload itself had already fully succeeded. Doing this
+    afterward, off the request/response path, means a slow thumbnail can
+    never fail the upload — uses its own DB session since the request's is
+    long gone by the time this runs."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp:
+            tmp_path = tmp.name
+        await run_in_threadpool(
+            s3_service.client.download_file, Bucket=s3_service.bucket_name, Key=s3_key, Filename=tmp_path
+        )
+        thumbnail_s3_key = await run_in_threadpool(
+            thumbnail_service.create_and_store_thumbnail_from_path,
+            file_uuid=str(file_id), filename=filename, file_path=tmp_path, file_type="video"
+        )
+        if thumbnail_s3_key:
+            async with AsyncSessionLocal() as db:
+                file_item = await db.get(FileItem, file_id)
+                if file_item and not file_item.is_trashed:
+                    file_item.thumbnail_s3_key = thumbnail_s3_key
+                    await db.commit()
+    except Exception as e:
+        print(f"[Thumbnail Warning] Background video thumbnail generation failed for {file_id}: {e}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
 @router.post("/chunk/complete", response_model=FileResponse)
 async def complete_chunk_upload(
     req: ChunkCompleteRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
@@ -738,8 +772,8 @@ async def complete_chunk_upload(
     mime_type = req.mime_type or get_media_mime_type(req.filename)
 
     # Generate thumbnail for media files. Images are small enough to load
-    # fully; a video is downloaded to a temp file first so OpenCV can seek a
-    # frame without pulling the whole thing into memory.
+    # fully within this request. Videos are handled separately, after the
+    # FileItem exists — see _generate_and_save_video_thumbnail above.
     thumbnail_s3_key = None
     if file_type == "image":
         try:
@@ -751,23 +785,6 @@ async def complete_chunk_upload(
                 )
         except Exception as thumb_err:
             print(f"[Thumbnail Warning] Chunk thumbnail generation failed: {thumb_err}")
-    elif file_type == "video":
-        tmp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(req.filename).suffix) as tmp:
-                tmp_path = tmp.name
-            await run_in_threadpool(
-                s3_service.client.download_file, Bucket=s3_service.bucket_name, Key=s3_key, Filename=tmp_path
-            )
-            thumbnail_s3_key = await run_in_threadpool(
-                thumbnail_service.create_and_store_thumbnail_from_path,
-                file_uuid=str(file_uuid), filename=req.filename, file_path=tmp_path, file_type=file_type
-            )
-        except Exception as thumb_err:
-            print(f"[Thumbnail Warning] Chunk thumbnail generation failed: {thumb_err}")
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
 
     # Read content for text/markdown
     content = None
@@ -803,6 +820,9 @@ async def complete_chunk_upload(
             await run_in_threadpool(s3_service.delete_object, thumbnail_s3_key)
         raise
     await db.refresh(file_item)
+
+    if file_type == "video":
+        background_tasks.add_task(_generate_and_save_video_thumbnail, file_item.id, s3_key, req.filename)
 
     # Index embeddings
     try:
