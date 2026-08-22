@@ -107,18 +107,38 @@ function videoBlockToExternalHTML(block, editor, context) {
   // is deliberately NOT the bare URL: BlockNote's own markdown exporter
   // collapses a link to a bare URL whenever its text equals its href, and
   // strips any `title` attribute outright — so VIDEO_EMBED_LINK_TEXT is the
-  // only signal that survives the round trip telling the read-only preview
-  // "this came from an actual video block, embed it" as opposed to a plain
-  // link someone just typed (see markdownLinkComponents.jsx). There is
-  // deliberately no reverse upgrade step that turns this back into a video
-  // block on re-parse inside the editor itself: a collaborative doc that
-  // re-seeds from this markdown (e.g. after a sync-server restart) shows a
-  // plain link with this label rather than replaying it as a live block —
-  // a known, accepted trade-off, not a bug.
+  // only signal that survives the round trip telling both the read-only
+  // preview (markdownLinkComponents.jsx) and upgradeVideoLinks (below) "this
+  // came from an actual video block" as opposed to a plain link someone just
+  // typed.
   const a = document.createElement('a');
   a.href = block.props.url;
   a.textContent = VIDEO_EMBED_LINK_TEXT;
   return { dom: a };
+}
+
+// A collaborative doc's Yjs room isn't kept in the sync server's memory
+// forever — Hocuspocus unloads a document once its last client disconnects,
+// so simply closing a note and reopening it later (completely routine, not
+// just a server restart) re-seeds the room from this markdown via
+// tryParseMarkdownToBlocks. That parses a video block's exported link (see
+// videoBlockToExternalHTML above) as an ordinary paragraph+link, degrading
+// the embed to plain text every time — this is what upgrades it back. It
+// only matches the exact VIDEO_EMBED_LINK_TEXT label, never a bare video URL
+// or a link with different text, so a link the user actually typed/pasted
+// still never gets turned into an embed (see markdownLinkComponents.jsx,
+// which enforces the same rule for the read-only preview).
+function upgradeVideoLinks(blocks) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? upgradeVideoLinks(block.children) : block.children;
+    if (block.type === 'paragraph' && block.content?.length === 1) {
+      const node = block.content[0];
+      if (node?.type === 'link' && node.content?.[0]?.text === VIDEO_EMBED_LINK_TEXT) {
+        return { type: 'video', props: { url: node.href }, children };
+      }
+    }
+    return children === block.children ? block : { ...block, children };
+  });
 }
 
 const blockNoteSchema = BlockNoteSchema.create({
@@ -205,6 +225,12 @@ export default function NoteEditor({
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isAttachModalOpen, setIsAttachModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  // Purely cosmetic mirror of isLoadingContentRef below, for rendering the
+  // loading overlay — it has to be state (not just the ref) to trigger a
+  // re-render, but it must never gate whether BlockNoteView itself mounts:
+  // swapping the editor instance in/out based on a "ready" flag is exactly
+  // what broke remote-update sync earlier (see the collab bootstrap effect).
+  const [isContentLoading, setIsContentLoading] = useState(true);
 
   const saveTimeoutRef = useRef(null);
   const idleCheckpointTimeoutRef = useRef(null);
@@ -261,6 +287,7 @@ export default function NoteEditor({
     }
     hasBootstrappedRef.current = false;
     isLoadingContentRef.current = true;
+    setIsContentLoading(true);
     const newYdoc = new Y.Doc();
     const newProvider = new HocuspocusProvider({
       url: syncUrl,
@@ -275,11 +302,12 @@ export default function NoteEditor({
         try {
           if (newYdoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
             const processed = await refreshImageTokensInMarkdown(fileRef.current?.content || '');
-            const blocks = editorRef.current.tryParseMarkdownToBlocks(processed || ' ');
+            const blocks = upgradeVideoLinks(editorRef.current.tryParseMarkdownToBlocks(processed || ' '));
             editorRef.current.replaceBlocks(editorRef.current.document, blocks);
           }
         } finally {
           isLoadingContentRef.current = false;
+          setIsContentLoading(false);
         }
       }
     });
@@ -456,7 +484,7 @@ export default function NoteEditor({
   // (now-matching) content — redundant but harmless, no special-casing needed.
   const handleVersionRestored = async (updatedFile) => {
     const processed = await refreshImageTokensInMarkdown(updatedFile.content || '');
-    const blocks = editor.tryParseMarkdownToBlocks(processed || ' ');
+    const blocks = upgradeVideoLinks(editor.tryParseMarkdownToBlocks(processed || ' '));
     editor.replaceBlocks(editor.document, blocks);
   };
 
@@ -586,6 +614,12 @@ export default function NoteEditor({
 
       {/* 3. Block Editor */}
       <div className="editor-panes">
+        {isContentLoading && (
+          <div className="editor-loading-overlay">
+            <Loader2 size={20} className="spin" color="var(--accent-primary)" />
+            <span>내용을 불러오는 중...</span>
+          </div>
+        )}
         <div className="editor-pane-blocknote">
           <BlockNoteView editor={editor} theme={BN_THEME} onChange={handleEditorChange} slashMenu={false}>
             <SuggestionMenuController

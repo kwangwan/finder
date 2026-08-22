@@ -2351,6 +2351,26 @@ h1, h2, h3, h4, h5, h6,
   position: relative;
 }
 
+/* Sits on top of the already-mounted BlockNoteView while its collaborative
+   content is still syncing in — matches the read-only preview's own
+   "내용을 불러오는 중..." state. Deliberately an overlay rather than a
+   swap-in/swap-out of the editor itself: gating BlockNoteView's mount on a
+   "ready" flag is what broke remote-update sync earlier this session (see
+   NoteEditor.jsx's collab bootstrap effect). */
+.editor-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
 .editor-pane-raw {
   flex: 1;
   height: 100%;
