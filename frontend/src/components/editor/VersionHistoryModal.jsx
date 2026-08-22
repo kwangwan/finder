@@ -139,7 +139,14 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
                         borderLeft: selectedVersion?.id === v.id ? '2px solid var(--accent-primary)' : '2px solid transparent'
                       }}
                     >
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', fontWeight: 600 }}>{formatTime(v.created_at)}</div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {formatTime(v.created_at)}
+                        {v.is_open && (
+                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--accent-primary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-sm)', padding: '0 4px' }}>
+                            진행 중
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{v.editor_name || '알 수 없음'}</div>
                     </div>
                   ))}

@@ -87,6 +87,7 @@ class FileVersionResponse(BaseModel):
     edited_by: Optional[uuid.UUID] = None
     editor_name: Optional[str] = None
     created_at: datetime
+    is_open: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
