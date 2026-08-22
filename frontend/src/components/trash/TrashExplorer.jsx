@@ -31,6 +31,7 @@ import {
   getMediaPreviewUrl
 } from '../../api';
 import { useDialog } from '../../context/DialogContext';
+import { useToast } from '../../context/ToastContext';
 import TrashPreviewModal from './TrashPreviewModal';
 
 function formatBytes(bytes) {
@@ -54,6 +55,7 @@ export default function TrashExplorer({
   onRefreshParent,
 }) {
   const { showAlert, showConfirm } = useDialog();
+  const { showToast } = useToast();
   const [trashData, setTrashData] = useState({ folders: [], files: [], total_count: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -97,11 +99,7 @@ export default function TrashExplorer({
       await restoreFile(file.id);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
-      await showAlert({
-        title: '복구 완료',
-        message: `'${file.name}' 파일이 성공적으로 복구되었습니다.`,
-        type: 'success'
-      });
+      showToast(`'${file.name}' 파일이 복구되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '복구 실패',
@@ -119,11 +117,7 @@ export default function TrashExplorer({
       await restoreFolder(folder.id);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
-      await showAlert({
-        title: '복구 완료',
-        message: `'${folder.name}' 폴더와 내부 항목들이 성공적으로 복구되었습니다.`,
-        type: 'success'
-      });
+      showToast(`'${folder.name}' 폴더와 내부 항목들이 복구되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '복구 실패',
@@ -161,11 +155,7 @@ export default function TrashExplorer({
       await deletePermanentFile(file.id);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
-      await showAlert({
-        title: '영구 삭제 완료',
-        message: `'${file.name}' 파일이 영구 삭제되었습니다.`,
-        type: 'success'
-      });
+      showToast(`'${file.name}' 파일이 영구 삭제되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '영구 삭제 실패',
@@ -203,11 +193,7 @@ export default function TrashExplorer({
       await deletePermanentFolder(folder.id);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
-      await showAlert({
-        title: '영구 삭제 완료',
-        message: `'${folder.name}' 폴더와 하위 항목들이 영구 삭제되었습니다.`,
-        type: 'success'
-      });
+      showToast(`'${folder.name}' 폴더와 하위 항목들이 영구 삭제되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '영구 삭제 실패',
@@ -244,11 +230,7 @@ export default function TrashExplorer({
       await emptyTrash(activeWorkspace?.id || null);
       await loadTrash();
       if (onRefreshParent) onRefreshParent();
-      await showAlert({
-        title: '휴지통 비우기 완료',
-        message: '휴지통의 모든 항목이 영구 삭제되었습니다.',
-        type: 'success'
-      });
+      showToast('휴지통의 모든 항목이 영구 삭제되었습니다.', { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '휴지통 비우기 실패',

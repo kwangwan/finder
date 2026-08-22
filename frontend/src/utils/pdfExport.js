@@ -1,3 +1,7 @@
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ensureMediaToken, getMediaPreviewUrl, getPresignedDownloadUrl } from '../api';
 import { extractYouTubeId } from './markdownLinkComponents';
 
@@ -103,38 +107,18 @@ async function resolveEmbeds(markdown) {
   return { text, embeds };
 }
 
+// Renders through the exact same react-markdown + remark-gfm pipeline the
+// live preview uses (see PreviewWindow.jsx / VersionHistoryModal.jsx), so
+// this can't drift out of sync with what's actually supported there —
+// the previous hand-rolled regex converter had no support for tables,
+// ordered/task lists, strikethrough, or h4-h6, and its later paragraph-
+// wrapping pass corrupted already-converted code blocks.
 const formatMarkdown = (md) => {
-  if (!md) return '<p><em>(내용 없음)</em></p>';
-  let html = escapeHtml(md);
-
-  // Code blocks
-  html = html.replace(/```([a-zA-Z]*)\n([\s\S]*?)```/g, (match, lang, code) => {
-    return `<pre><code>${code}</code></pre>`;
-  });
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Headers
-  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
-
-  // Bold & Italic
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-  // Blockquotes
-  html = html.replace(/^&gt; (.*$)/gim, '<blockquote>$1</blockquote>');
-
-  // Unordered Lists
-  html = html.replace(/^\s*-\s+(.*$)/gim, '<li>$1</li>');
-
-  // Paragraphs
-  html = html.replace(/\n\n/g, '</p><p>');
-  html = html.replace(/\n/g, '<br/>');
-
-  return `<div class="md-body"><p>${html}</p></div>`;
+  if (!md || !md.trim()) return '<div class="md-body"><p><em>(내용 없음)</em></p></div>';
+  const html = renderToStaticMarkup(
+    React.createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, md)
+  );
+  return `<div class="md-body">${html}</div>`;
 };
 
 export const exportMarkdownToPdf = async (title, content) => {
@@ -223,8 +207,43 @@ export const exportMarkdownToPdf = async (title, content) => {
           margin-top: 14px;
           margin-bottom: 8px;
         }
+        h4, h5, h6 {
+          font-weight: 600;
+          color: #374151;
+          margin-top: 12px;
+          margin-bottom: 6px;
+        }
+        h4 { font-size: 11pt; }
+        h5 { font-size: 10.5pt; }
+        h6 { font-size: 10pt; color: #4b5563; }
         p {
           margin: 8px 0;
+        }
+        del {
+          color: #6b7280;
+        }
+        table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 12px 0;
+          font-size: 9.5pt;
+        }
+        th, td {
+          border: 1px solid #e2e8f0;
+          padding: 6px 10px;
+          text-align: left;
+        }
+        th {
+          background-color: #f8fafc;
+          font-weight: 700;
+          color: #1f2937;
+        }
+        li.task-list-item {
+          list-style: none;
+          margin-left: -22px;
+        }
+        li.task-list-item input[type="checkbox"] {
+          margin-right: 6px;
         }
         code {
           font-family: "JetBrains Mono", Consolas, Monaco, monospace;

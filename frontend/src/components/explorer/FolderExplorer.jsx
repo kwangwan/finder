@@ -34,7 +34,8 @@ import {
   X,
   Filter,
   RefreshCw,
-  Info
+  Info,
+  Loader2
 } from '../../utils/icons';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
@@ -103,6 +104,38 @@ export default function FolderExplorer({
   const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [infoFile, setInfoFile] = useState(null);
   const [removingIds, setRemovingIds] = useState(new Set());
+  // Cards fading out are hidden from the grid as soon as the fade finishes,
+  // rather than waiting on the server round-trip (moveToTrashFile + refreshFiles)
+  // to actually drop them from `files` — otherwise the faded card's now-empty
+  // grid slot sits there for however long that network call takes, then
+  // collapses abruptly once `files` updates, which reads as a jarring delayed
+  // layout jump (most visible on slower mobile connections).
+  const [hiddenIds, setHiddenIds] = useState(new Set());
+  // Guards the "새 문서" buttons: onNewNote does a create + refresh round-trip
+  // with no visual feedback of its own, so a slow network made it easy to
+  // double-click and create two documents without realizing the first click
+  // had registered at all.
+  const [isCreatingNote, setIsCreatingNote] = useState(false);
+  const handleCreateNote = async () => {
+    if (isCreatingNote || !onNewNote) return;
+    setIsCreatingNote(true);
+    try {
+      await onNewNote();
+    } finally {
+      setIsCreatingNote(false);
+    }
+  };
+
+  // Prune ids that have actually left `files` (real deletion confirmed) so
+  // this Set doesn't grow forever across a long session.
+  useEffect(() => {
+    setHiddenIds(prev => {
+      if (prev.size === 0) return prev;
+      const stillPresent = new Set(files.map(f => f.id));
+      const next = new Set([...prev].filter(id => stillPresent.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [files]);
 
   const [downloadProgress, setDownloadProgress] = useState(null); // { fileId, percent, status }
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
@@ -414,8 +447,8 @@ export default function FolderExplorer({
         {/* Action Buttons */}
         <div className="explorer-actions">
           {activeView === 'notes' ? (
-            <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 문서 작성">
-              <Plus size={15} />
+            <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote} title="새 문서 작성">
+              {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
               <span>새 문서</span>
             </button>
           ) : activeView === 'favorites' ? (
@@ -450,8 +483,8 @@ export default function FolderExplorer({
                 <FolderPlus size={15} />
                 <span className="hide-mobile">새 폴더</span>
               </button>
-              <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 문서 작성">
-                <Plus size={15} />
+              <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote} title="새 문서 작성">
+                {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
                 <span className="hide-mobile">새 문서</span>
               </button>
             </>
@@ -727,8 +760,8 @@ export default function FolderExplorer({
               <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
                 아이디어, 메모, 지식을 자유롭게 작성하고 AI 검색으로 빠르게 찾아보세요.
               </p>
-              <button className="btn-primary" onClick={onNewNote} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
-                <Plus size={16} />
+              <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
+                {isCreatingNote ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
                 <span>새 문서 작성</span>
               </button>
             </div>
@@ -800,8 +833,8 @@ export default function FolderExplorer({
                 새 문서를 작성하거나 미디어 파일을 드래그하여 업로드하세요.
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-                <button className="btn-primary" onClick={onNewNote} style={{ padding: '0.6rem 1.25rem' }}>
-                  <Plus size={16} />
+                <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote} style={{ padding: '0.6rem 1.25rem' }}>
+                  {isCreatingNote ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
                   <span>새 문서 작성</span>
                 </button>
                 <button className="btn-secondary" onClick={onOpenUpload} style={{ padding: '0.6rem 1.25rem' }}>
@@ -813,7 +846,7 @@ export default function FolderExplorer({
           )
         ) : (
           <div className="grid-cards">
-            {files.map(file => {
+            {files.filter(file => !hiddenIds.has(file.id)).map(file => {
               const isSelected = selectedFileIds.includes(file.id);
               const previewable = isPreviewableFile(file);
               const hasVisualThumb = isImageOrVideo(file) || file.thumbnail_url || file.thumbnail_s3_key;
@@ -900,7 +933,10 @@ export default function FolderExplorer({
                           if (!onDeleteFile) return;
                           await onDeleteFile(file.id, () => new Promise((resolve) => {
                             setRemovingIds(new Set([file.id]));
-                            setTimeout(resolve, 220);
+                            setTimeout(() => {
+                              setHiddenIds(prev => new Set([...prev, file.id]));
+                              resolve();
+                            }, 220);
                           }));
                           setRemovingIds(new Set());
                         }}
@@ -1085,7 +1121,10 @@ export default function FolderExplorer({
               const idsToDelete = [...selectedFileIds];
               const proceeded = await onBatchDelete(idsToDelete, () => new Promise((resolve) => {
                 setRemovingIds(new Set(idsToDelete));
-                setTimeout(resolve, 220);
+                setTimeout(() => {
+                  setHiddenIds(prev => new Set([...prev, ...idsToDelete]));
+                  resolve();
+                }, 220);
               }));
               if (proceeded !== false) {
                 setSelectedFileIds([]);

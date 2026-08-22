@@ -147,11 +147,9 @@ export default function Sidebar({
             <span style={{ width: 14 }} />
           )}
           <FolderIcon size={16} color={folder.color || (isSelected ? '#3b82f6' : '#94a3b8')} />
-          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {folder.name}
-          </span>
+          <span>{folder.name}</span>
           {folder.file_count > 0 && (
-            <span className="menu-badge">{folder.file_count}</span>
+            <span className="menu-badge" style={{ marginLeft: 0 }}>{folder.file_count}</span>
           )}
           <button
             className="btn-icon tree-add-btn"

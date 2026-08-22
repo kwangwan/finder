@@ -886,11 +886,15 @@ async def direct_upload(
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
-    # Storage quota check on workspace owner
-    await quota_service.check_quota(db, workspace_id, current_user, len(file_bytes))
+    # Reserve the size up front (atomically checked-and-claimed in one UPDATE)
+    # rather than just checking it, so two direct uploads landing at nearly
+    # the same moment can't both pass the check against the same stale
+    # storage_used_bytes and together exceed quota — same reasoning as the
+    # chunked-upload path's quota_service.reserve_quota.
+    owner = await quota_service.reserve_quota(db, workspace_id, current_user, len(file_bytes))
     file_uuid = uuid.uuid4()
     s3_key = build_storage_key("uploads", file_uuid, file.filename)
-    
+
     try:
         await run_in_threadpool(s3_service.put_object, s3_key, file_bytes, file.content_type or "application/octet-stream")
     except Exception as e:
@@ -898,6 +902,7 @@ async def direct_upload(
         # doesn't actually exist in S3. Swallowing this here (as it used to)
         # left a phantom file counted in stats/listings with a s3_key nothing
         # was ever written to.
+        await quota_service.release_reservation(db, owner.id, len(file_bytes))
         raise HTTPException(status_code=502, detail=f"파일을 스토리지에 저장하지 못했습니다: {e}")
 
     name_lower = file.filename.lower()
@@ -963,11 +968,12 @@ async def direct_upload(
         await run_in_threadpool(s3_service.delete_object, s3_key)
         if thumbnail_s3_key:
             await run_in_threadpool(s3_service.delete_object, thumbnail_s3_key)
+        await quota_service.release_reservation(db, owner.id, len(file_bytes))
         raise
     await db.refresh(file_item)
 
-    # Update workspace owner storage usage
-    await quota_service.record_storage_added(db, workspace_id, current_user, len(file_bytes))
+    # Turn the reservation into real usage now that the FileItem row exists.
+    await quota_service.commit_reservation(db, owner.id, len(file_bytes), len(file_bytes))
 
     try:
         await document_service.index_file_chunks(db, file_item, raw_bytes=file_bytes)

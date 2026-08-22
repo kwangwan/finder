@@ -477,7 +477,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 type="number"
                                 value={quotaInputGb}
                                 onChange={e => setQuotaInputGb(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') handleQuotaSave(user); if (e.key === 'Escape') setEditingQuotaUserId(null); }}
+                                onKeyDown={e => { if (e.key === 'Enter') handleSaveQuota(user.id); if (e.key === 'Escape') setEditingQuotaUserId(null); }}
                                 style={{
                                   width: 68, 
                                   height: 32,
@@ -496,7 +496,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>GB</span>
                               <button 
                                 className="btn-icon" 
-                                onClick={() => handleQuotaSave(user)} 
+                                onClick={() => handleSaveQuota(user.id)}
                                 title="저장" 
                                 style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(16,185,129,0.12)' }}
                               >
@@ -519,7 +519,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 </span>
                                 <button 
                                   className="btn-icon" 
-                                  onClick={() => handleQuotaEdit(user)} 
+                                  onClick={() => handleStartEditQuota(user)}
                                   title="용량 수정" 
                                   style={{ width: 22, height: 22, padding: 0 }}
                                 >

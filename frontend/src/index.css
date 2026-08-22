@@ -265,6 +265,13 @@ body {
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn-secondary {
   display: inline-flex;
   align-items: center;
@@ -1335,6 +1342,72 @@ body {
   }
 }
 
+/* Toasts — brief, auto-dismissing notifications for actions that already
+   completed and need no further user decision (contrast with the modal
+   dialogs above, which block for a confirm/cancel choice). */
+.toast-stack {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+  max-width: calc(100vw - 1.5rem);
+}
+
+.toast-item {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  animation: toastIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toast-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast-success { border-color: rgba(16, 185, 129, 0.35); }
+.toast-error { border-color: rgba(239, 68, 68, 0.4); }
+.toast-warning { border-color: rgba(245, 158, 11, 0.4); }
+.toast-loading { border-color: var(--border-medium); }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 768px) {
+  .toast-stack {
+    top: 60px;
+    width: calc(100vw - 1.2rem);
+  }
+  .toast-item {
+    width: 100%;
+    white-space: normal;
+  }
+  .toast-message {
+    white-space: normal;
+  }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -1788,6 +1861,28 @@ h1, h2, h3, h4, h5, h6,
     margin: 10px !important;
     padding: 1.15rem !important;
     max-height: 92vh !important;
+  }
+
+  /* Version history manages its own header/body/footer padding (padding:0 on
+     .modal-content itself) — the blanket mobile padding above fought that and
+     squeezed the already-narrow preview pane even further. */
+  .modal-content.version-history-modal {
+    padding: 0 !important;
+  }
+
+  .version-history-body {
+    flex-direction: column !important;
+  }
+
+  .version-history-list {
+    width: 100% !important;
+    max-height: 34vh;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .version-history-preview {
+    padding: 1rem !important;
   }
 
   .invitation-grid {

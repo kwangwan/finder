@@ -94,7 +94,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
       <div
-        className="modal-content"
+        className="modal-content version-history-modal"
         onClick={e => e.stopPropagation()}
         style={{ maxWidth: 720, width: '90vw', height: '80vh', display: 'flex', flexDirection: 'column', padding: 0 }}
       >
@@ -111,9 +111,9 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
           </button>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <div className="version-history-body" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {/* Version list */}
-          <div style={{ width: 220, borderRight: '1px solid var(--border-subtle)', overflowY: 'auto', flexShrink: 0 }}>
+          <div className="version-history-list" style={{ width: 220, borderRight: '1px solid var(--border-subtle)', overflowY: 'auto', flexShrink: 0 }}>
             {isLoadingList ? (
               <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                 <Loader2 size={16} className="spin" />
@@ -156,7 +156,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
           </div>
 
           {/* Preview pane */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', minWidth: 0 }}>
+          <div className="version-history-preview" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', minWidth: 0 }}>
             {!selectedVersion ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
                 왼쪽에서 버전을 선택하면 그 시점의 내용을 볼 수 있습니다.

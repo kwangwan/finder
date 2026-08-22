@@ -67,6 +67,7 @@ import {
   batchMoveFiles
 } from './api';
 import { useDialog } from './context/DialogContext';
+import { useToast } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 
 // Helper to find folder and build breadcrumb path
@@ -104,6 +105,7 @@ function buildFolderPath(nodeList, targetId) {
 
 export default function App() {
   const { showAlert, showConfirm } = useDialog();
+  const { showToast, updateToast, dismissToast } = useToast();
   const [theme, setTheme] = useState(() => localStorage.getItem('kb_theme') || 'dark');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   
@@ -445,11 +447,7 @@ export default function App() {
       const res = await batchMoveFiles(activeWorkspace.id, moveFilesModal.fileIds, targetFolderId);
       await refreshFiles();
       await refreshFoldersAndStats();
-      await showAlert({
-        title: '파일 이동 완료',
-        message: `${res.moved_count}개의 파일이 성공적으로 이동되었습니다.`,
-        type: 'success',
-      });
+      showToast(`${res.moved_count}개의 파일이 이동되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '이동 실패',
@@ -465,11 +463,7 @@ export default function App() {
       const res = await batchMoveFiles(activeWorkspace.id, fileIds, targetFolderId);
       await refreshFiles();
       await refreshFoldersAndStats();
-      await showAlert({
-        title: '파일 이동 완료',
-        message: `${res.moved_count}개의 파일이 지정한 폴더로 이동되었습니다.`,
-        type: 'success',
-      });
+      showToast(`${res.moved_count}개의 파일이 이동되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
         title: '이동 실패',
@@ -489,6 +483,8 @@ export default function App() {
     });
     if (!confirmed) return false;
 
+    const toastId = showToast('휴지통으로 이동 중...', { type: 'loading', duration: 0 });
+
     if (onConfirmed) {
       await onConfirmed();
     }
@@ -502,6 +498,7 @@ export default function App() {
     }
     await refreshFiles();
     await refreshFoldersAndStats();
+    updateToast(toastId, { message: `${fileIds.length}개 파일을 휴지통으로 이동했습니다.`, type: 'success' });
     return true;
   };
 
@@ -774,6 +771,10 @@ export default function App() {
         const wm = await getFilesWatermark(viewParams);
         if (requestId === refreshFilesRequestIdRef.current) {
           lastWatermarkRef.current = wm?.watermark ?? null;
+          // This refresh just brought the view fully current, so any "new files
+          // available" flag the 45s poll may have raced into setting (e.g. right
+          // after the user's own create/delete/move) is now stale — clear it.
+          setHasNewFilesInView(false);
         }
       } catch (e) { /* polling baseline is best-effort */ }
     } catch (err) {
@@ -905,6 +906,8 @@ export default function App() {
     });
     if (!confirmed) return;
 
+    const toastId = showToast('휴지통으로 이동 중...', { type: 'loading', duration: 0 });
+
     if (onConfirmed) {
       await onConfirmed();
     }
@@ -916,12 +919,9 @@ export default function App() {
       }
       refreshFiles();
       refreshFoldersAndStats();
-      await showAlert({
-        title: '휴지통 이동 완료',
-        message: `'${file.name}' 파일이 휴지통으로 이동되었습니다.`,
-        type: 'success'
-      });
+      updateToast(toastId, { message: `'${file.name}' 파일이 휴지통으로 이동되었습니다.`, type: 'success' });
     } catch (err) {
+      dismissToast(toastId);
       await showAlert({
         title: '휴지통 이동 실패',
         message: '파일을 휴지통으로 이동하지 못했습니다: ' + err.message,
@@ -965,6 +965,8 @@ export default function App() {
     });
     if (!confirmed) return;
 
+    const toastId = showToast('휴지통으로 이동 중...', { type: 'loading', duration: 0 });
+
     try {
       await moveToTrashFolder(folder.id);
       if (activeFolderId === folder.id) {
@@ -973,12 +975,9 @@ export default function App() {
       }
       refreshFiles();
       refreshFoldersAndStats();
-      await showAlert({
-        title: '휴지통 이동 완료',
-        message: `'${folder.name}' 폴더가 휴지통으로 이동되었습니다.`,
-        type: 'success'
-      });
+      updateToast(toastId, { message: `'${folder.name}' 폴더가 휴지통으로 이동되었습니다.`, type: 'success' });
     } catch (err) {
+      dismissToast(toastId);
       await showAlert({
         title: '휴지통 이동 실패',
         message: '폴더를 휴지통으로 이동하지 못했습니다: ' + err.message,
