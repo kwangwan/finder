@@ -9,6 +9,7 @@ from typing import Optional
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +36,29 @@ from app.services.quota_service import quota_service
 from app.services.svg_sanitizer import sanitize_svg
 
 router = APIRouter(prefix="/api/storage", tags=["Storage & Uploads"])
+
+
+async def _stream_s3_object(s3_key: str, chunk_size: int = 1024 * 1024):
+    """
+    Yield an S3/MinIO object's bytes in chunks instead of buffering the whole
+    thing into memory first — used for the no-Range fallback response below.
+    Without this, previewing/downloading a large file (e.g. a several-
+    hundred-MB video with no Range header from the browser's first request)
+    meant reading the entire object into RAM before a single byte reached the
+    client, which is exactly what made large videos feel like they loaded the
+    whole file before playing anything. Each chunk read is offloaded via
+    run_in_threadpool since boto3's StreamingBody.read() is a blocking call.
+    """
+    resp = await run_in_threadpool(s3_service.client.get_object, Bucket=s3_service.bucket_name, Key=s3_key)
+    body = resp["Body"]
+    try:
+        while True:
+            chunk = await run_in_threadpool(body.read, chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        body.close()
 
 @router.get("/config", response_model=StorageConfigResponse)
 async def get_storage_config(
@@ -933,12 +957,14 @@ async def preview_file(
                 media_type=mime_type
             )
 
-    raw_bytes = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
-    if raw_bytes is None:
-        raise HTTPException(status_code=404, detail="파일 데이터를 찾을 수 없습니다.")
-
-    content_disposition = f"inline; filename*=UTF-8''{safe_name}"
     if is_svg:
+        # SVGs are small documents that need full-buffer sanitization anyway,
+        # so there's no streaming benefit to skip here.
+        raw_bytes = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
+        if raw_bytes is None:
+            raise HTTPException(status_code=404, detail="파일 데이터를 찾을 수 없습니다.")
+
+        content_disposition = f"inline; filename*=UTF-8''{safe_name}"
         sanitized = sanitize_svg(raw_bytes)
         if sanitized is None:
             # Couldn't safely parse/sanitize it — fall back to a forced download
@@ -947,14 +973,32 @@ async def preview_file(
         else:
             raw_bytes = sanitized
 
-    return Response(
-        content=raw_bytes,
+        return Response(
+            content=raw_bytes,
+            status_code=status.HTTP_200_OK,
+            headers={
+                "Content-Disposition": content_disposition,
+                "Content-Type": mime_type,
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(raw_bytes)),
+                "Cache-Control": "public, max-age=3600"
+            },
+            media_type=mime_type
+        )
+
+    # No Range header (e.g. a browser's first request for a <video> element)
+    # — stream straight from S3/MinIO instead of buffering the whole object
+    # into memory first. For a several-hundred-MB video, buffering meant
+    # nothing reached the client until the entire file had been downloaded
+    # backend-side, which is what made playback feel like it was fetching
+    # the whole file up front instead of streaming.
+    return StreamingResponse(
+        _stream_s3_object(file_item.s3_key),
         status_code=status.HTTP_200_OK,
         headers={
-            "Content-Disposition": content_disposition,
-            "Content-Type": mime_type,
+            "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
             "Accept-Ranges": "bytes",
-            "Content-Length": str(len(raw_bytes)),
+            "Content-Length": str(file_item.size_bytes) if file_item.size_bytes else "",
             "Cache-Control": "public, max-age=3600"
         },
         media_type=mime_type
@@ -996,17 +1040,14 @@ async def direct_file_download(
                 media_type="application/octet-stream"
             )
 
-    raw_bytes = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
-    if raw_bytes is None:
-        raise HTTPException(status_code=404, detail="파일 데이터를 찾을 수 없습니다.")
-
-    return Response(
-        content=raw_bytes,
+    # No Range header — stream straight from S3/MinIO instead of buffering
+    # the whole object into memory first (see preview_file for why).
+    return StreamingResponse(
+        _stream_s3_object(file_item.s3_key),
         status_code=status.HTTP_200_OK,
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}",
-            "Content-Type": "application/octet-stream",
-            "Content-Length": str(len(raw_bytes)),
+            "Content-Length": str(file_item.size_bytes) if file_item.size_bytes else "",
             "Accept-Ranges": "bytes"
         },
         media_type="application/octet-stream"

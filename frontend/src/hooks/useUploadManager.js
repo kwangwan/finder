@@ -125,7 +125,12 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         controller.signal
       );
 
-      updateItem(nextItem.id, { percent: 100, status: 'completed', statusText: '완료됨' });
+      // Drop the File blob reference now that it's uploaded — a batch of
+      // thousands of items (video files especially) otherwise keeps every
+      // one of them alive in the queue's React state for the rest of the
+      // session, which is a lot of retained memory for data nothing needs
+      // anymore. (error/canceled items keep theirs — retryItem/retryAll need it.)
+      updateItem(nextItem.id, { percent: 100, status: 'completed', statusText: '완료됨', file: null });
       if (onUploadSuccess) {
         onUploadSuccess({
           ...nextItem,

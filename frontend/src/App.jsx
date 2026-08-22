@@ -236,14 +236,20 @@ export default function App() {
           // reshuffling an already-populated, paginated page is — let that
           // case keep auto-refreshing so files still "just appear" as the
           // empty-state message promises.
-          if (viewingUploadedFolder && filesRef.current.length > 0) {
-            // Don't silently refetch the folder the user is currently looking
-            // at — with the default recency sort, that would keep bumping
-            // whatever they're looking at onto later pages as new arrivals
-            // take the top slots. Let them choose when to refresh instead.
-            setHasNewFilesInView(true);
-          } else {
-            refreshFiles(true);
+          // Only touch the file list at all if this upload actually landed in
+          // the folder being viewed — refetching it for every completion
+          // anywhere else in a multi-thousand-file batch was pure wasted load
+          // (on both this tab and the backend) for a view that never changed.
+          if (viewingUploadedFolder) {
+            if (filesRef.current.length > 0) {
+              // Don't silently refetch a folder the user is currently looking
+              // at — with the default recency sort, that would keep bumping
+              // whatever they're looking at onto later pages as new arrivals
+              // take the top slots. Let them choose when to refresh instead.
+              setHasNewFilesInView(true);
+            } else {
+              refreshFiles(true);
+            }
           }
         }
       }, 300);
