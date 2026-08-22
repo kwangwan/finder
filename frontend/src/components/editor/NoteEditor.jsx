@@ -23,12 +23,22 @@ import {
 } from '../../utils/icons';
 import AttachExistingFileModal from './AttachExistingFileModal';
 import VersionHistoryModal from './VersionHistoryModal';
-import { uploadNoteImage, ensureMediaToken, getMediaPreviewUrl, getStoredToken, getAuthConfig } from '../../api';
+import { uploadNoteImage, ensureMediaToken, getMediaPreviewUrl, getStoredToken, getAuthConfig, checkpointFileVersion } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
-import { getVideoEmbedUrl } from '../../utils/markdownLinkComponents';
+import { getVideoEmbedUrl, VIDEO_EMBED_LINK_TEXT } from '../../utils/markdownLinkComponents';
 
 const COLLAB_FRAGMENT_NAME = 'blocknote';
+
+// How long the editor waits after the last edit before treating the editing
+// session as "closed" and forcing a version-history checkpoint of the
+// current content — matches Notion's own history behavior (periodic
+// snapshots every 10 min while actively editing, see VERSION_SNAPSHOT_MIN_INTERVAL
+// on the backend, plus a session-end snapshot once editing stops for this
+// long), so a short sub-10-minute editing session still gets its own restore
+// point right when you stop, rather than only being captured retroactively
+// the next time the note happens to be edited again.
+const IDLE_CHECKPOINT_DELAY = 2 * 60 * 1000;
 
 // Maps BlockNote's own hardcoded light/dark greys onto this app's CSS
 // variables instead, so the editor blends into whichever theme (dark/light/
@@ -96,18 +106,23 @@ function renderVideoBlock(block, editor) {
 function videoBlockToExternalHTML(block, editor, context) {
   const embedUrl = getVideoEmbedUrl(block.props.url);
   if (!embedUrl) return stockVideoSpec.implementation.toExternalHTML.call(this, block, editor, context);
-  // Export as a plain link, not the iframe — keeps the markdown stored in
-  // Postgres (the RAG embedding pipeline's source of truth) and PDF export's
-  // existing YouTube-thumbnail special-case working exactly as before. There
-  // is deliberately no reverse upgrade step that turns a plain YouTube/Vimeo
-  // link back into a video block on re-parse: a link the user just typed or
-  // pasted should stay a plain link (see markdownLinkComponents.jsx), so a
-  // collaborative doc that re-seeds from this markdown (e.g. after a
-  // sync-server restart) shows this as plain text rather than replaying it
-  // as an embed — a known, accepted trade-off, not a bug.
+  // Export as a link, not the iframe — keeps the markdown stored in Postgres
+  // (the RAG embedding pipeline's source of truth) and PDF export's existing
+  // YouTube-thumbnail special-case working exactly as before. The link text
+  // is deliberately NOT the bare URL: BlockNote's own markdown exporter
+  // collapses a link to a bare URL whenever its text equals its href, and
+  // strips any `title` attribute outright — so VIDEO_EMBED_LINK_TEXT is the
+  // only signal that survives the round trip telling the read-only preview
+  // "this came from an actual video block, embed it" as opposed to a plain
+  // link someone just typed (see markdownLinkComponents.jsx). There is
+  // deliberately no reverse upgrade step that turns this back into a video
+  // block on re-parse inside the editor itself: a collaborative doc that
+  // re-seeds from this markdown (e.g. after a sync-server restart) shows a
+  // plain link with this label rather than replaying it as a live block —
+  // a known, accepted trade-off, not a bug.
   const a = document.createElement('a');
   a.href = block.props.url;
-  a.textContent = block.props.url;
+  a.textContent = VIDEO_EMBED_LINK_TEXT;
   return { dom: a };
 }
 
@@ -198,6 +213,7 @@ export default function NoteEditor({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   const saveTimeoutRef = useRef(null);
+  const idleCheckpointTimeoutRef = useRef(null);
   const fileRef = useRef(file);
   const workspaceIdRef = useRef(activeWorkspaceId);
   const titleRef = useRef(title);
@@ -275,6 +291,10 @@ export default function NoteEditor({
     });
     setCollab({ ydoc: newYdoc, provider: newProvider });
     return () => {
+      if (idleCheckpointTimeoutRef.current) {
+        clearTimeout(idleCheckpointTimeoutRef.current);
+        idleCheckpointTimeoutRef.current = null;
+      }
       newProvider.destroy();
       newYdoc.destroy();
     };
@@ -367,18 +387,41 @@ export default function NoteEditor({
     }, 1000);
   }, [doSave, isSaveLeader]);
 
+  // Every real edit pushes this out by IDLE_CHECKPOINT_DELAY — once it
+  // actually fires (no further edits for that long), the note is treated as
+  // "done for now" and gets its own version-history entry, same as Notion
+  // closing out a session the moment you stop typing.
+  const scheduleIdleCheckpoint = useCallback(() => {
+    if (idleCheckpointTimeoutRef.current) clearTimeout(idleCheckpointTimeoutRef.current);
+    idleCheckpointTimeoutRef.current = setTimeout(() => {
+      idleCheckpointTimeoutRef.current = null;
+      if (!isSaveLeader() || !fileRef.current?.id) return;
+      checkpointFileVersion(fileRef.current.id).catch(() => {});
+    }, IDLE_CHECKPOINT_DELAY);
+  }, [isSaveLeader]);
+
   // Flush a pending save immediately when the tab is hidden/closed, instead of
   // losing up to 1s of edits (the autosave debounce window) or waiting for the
   // next periodic save — a session-boundary flush, the same signal most
   // collaborative editors use to decide "this edit is worth a history entry."
+  // Closing/hiding the tab is itself a session boundary, so it also forces the
+  // same version-history checkpoint the idle timer would eventually trigger,
+  // once the flushed save (if any) actually lands.
   useEffect(() => {
     const flush = () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
       }
-      if (saveStatusRef.current === 'saved' || !isSaveLeader()) return;
-      doSave(titleRef.current, tagsRef.current);
+      if (idleCheckpointTimeoutRef.current) {
+        clearTimeout(idleCheckpointTimeoutRef.current);
+        idleCheckpointTimeoutRef.current = null;
+      }
+      if (!isSaveLeader()) return;
+      const pending = saveStatusRef.current === 'saved' ? Promise.resolve() : doSave(titleRef.current, tagsRef.current);
+      Promise.resolve(pending).then(() => {
+        if (fileRef.current?.id) checkpointFileVersion(fileRef.current.id).catch(() => {});
+      });
     };
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') flush();
@@ -395,11 +438,13 @@ export default function NoteEditor({
     const val = e.target.value;
     setTitle(val);
     triggerAutoSave(val, tags);
+    scheduleIdleCheckpoint();
   };
 
   const handleEditorChange = () => {
     if (isLoadingContentRef.current) return;
     triggerAutoSave(titleRef.current, tagsRef.current);
+    scheduleIdleCheckpoint();
   };
 
   const handleInsertAttachedFile = (snippet) => {

@@ -27,6 +27,16 @@ export function getVideoEmbedUrl(url) {
   return null;
 }
 
+// The link text NoteEditor.jsx's video-block markdown export uses (instead of
+// the bare URL) — the ONLY signal that tells the preview renderer below "this
+// link came from an actual video block the user explicitly inserted," as
+// opposed to a plain YouTube/Vimeo URL someone just typed or pasted as text.
+// BlockNote's own markdown exporter strips link `title` attributes entirely
+// and collapses text-equals-href links to a bare URL, so the link's visible
+// text is the only part of a `[text](url)` pair that reliably round-trips —
+// this sentinel has to live in that text, not in an attribute.
+export const VIDEO_EMBED_LINK_TEXT = '▶ 첨부된 동영상';
+
 /**
  * An inserted image's markdown (`![name](/api/storage/preview/{id}?token=...)`)
  * has the media token baked into the stored text at insert time, but that
@@ -140,11 +150,47 @@ export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {
         );
       }
 
-      // A link that happens to point at YouTube/Vimeo is still just a link
-      // here — it's not auto-embedded. The only place a video actually plays
-      // inline is the live BlockNote editor's own video block (see
-      // NoteEditor.jsx), which is a deliberate, explicit insert; a link the
-      // user typed or pasted as plain text should render as a plain link.
+      // 3. A video block's own export (see VIDEO_EMBED_LINK_TEXT above) —
+      // embed it here too, so the read-only preview shows exactly what the
+      // live editor does. A link that merely happens to point at YouTube/
+      // Vimeo (typed or pasted as plain text, not inserted as a video block)
+      // does NOT get this treatment — it stays a plain link, since "just a
+      // link" should render as just a link.
+      const linkText = Array.isArray(children) ? children.join('') : children;
+      const embedUrl = linkText === VIDEO_EMBED_LINK_TEXT ? getVideoEmbedUrl(href) : null;
+      if (embedUrl) {
+        return (
+          <span style={{ display: 'block', margin: '1.25rem 0' }}>
+            <span style={{
+              display: 'block',
+              position: 'relative',
+              paddingBottom: '56.25%',
+              height: 0,
+              overflow: 'hidden',
+              borderRadius: 'var(--radius-lg)',
+              boxShadow: 'var(--shadow-md)',
+              border: '1px solid var(--border-subtle)'
+            }}>
+              <iframe
+                src={embedUrl}
+                title="Video Player"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  border: 'none'
+                }}
+              />
+            </span>
+          </span>
+        );
+      }
+
       return (
         <a href={href} target="_blank" rel="noopener noreferrer" {...props} style={{ color: 'var(--accent-primary)' }}>
           {children}

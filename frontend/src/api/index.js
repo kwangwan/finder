@@ -642,6 +642,15 @@ export async function restoreFileVersion(fileId, versionId) {
   return res.json();
 }
 
+export async function checkpointFileVersion(fileId) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/versions/checkpoint`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to checkpoint version');
+  return res.json();
+}
+
 export async function moveFile(fileId, folder_id) {
   const res = await fetch(`${API_BASE}/files/${fileId}/move`, {
     method: 'PUT',

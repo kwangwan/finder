@@ -449,6 +449,40 @@ async def list_file_versions(
         names = {u.id: _display_name(u) for u in users}
     return [_to_version_response(v, names.get(v.edited_by), include_content=False) for v in versions]
 
+@router.post("/{file_id}/versions/checkpoint")
+async def checkpoint_file_version(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Force a snapshot of the note's CURRENT content right now, bypassing
+    the normal VERSION_SNAPSHOT_MIN_INTERVAL gate. The editor calls this after
+    ~2 minutes of no edits (and on tab-hide/close) — mirroring Notion's own
+    history behavior, which snapshots every 10 minutes *while actively
+    editing* but also closes out a version the moment editing stops, so a
+    short session still gets its own restore point immediately rather than
+    only being captured retroactively whenever the note happens to be edited
+    again. No-ops (returns created=False) if content already matches the
+    newest existing snapshot, so repeated idle-fires without further edits
+    don't pile up duplicate rows."""
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+
+    file_item = await db.get(FileItem, file_id)
+    if not file_item or not file_item.content or not file_item.content.strip():
+        return {"created": False}
+
+    last_version = (await db.execute(
+        select(FileVersion).where(FileVersion.file_id == file_id)
+        .order_by(FileVersion.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if last_version and last_version.content == file_item.content:
+        return {"created": False}
+
+    db.add(FileVersion(file_id=file_item.id, name=file_item.name, content=file_item.content, edited_by=file_item.last_edited_by))
+    await db.commit()
+    return {"created": True}
+
 @router.get("/{file_id}/versions/{version_id}", response_model=FileVersionDetailResponse)
 async def get_file_version(
     file_id: uuid.UUID,
