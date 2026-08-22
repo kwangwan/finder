@@ -35,7 +35,7 @@ import {
   Filter,
   RefreshCw
 } from 'lucide-react';
-import { downloadFileChunked, getThumbnailUrl } from '../../api';
+import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
@@ -896,11 +896,27 @@ export default function FolderExplorer({
                       onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
                       title="클릭하여 미리보기"
                     >
-                      <img 
-                        src={getThumbnailUrl(file.id)} 
-                        alt={file.name} 
-                        loading="lazy" 
-                        onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
+                      <img
+                        src={getThumbnailUrl(file.id)}
+                        alt={file.name}
+                        loading="lazy"
+                        onError={async (e) => {
+                          // A thumbnail request can 401 if the cached media
+                          // token happened to expire right as this rendered
+                          // (e.g. a page-wide refresh right when a backend
+                          // under heavy upload load was too slow to renew
+                          // it in time) — force a fresh token and retry once
+                          // before giving up, instead of hiding permanently.
+                          const img = e.currentTarget;
+                          if (img.dataset.retriedToken) {
+                            img.parentElement.style.display = 'none';
+                            return;
+                          }
+                          img.dataset.retriedToken = '1';
+                          clearMediaToken();
+                          await ensureMediaToken();
+                          img.src = getThumbnailUrl(file.id);
+                        }}
                       />
                       <div className="thumbnail-overlay">
                         <Eye size={16} color="#fff" />

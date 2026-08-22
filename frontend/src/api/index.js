@@ -63,7 +63,15 @@ export async function ensureMediaToken() {
   }
   if (!mediaTokenRefreshPromise) {
     mediaTokenRefreshPromise = fetchMediaToken()
-      .catch((err) => { console.warn('[Media Token] refresh failed:', err); return null; })
+      .catch((err) => {
+        // A failed refresh (e.g. the backend momentarily overloaded during a
+        // large upload) used to just sit there until the next 5-minute
+        // interval tick — every thumbnail/preview/download on the page would
+        // 401 for however much of that window remained. Retry soon instead.
+        console.warn('[Media Token] refresh failed, retrying shortly:', err);
+        setTimeout(() => { if (getStoredToken()) ensureMediaToken(); }, 5000);
+        return null;
+      })
       .finally(() => { mediaTokenRefreshPromise = null; });
   }
   return mediaTokenRefreshPromise;
