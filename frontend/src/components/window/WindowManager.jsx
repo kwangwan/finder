@@ -11,6 +11,7 @@ export default function WindowManager({
     closeWindow,
     closeAllWindows,
     minimizeWindow,
+    restoreWindow,
     toggleMinimize,
     toggleMaximize,
     focusWindow,
@@ -45,7 +46,7 @@ export default function WindowManager({
       {/* 2. Desktop Dock & Mobile Floating Action Button */}
       <WindowTaskbar
         windows={windows}
-        onFocusWindow={focusWindow}
+        onRestoreWindow={restoreWindow}
         onToggleMinimize={toggleMinimize}
         onCloseWindow={closeWindow}
         onCloseAllWindows={closeAllWindows}

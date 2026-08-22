@@ -18,7 +18,7 @@ import {
 
 export default function WindowTaskbar({
   windows,
-  onFocusWindow,
+  onRestoreWindow,
   onToggleMinimize,
   onCloseWindow,
   onCloseAllWindows,
@@ -172,7 +172,11 @@ export default function WindowTaskbar({
                     key={win.id}
                     className={`chrome-tab-card ${isActive ? 'is-active' : ''} ${win.isMinimized ? 'is-minimized' : ''}`}
                     onClick={() => {
-                      onFocusWindow(win.id);
+                      // Must clear isMinimized, not just raise z-index — this
+                      // grid is the only way to reach a minimized window's
+                      // tab on mobile (.dock-tabs-list, the per-window tab
+                      // list, is hidden below 768px).
+                      onRestoreWindow(win.id);
                       setIsMobileSwitcherOpen(false);
                     }}
                   >
