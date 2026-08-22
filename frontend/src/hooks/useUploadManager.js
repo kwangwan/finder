@@ -17,6 +17,18 @@ export function useUploadManager({ onUploadSuccess } = {}) {
     queueRef.current = queue;
   }, [queue]);
 
+  // processNextItem's own recursive self-call (in its `finally` block) keeps
+  // reusing whichever closure was live when the worker chain started, for as
+  // long as that chain keeps running — a fresh `onUploadSuccess` passed in on
+  // a later render (e.g. after switching workspace mid-upload) would never
+  // reach an already-running chain if called directly. Route through a ref
+  // instead so every call always reads the latest callback (and whatever it
+  // closes over, like the caller's current active workspace).
+  const onUploadSuccessRef = useRef(onUploadSuccess);
+  useEffect(() => {
+    onUploadSuccessRef.current = onUploadSuccess;
+  }, [onUploadSuccess]);
+
   const activeCount = queue.filter(t => t.status === 'uploading' || t.status === 'pending').length;
   const completedCount = queue.filter(t => t.status === 'completed').length;
   const errorCount = queue.filter(t => t.status === 'error' || t.status === 'canceled').length;
@@ -131,8 +143,8 @@ export function useUploadManager({ onUploadSuccess } = {}) {
       // session, which is a lot of retained memory for data nothing needs
       // anymore. (error/canceled items keep theirs — retryItem/retryAll need it.)
       updateItem(nextItem.id, { percent: 100, status: 'completed', statusText: '완료됨', file: null });
-      if (onUploadSuccess) {
-        onUploadSuccess({
+      if (onUploadSuccessRef.current) {
+        onUploadSuccessRef.current({
           ...nextItem,
           targetFolderId,
           activeWorkspaceId: targetWsId
@@ -153,7 +165,7 @@ export function useUploadManager({ onUploadSuccess } = {}) {
         processNextItem();
       }, 20);
     }
-  }, [updateItem, onUploadSuccess, resolveFolderPath]);
+  }, [updateItem, resolveFolderPath]);
 
   const startWorkerPool = useCallback(() => {
     for (let i = 0; i < MAX_CONCURRENT_UPLOADS; i++) {
