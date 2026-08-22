@@ -122,7 +122,7 @@ export default function NewFolderModal({
                 새 폴더 만들기
               </h2>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
-                문서와 노트를 체계적으로 분류할 폴더를 생성합니다.
+                문서와 파일을 체계적으로 분류할 폴더를 생성합니다.
               </p>
             </div>
           </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import FolderExplorer from './components/explorer/FolderExplorer';
-import MarkdownEditor from './components/editor/MarkdownEditor';
+import NoteEditor from './components/editor/NoteEditor';
 import SemanticSearchModal from './components/search/SemanticSearchModal';
 import ChunkedUploadModal from './components/upload/ChunkedUploadModal';
 import FileConflictModal from './components/upload/FileConflictModal';
@@ -872,7 +872,7 @@ export default function App() {
     } catch (err) {
       await showAlert({
         title: '생성 실패',
-        message: '새 노트 생성에 실패했습니다: ' + err.message,
+        message: '새 문서 생성에 실패했습니다: ' + err.message,
         type: 'error'
       });
     }
@@ -1008,7 +1008,7 @@ export default function App() {
           },
         },
         {
-          label: '새 노트 작성',
+          label: '새 문서 작성',
           icon: Plus,
           onClick: async () => {
             try {
@@ -1025,7 +1025,7 @@ export default function App() {
             } catch (err) {
               await showAlert({
                 title: '생성 실패',
-                message: '새 노트 생성에 실패했습니다: ' + err.message,
+                message: '새 문서 생성에 실패했습니다: ' + err.message,
                 type: 'error'
               });
             }
@@ -1108,7 +1108,7 @@ export default function App() {
       y: e.clientY,
       items: [
         {
-          label: '새 노트 작성',
+          label: '새 문서 작성',
           icon: Plus,
           onClick: handleNewNote,
         },
@@ -1298,9 +1298,10 @@ export default function App() {
             }}
           />
         ) : activeFile ? (
-          <MarkdownEditor
+          <NoteEditor
             file={activeFile}
             activeWorkspaceId={activeWorkspace?.id}
+            currentUser={currentUser}
             onSave={handleSaveNote}
             onBack={() => setActiveFile(null)}
             onDelete={handleDeleteFile}

@@ -2361,6 +2361,24 @@ h1, h2, h3, h4, h5, h6,
   overflow: hidden;
 }
 
+/* Without flex:1 this shrinks to BlockNote's own intrinsic content width
+   (~840px) inside the flex row, leaving most of a wide viewport empty next
+   to it — the "not using the available space" gap. Stretch it to fill, and
+   let the block editor's own internal padding keep the actual reading
+   column at a comfortable width. */
+.editor-pane-blocknote {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.editor-pane-blocknote .bn-editor {
+  max-width: 900px;
+  margin: 0 auto;
+  min-height: 100%;
+}
+
 .editor-textarea {
   flex: 1;
   width: 100%;

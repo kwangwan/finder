@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
+    # Realtime document collaboration (Hocuspocus/Yjs sync server) — the
+    # frontend's own VITE_SYNC_URL build-time env var only bakes in on a plain
+    # `npm run build`; the Docker build context is `frontend/` alone, so it
+    # never sees the repo-root .env. Read it here (backend's container does
+    # get the root .env, via docker-compose's env_file) and serve it through
+    # /api/auth/config, the same runtime-fallback pattern already used for
+    # GOOGLE_CLIENT_ID.
+    VITE_SYNC_URL: str = "ws://localhost:1234"
+
     # AWS SES (초대 및 알림 메일 발송용)
     AWS_SES_ACCESS_KEY_ID: str = ""
     AWS_SES_SECRET_ACCESS_KEY: str = ""

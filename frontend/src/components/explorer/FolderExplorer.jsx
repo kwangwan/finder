@@ -334,7 +334,7 @@ export default function FolderExplorer({
               <ChevronRight size={13} className="breadcrumb-sep" />
               <span className="breadcrumb-item active" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                 <FileText size={14} color="var(--accent-primary)" />
-                <span>마크다운 노트</span>
+                <span>문서</span>
               </span>
             </>
           ) : activeView === 'favorites' ? (
@@ -412,9 +412,9 @@ export default function FolderExplorer({
         {/* Action Buttons */}
         <div className="explorer-actions">
           {activeView === 'notes' ? (
-            <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 지식 노트 작성">
+            <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 문서 작성">
               <Plus size={15} />
-              <span>새 노트</span>
+              <span>새 문서</span>
             </button>
           ) : activeView === 'favorites' ? (
             <button 
@@ -448,9 +448,9 @@ export default function FolderExplorer({
                 <FolderPlus size={15} />
                 <span className="hide-mobile">새 폴더</span>
               </button>
-              <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 지식 노트 작성">
+              <button className="btn-primary explorer-btn" onClick={onNewNote} title="새 문서 작성">
                 <Plus size={15} />
-                <span className="hide-mobile">새 노트</span>
+                <span className="hide-mobile">새 문서</span>
               </button>
             </>
           )}
@@ -669,7 +669,7 @@ export default function FolderExplorer({
       {/* 2. Files Grid Section */}
       <div>
         <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-          {activeView === 'notes' ? `마크다운 노트 (${totalItemCount})` : activeView === 'favorites' ? `즐겨찾기 항목 (${totalItemCount})` : `문서 및 파일 (${totalItemCount})`}
+          {activeView === 'notes' ? `문서 (${totalItemCount})` : activeView === 'favorites' ? `즐겨찾기 항목 (${totalItemCount})` : `문서 및 파일 (${totalItemCount})`}
         </div>
 
         {files.length === 0 && (activeView === 'notes' || activeView === 'favorites' || sortedSubfolders.length === 0) ? (
@@ -726,14 +726,14 @@ export default function FolderExplorer({
                 <FileText size={28} color="var(--accent-primary)" />
               </div>
               <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                작성된 마크다운 노트가 없습니다
+                작성된 문서가 없습니다
               </h3>
               <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
-                아이디어, 메모, 지식 노트를 마크다운 서식으로 작성하고 AI 검색으로 빠르게 찾아보세요.
+                아이디어, 메모, 지식을 자유롭게 작성하고 AI 검색으로 빠르게 찾아보세요.
               </p>
               <button className="btn-primary" onClick={onNewNote} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
                 <Plus size={16} />
-                <span>새 마크다운 노트 작성</span>
+                <span>새 문서 작성</span>
               </button>
             </div>
           ) : activeView === 'favorites' ? (
@@ -801,12 +801,12 @@ export default function FolderExplorer({
                 {currentFolder ? `'${currentFolder.name}' 폴더가 비어 있습니다` : '저장된 항목이 없습니다'}
               </h3>
               <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
-                새 노트를 작성하거나 문서/미디어 파일을 드래그하여 업로드하세요.
+                새 문서를 작성하거나 미디어 파일을 드래그하여 업로드하세요.
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
                 <button className="btn-primary" onClick={onNewNote} style={{ padding: '0.6rem 1.25rem' }}>
                   <Plus size={16} />
-                  <span>새 노트 작성</span>
+                  <span>새 문서 작성</span>
                 </button>
                 <button className="btn-secondary" onClick={onOpenUpload} style={{ padding: '0.6rem 1.25rem' }}>
                   <UploadCloud size={16} />

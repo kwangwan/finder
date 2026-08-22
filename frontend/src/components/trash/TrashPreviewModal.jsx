@@ -357,7 +357,7 @@ export default function TrashPreviewModal({
                   {isMarkdown ? (
                     <div className="markdown-preview" style={{ lineHeight: 1.7 }}>
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {textContent || '*(내용이 비어있는 마크다운 문서입니다)*'}
+                        {textContent || '*(내용이 비어있는 문서입니다)*'}
                       </ReactMarkdown>
                     </div>
                   ) : (

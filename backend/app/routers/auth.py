@@ -121,9 +121,10 @@ async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token
 
 @router.get("/config")
 async def get_auth_config():
-    """Return public auth config (e.g. Google Client ID) to frontend."""
+    """Return public runtime config (Google Client ID, sync server URL) to frontend."""
     return {
-        "google_client_id": settings.GOOGLE_CLIENT_ID
+        "google_client_id": settings.GOOGLE_CLIENT_ID,
+        "sync_url": settings.VITE_SYNC_URL
     }
 
 @router.post("/register-password", response_model=TokenResponse)

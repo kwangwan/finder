@@ -218,7 +218,7 @@ export default function InsertFileModal({
             </div>
 
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              💡 마크다운 문서 내에 유튜브 동영상 URL을 입력하면 자동으로 반응형 플레이어가 생성됩니다.
+              💡 문서 내에 유튜브 동영상 URL을 입력하면 자동으로 반응형 플레이어가 생성됩니다.
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>

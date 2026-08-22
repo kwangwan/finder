@@ -252,7 +252,7 @@ export default function Sidebar({
           onClick={() => onSelectView('notes')}
         >
           <FileText size={16} />
-          <span>마크다운 노트</span>
+          <span>문서</span>
           {stats?.note_count > 0 && <span className="menu-badge">{stats.note_count}</span>}
         </li>
         <li 
