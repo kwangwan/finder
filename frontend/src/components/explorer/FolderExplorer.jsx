@@ -84,6 +84,7 @@ export default function FolderExplorer({
   onBatchDownload,
   onBatchDelete,
   onDirectMoveFiles,
+  hasOpenWindows = false,
   hasNewFiles = false,
   onRefreshNewFiles,
   sortBy = 'updated_at',
@@ -101,6 +102,7 @@ export default function FolderExplorer({
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [infoFile, setInfoFile] = useState(null);
+  const [removingIds, setRemovingIds] = useState(new Set());
 
   const [downloadProgress, setDownloadProgress] = useState(null); // { fileId, percent, status }
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
@@ -460,12 +462,6 @@ export default function FolderExplorer({
       {/* Explorer Secondary Toolbar: Sort & Count Controls */}
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {selectedFileIds.length > 0 && (
-            <span className="explorer-item-count">
-              <strong className="item-count-number">{selectedFileIds.length}개</strong>
-              <span>선택됨</span>
-            </span>
-          )}
           {files.length > 0 && (
             <button
               type="button"
@@ -823,9 +819,9 @@ export default function FolderExplorer({
               const hasVisualThumb = isImageOrVideo(file) || file.thumbnail_url || file.thumbnail_s3_key;
 
               return (
-                <div 
-                  key={file.id} 
-                  className={`file-card ${isSelected ? 'selected' : ''}`}
+                <div
+                  key={file.id}
+                  className={`file-card ${isSelected ? 'selected' : ''} ${removingIds.has(file.id) ? 'is-removing' : ''}`}
                   draggable={true}
                   onDragStart={(e) => {
                     const ids = selectedFileIds.includes(file.id) ? selectedFileIds : [file.id];
@@ -899,7 +895,15 @@ export default function FolderExplorer({
                       </button>
                       <button
                         className="btn-icon card-action-btn"
-                        onClick={(e) => { e.stopPropagation(); onDeleteFile(file.id); }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!onDeleteFile) return;
+                          await onDeleteFile(file.id, () => new Promise((resolve) => {
+                            setRemovingIds(new Set([file.id]));
+                            setTimeout(resolve, 220);
+                          }));
+                          setRemovingIds(new Set());
+                        }}
                         title="삭제"
                       >
                         <Trash2 size={14} color="var(--accent-rose)" />
@@ -1007,9 +1011,9 @@ export default function FolderExplorer({
 
       {/* Floating Batch Action Bar */}
       {selectedFileIds.length > 0 && (
-        <div className="batch-floating-bar" style={{
+        <div className={`batch-floating-bar ${hasOpenWindows ? 'has-open-windows' : ''}`} style={{
           position: 'fixed',
-          bottom: '2rem',
+          bottom: hasOpenWindows ? '6.5rem' : '2rem',
           left: '50%',
           transform: 'translateX(-50%)',
           background: 'var(--bg-secondary)',
@@ -1021,17 +1025,22 @@ export default function FolderExplorer({
           alignItems: 'center',
           gap: '0.75rem',
           zIndex: 9000,
+          maxWidth: 'calc(100vw - 1.5rem)',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          transition: 'bottom 0.2s ease',
         }}>
           <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
             <CheckSquare size={16} color="var(--accent-primary)" />
             <span>{selectedFileIds.length}개 선택됨</span>
           </div>
 
-          <div style={{ height: '18px', width: '1px', background: 'var(--border-subtle)' }} />
+          <div className="hide-mobile" style={{ height: '18px', width: '1px', background: 'var(--border-subtle)' }} />
 
           <button
             type="button"
             className="btn-secondary"
+            title={selectedFileIds.length === files.length ? '선택 해제' : '전체 선택'}
             onClick={() => {
               if (selectedFileIds.length === files.length) {
                 setSelectedFileIds([]);
@@ -1039,49 +1048,63 @@ export default function FolderExplorer({
                 setSelectedFileIds(files.map(f => f.id));
               }
             }}
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
-            {selectedFileIds.length === files.length ? '선택 해제' : '전체 선택'}
+            {selectedFileIds.length === files.length ? <Square size={14} /> : <CheckSquare size={14} />}
+            <span className="hide-mobile">{selectedFileIds.length === files.length ? '선택 해제' : '전체 선택'}</span>
           </button>
 
           <button
             type="button"
             className="btn-primary"
+            title="폴더로 이동"
             onClick={() => onOpenMoveModal && onOpenMoveModal(selectedFileIds)}
             style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
             <FolderInput size={15} />
-            <span>폴더로 이동</span>
+            <span className="hide-mobile">폴더로 이동</span>
           </button>
 
           <button
             type="button"
             className="btn-secondary"
+            title="ZIP 다운로드"
             onClick={() => onBatchDownload && onBatchDownload(selectedFileIds)}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
             <Download size={15} />
-            <span>ZIP 다운로드</span>
+            <span className="hide-mobile">ZIP 다운로드</span>
           </button>
 
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => onBatchDelete && onBatchDelete(selectedFileIds)}
+            title="삭제"
+            onClick={async () => {
+              if (!onBatchDelete) return;
+              const idsToDelete = [...selectedFileIds];
+              const proceeded = await onBatchDelete(idsToDelete, () => new Promise((resolve) => {
+                setRemovingIds(new Set(idsToDelete));
+                setTimeout(resolve, 220);
+              }));
+              if (proceeded !== false) {
+                setSelectedFileIds([]);
+              }
+              setRemovingIds(new Set());
+            }}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent-rose)', whiteSpace: 'nowrap' }}
           >
             <Trash2 size={15} />
-            <span>삭제</span>
+            <span className="hide-mobile">삭제</span>
           </button>
 
           <button
             type="button"
-            className="btn-icon"
+            className="btn-icon batch-bar-close"
             onClick={() => setSelectedFileIds([])}
             title="선택 닫기"
-            style={{ padding: '4px', marginLeft: '4px' }}
           >
-            <X size={16} />
+            <X size={14} strokeWidth={2.5} />
           </button>
         </div>
       )}

@@ -70,6 +70,27 @@ export default function PreviewWindow({
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: position.x, posY: position.y });
   const isResizingRef = useRef(false);
   const resizeStartRef = useRef({ mouseX: 0, mouseY: 0, width: size.width, height: size.height });
+  // Toggled only at drag/resize start & end (not on every mousemove) so the
+  // maximize/restore transition below can be gated off during a live
+  // drag/resize without re-rendering per mousemove.
+  const [isInteracting, setIsInteracting] = useState(false);
+
+  // Minimize plays a shrink-toward-dock animation before the window actually
+  // unmounts, since the parent flips isMinimized to true immediately.
+  const [minimizePhase, setMinimizePhase] = useState('none'); // 'none' | 'closing' | 'hidden'
+  const prevIsMinimizedRef = useRef(isMinimized);
+  useEffect(() => {
+    if (isMinimized && !prevIsMinimizedRef.current) {
+      setMinimizePhase('closing');
+      prevIsMinimizedRef.current = isMinimized;
+      const t = setTimeout(() => setMinimizePhase('hidden'), 220);
+      return () => clearTimeout(t);
+    }
+    if (!isMinimized) {
+      setMinimizePhase('none');
+    }
+    prevIsMinimizedRef.current = isMinimized;
+  }, [isMinimized]);
 
   // Load detailed content if text/markdown/code document without content
   useEffect(() => {
@@ -152,6 +173,7 @@ export default function PreviewWindow({
 
     onFocus(id);
     isDraggingRef.current = true;
+    setIsInteracting(true);
     const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
     const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
 
@@ -189,6 +211,7 @@ export default function PreviewWindow({
 
   const handleDragEnd = useCallback(() => {
     isDraggingRef.current = false;
+    setIsInteracting(false);
     window.removeEventListener('mousemove', handleDragMove);
     window.removeEventListener('mouseup', handleDragEnd);
     window.removeEventListener('touchmove', handleDragMove);
@@ -204,6 +227,7 @@ export default function PreviewWindow({
     e.stopPropagation();
     onFocus(id);
     isResizingRef.current = true;
+    setIsInteracting(true);
 
     const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
     const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
@@ -244,6 +268,7 @@ export default function PreviewWindow({
 
   const handleResizeEnd = useCallback(() => {
     isResizingRef.current = false;
+    setIsInteracting(false);
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', handleResizeEnd);
     window.removeEventListener('touchmove', handleResizeMove);
@@ -288,17 +313,27 @@ export default function PreviewWindow({
     };
   };
 
-  if (isMinimized) return null;
+  if (minimizePhase === 'hidden') return null;
+
+  const isMinimizingOut = minimizePhase === 'closing';
+  const dockTargetX = (typeof window !== 'undefined' ? window.innerWidth / 2 : 0) - 40;
+  const dockTargetY = typeof window !== 'undefined' ? window.innerHeight - 40 : 0;
 
   return (
     <div
       ref={windowRef}
-      className={`os-preview-window ${isMaximized ? 'is-maximized' : ''}`}
+      className={`os-preview-window ${isMaximized ? 'is-maximized' : ''} ${isMinimizingOut ? 'is-minimizing' : ''}`}
       style={{
-        transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+        transform: isMinimizingOut
+          ? `translate3d(${dockTargetX}px, ${dockTargetY}px, 0) scale(0.05)`
+          : `translate3d(${position.x}px, ${position.y}px, 0)`,
         width: `${size.width}px`,
         height: `${size.height}px`,
-        zIndex
+        opacity: isMinimizingOut ? 0 : 1,
+        zIndex,
+        transition: isMinimizingOut
+          ? 'transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease'
+          : (isInteracting ? 'box-shadow 0.2s ease' : 'transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1), height 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s ease'),
       }}
       onMouseDown={() => onFocus(id)}
       onTouchStart={() => onFocus(id)}

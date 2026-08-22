@@ -479,15 +479,19 @@ export default function App() {
     }
   };
 
-  const handleBatchTrashFiles = async (fileIds) => {
-    if (!fileIds || fileIds.length === 0) return;
+  const handleBatchTrashFiles = async (fileIds, onConfirmed) => {
+    if (!fileIds || fileIds.length === 0) return false;
     const confirmed = await showConfirm({
       title: '파일 일괄 삭제',
       message: `선택한 ${fileIds.length}개 파일을 휴지통으로 이동하시겠습니까?`,
       confirmText: '삭제',
       danger: true,
     });
-    if (!confirmed) return;
+    if (!confirmed) return false;
+
+    if (onConfirmed) {
+      await onConfirmed();
+    }
 
     for (const fid of fileIds) {
       try {
@@ -498,6 +502,7 @@ export default function App() {
     }
     await refreshFiles();
     await refreshFoldersAndStats();
+    return true;
   };
 
   const handleBatchDownloadFiles = async (fileIds) => {
@@ -890,7 +895,7 @@ export default function App() {
     refreshFoldersAndStats();
   };
 
-  const handleTrashFile = async (file) => {
+  const handleTrashFile = async (file, onConfirmed) => {
     const confirmed = await showConfirm({
       title: '휴지통으로 이동',
       message: `'${file.name}' 파일을 휴지통으로 이동하시겠습니까?\n휴지통에서 언제든 복구할 수 있으며 30일 후 자동 영구 삭제됩니다.`,
@@ -899,6 +904,10 @@ export default function App() {
       cancelText: '취소'
     });
     if (!confirmed) return;
+
+    if (onConfirmed) {
+      await onConfirmed();
+    }
 
     try {
       await moveToTrashFile(file.id);
@@ -921,12 +930,15 @@ export default function App() {
     }
   };
 
-  const handleDeleteFile = async (fileId) => {
+  const handleDeleteFile = async (fileId, onConfirmed) => {
     const targetFile = files.find(f => f.id === fileId) || activeFile;
     if (targetFile) {
-      await handleTrashFile(targetFile);
+      await handleTrashFile(targetFile, onConfirmed);
     } else {
       try {
+        if (onConfirmed) {
+          await onConfirmed();
+        }
         await moveToTrashFile(fileId);
         if (activeFile?.id === fileId) {
           setActiveFile(null);
@@ -1339,6 +1351,7 @@ export default function App() {
             onBatchDownload={handleBatchDownloadFiles}
             onBatchDelete={handleBatchTrashFiles}
             onDirectMoveFiles={handleDirectMoveFiles}
+            hasOpenWindows={windowManager.windows.length > 0}
             hasNewFiles={hasNewFilesInView}
             onRefreshNewFiles={() => {
               setHasNewFilesInView(false);

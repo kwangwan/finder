@@ -181,8 +181,6 @@ export default function Sidebar({
     );
   };
 
-  if (isCollapsed) return null;
-
   return (
     <aside 
       className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}
@@ -244,7 +242,7 @@ export default function Sidebar({
           onClick={() => onSelectView('all')}
         >
           <Layers size={16} />
-          <span>전체 문서</span>
+          <span>전체 파일</span>
           {stats?.total_files > 0 && <span className="menu-badge">{stats.total_files}</span>}
         </li>
         <li 

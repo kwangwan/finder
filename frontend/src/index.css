@@ -173,14 +173,19 @@ body {
   flex-direction: column;
   position: relative;
   z-index: 20;
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  opacity: 1;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.18s ease;
 }
 
 .sidebar.collapsed {
   width: 0 !important;
   min-width: 0 !important;
-  overflow: hidden;
+  opacity: 0;
   border-right: none;
+  pointer-events: none;
 }
 
 .sidebar-resizer {
@@ -297,6 +302,21 @@ body {
 .btn-icon:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
+}
+
+.batch-bar-close {
+  width: 26px;
+  height: 26px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.batch-bar-close:hover {
+  background: var(--border-medium);
+  color: var(--text-primary);
 }
 
 /* Forms & Inputs */
@@ -1084,6 +1104,12 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+.file-card.is-removing {
+  opacity: 0;
+  transform: scale(0.92);
+  pointer-events: none;
+}
+
 .file-card-top {
   display: flex;
   align-items: center;
@@ -1733,7 +1759,7 @@ h1, h2, h3, h4, h5, h6,
   }
 
   .sort-select {
-    max-width: 82px !important;
+    max-width: 152px !important;
   }
 
   .sort-select .select-trigger {
@@ -1781,10 +1807,25 @@ h1, h2, h3, h4, h5, h6,
 
   .batch-floating-bar {
     width: calc(100vw - 1.2rem) !important;
+    max-width: calc(100vw - 1.2rem) !important;
+    left: 0.6rem !important;
+    right: 0.6rem !important;
+    transform: none !important;
     bottom: 0.85rem !important;
-    padding: 0.45rem 0.65rem !important;
-    gap: 0.35rem !important;
-    overflow-x: auto;
+    padding: 0.45rem 0.6rem !important;
+    gap: 0.3rem !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    box-sizing: border-box;
+  }
+
+  .batch-floating-bar button {
+    padding: 0.4rem 0.55rem !important;
+    font-size: 0.76rem !important;
+  }
+
+  .batch-floating-bar.has-open-windows {
+    bottom: 62px !important;
   }
 
   .transfer-manager-container {
@@ -2753,6 +2794,16 @@ h1, h2, h3, h4, h5, h6,
   transition: box-shadow 0.2s ease;
   min-width: 320px;
   min-height: 220px;
+  animation: windowPopIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes windowPopIn {
+  from { opacity: 0; filter: blur(4px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+.os-preview-window.is-minimizing {
+  animation: none;
 }
 
 .os-preview-window:focus-within,
