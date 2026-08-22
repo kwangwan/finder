@@ -140,13 +140,6 @@ export default function NoteEditor({
     return () => { cancelled = true; };
   }, []);
 
-  // One Yjs doc + Hocuspocus room per open document — recreated whenever the
-  // user switches files. The document's markdown `content` column in Postgres
-  // stays the durable source of truth; this Y.Doc is the live, shared editing
-  // session, seeded from that markdown the first time anyone opens it after
-  // the sync server has no room for it yet (see onSynced below).
-  const ydoc = useMemo(() => (file?.id ? new Y.Doc() : null), [file?.id]);
-
   // The editor is created ONCE per file (as soon as ydoc+provider exist) and
   // never swapped out afterward — swapping the collaboration-bound editor
   // later (e.g. gating its creation on a "sync finished" flag) breaks the
@@ -156,14 +149,32 @@ export default function NoteEditor({
   // editor's own replaceBlocks — never a second, throwaway editor instance.
   const editorRef = useRef(null);
 
-  const provider = useMemo(() => {
-    if (!file?.id || !ydoc || !syncUrl) return null;
+  // One Yjs doc + Hocuspocus room per open document, created AND torn down in
+  // the same effect (not useMemo-for-creation + a separate cleanup effect).
+  // Under StrictMode (main.jsx wraps the app in it) React deliberately runs
+  // mount -> cleanup -> mount once; HocuspocusProvider.destroy() unregisters
+  // its own document "update" listener as part of that cleanup. useMemo has
+  // no matching "re-run" signal when its deps haven't changed, so the second
+  // mount would keep reusing the SAME (already-torn-down) provider — it stays
+  // connected and reports isSynced, but with its listener gone, local edits
+  // never trigger a broadcast; they'd only go out via Hocuspocus's periodic
+  // reconnect-checker eventually forcing a full resync, tens of seconds
+  // later. Creating and destroying inside one effect makes React's second
+  // mount build a genuinely fresh pair with a fresh listener, every time.
+  const [collab, setCollab] = useState(null); // { ydoc, provider } | null
+
+  useEffect(() => {
+    if (!file?.id || !syncUrl) {
+      setCollab(null);
+      return;
+    }
     hasBootstrappedRef.current = false;
     isLoadingContentRef.current = true;
-    return new HocuspocusProvider({
+    const newYdoc = new Y.Doc();
+    const newProvider = new HocuspocusProvider({
       url: syncUrl,
       name: file.id,
-      document: ydoc,
+      document: newYdoc,
       token: () => getStoredToken() || '',
       onAuthenticationFailed: () => setSyncStatus('error'),
       onSynced: async () => {
@@ -171,7 +182,7 @@ export default function NoteEditor({
         if (hasBootstrappedRef.current) return;
         hasBootstrappedRef.current = true;
         try {
-          if (ydoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
+          if (newYdoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
             const processed = await refreshImageTokensInMarkdown(fileRef.current?.content || '');
             const blocks = editorRef.current.tryParseMarkdownToBlocks(processed || ' ');
             editorRef.current.replaceBlocks(editorRef.current.document, blocks);
@@ -181,18 +192,15 @@ export default function NoteEditor({
         }
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file?.id, ydoc, syncUrl]);
-
-  useEffect(() => {
+    setCollab({ ydoc: newYdoc, provider: newProvider });
     return () => {
-      provider?.destroy();
-      ydoc?.destroy();
+      newProvider.destroy();
+      newYdoc.destroy();
     };
-  }, [provider, ydoc]);
+  }, [file?.id, syncUrl]);
 
   const editor = useCreateBlockNote(
-    ydoc && provider
+    collab
       ? withCollaboration({
           dictionary: blockNoteKo,
           uploadFile: async (uploadedFile) => {
@@ -205,16 +213,16 @@ export default function NoteEditor({
             }
           },
           collaboration: {
-            fragment: ydoc.getXmlFragment(COLLAB_FRAGMENT_NAME),
+            fragment: collab.ydoc.getXmlFragment(COLLAB_FRAGMENT_NAME),
             user: {
               name: currentUser?.name || currentUser?.email?.split('@')[0] || '익명',
               color: colorForUser(currentUser?.id || currentUser?.email)
             },
-            provider: { awareness: provider.awareness }
+            provider: { awareness: collab.provider.awareness }
           }
         })
       : { dictionary: blockNoteKo },
-    [file?.id, syncUrl]
+    [file?.id, syncUrl, collab]
   );
 
   editorRef.current = editor;
@@ -248,11 +256,11 @@ export default function NoteEditor({
   // responsible for persisting to Postgres — deterministic and needs no extra
   // coordination beyond awareness state every client already has.
   const isSaveLeader = useCallback(() => {
-    if (!provider?.awareness || !ydoc) return true;
-    const ids = Array.from(provider.awareness.getStates().keys());
+    if (!collab?.provider?.awareness) return true;
+    const ids = Array.from(collab.provider.awareness.getStates().keys());
     if (ids.length === 0) return true;
-    return ydoc.clientID === Math.min(...ids);
-  }, [provider, ydoc]);
+    return collab.ydoc.clientID === Math.min(...ids);
+  }, [collab]);
 
   const doSave = useCallback(async (newTitle, newTags) => {
     setSaveStatus('saving');
@@ -313,7 +321,15 @@ export default function NoteEditor({
   };
 
   const handleInsertFromModal = (snippet) => {
-    const blocks = editor.tryParseMarkdownToBlocks(snippet);
+    // The YouTube tab inserts a bare URL (no [text](url) syntax) expecting the
+    // existing bare-link-as-video-embed convention (see markdownLinkComponents.jsx)
+    // to pick it up — but that convention only fires for an actual markdown link
+    // mark, and a plain URL isn't guaranteed to autolink when parsed. Wrap a
+    // bare URL in explicit link syntax first so it always becomes a real link.
+    const trimmed = snippet.trim();
+    const isBareUrl = /^https?:\/\/\S+$/.test(trimmed);
+    const toParse = isBareUrl ? snippet.replace(trimmed, `[${trimmed}](${trimmed})`) : snippet;
+    const blocks = editor.tryParseMarkdownToBlocks(toParse);
     const cursor = editor.getTextCursorPosition();
     editor.insertBlocks(blocks, cursor.block, 'after');
     handleEditorChange();

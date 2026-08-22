@@ -203,7 +203,7 @@ import {
   Video as PxVideo,
   Volume2 as PxVolume2,
   WarningDiamond as PxWarningDiamond,
-  X as PxX,
+  Close as PxClose,
   ZoomIn as PxZoomIn,
   ZoomOut as PxZoomOut,
 } from 'pixelarticons/react';
@@ -336,7 +336,12 @@ export const UserX = makeIcon(LuUserX, PxUserX);
 export const Users = makeIcon(LuUsers, PxUsers);
 export const Video = makeIcon(LuVideo, PxVideo);
 export const Volume2 = makeIcon(LuVolume2, PxVolume2);
-export const X = makeIcon(LuX, PxX);
+// Named "X" for the close-button use case (matching lucide's own icon name)
+// throughout the app, not the letter X — pixelarticons' own "X" is a bold
+// glyph shaped like the letter (and, at small close-button sizes, reads as
+// the X/Twitter logo instead of a close affordance). "Close" is the icon
+// pixelarticons actually ships for this purpose.
+export const X = makeIcon(LuX, PxClose);
 export const XCircle = makeIcon(LuXCircle, PxCancel);
 export const ZoomIn = makeIcon(LuZoomIn, PxZoomIn);
 export const ZoomOut = makeIcon(LuZoomOut, PxZoomOut);

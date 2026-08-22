@@ -972,7 +972,7 @@ export default function FolderExplorer({
                       ) : (
                         <div className="doc-preview-placeholder">
                           <FileText size={22} style={{ opacity: 0.35 }} />
-                          <span>{file.file_type ? file.file_type.toUpperCase() : 'DOC'} 문서</span>
+                          <span>{file.is_markdown || !file.file_type ? '문서' : `${file.file_type.toUpperCase()} 문서`}</span>
                         </div>
                       )}
                     </div>
