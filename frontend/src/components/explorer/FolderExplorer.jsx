@@ -33,12 +33,14 @@ import {
   FolderInput,
   X,
   Filter,
-  RefreshCw
+  RefreshCw,
+  Info
 } from 'lucide-react';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
+import FileInfoModal from '../modals/FileInfoModal';
 
 function getPageNumbers(currentPage, totalPages) {
   if (!totalPages || totalPages <= 1) return [1];
@@ -97,6 +99,7 @@ export default function FolderExplorer({
   const { showAlert } = useDialog();
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState([]);
+  const [infoFile, setInfoFile] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(null); // { fileId, percent, status }
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
   const breadcrumbRef = useRef(null);
@@ -885,8 +888,15 @@ export default function FolderExplorer({
                       >
                         <Download size={14} />
                       </button>
-                      <button 
-                        className="btn-icon card-action-btn" 
+                      <button
+                        className="btn-icon card-action-btn"
+                        onClick={(e) => { e.stopPropagation(); setInfoFile(file); }}
+                        title="파일 정보"
+                      >
+                        <Info size={14} />
+                      </button>
+                      <button
+                        className="btn-icon card-action-btn"
                         onClick={(e) => { e.stopPropagation(); onDeleteFile(file.id); }}
                         title="삭제"
                       >
@@ -969,28 +979,6 @@ export default function FolderExplorer({
                   <div className="file-card-title" title={file.name}>
                     {file.name}
                   </div>
-
-                  {(() => {
-                    const ownerLabel = file.is_markdown
-                      ? (file.last_editor_name ? `최종 수정: ${file.last_editor_name}` : null)
-                      : (file.creator_name ? `업로드: ${file.creator_name}` : null);
-                    return ownerLabel ? (
-                      <div
-                        className="file-card-owner"
-                        title={ownerLabel}
-                        style={{
-                          fontSize: '0.72rem',
-                          color: 'var(--text-muted)',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          marginTop: '0.15rem'
-                        }}
-                      >
-                        {ownerLabel}
-                      </div>
-                    ) : null;
-                  })()}
 
                   <div className="file-card-meta">
                     <div className="file-card-meta-left">
@@ -1161,6 +1149,8 @@ export default function FolderExplorer({
           </div>
         </div>
       )}
+
+      <FileInfoModal file={infoFile} onClose={() => setInfoFile(null)} />
     </div>
   );
 }
