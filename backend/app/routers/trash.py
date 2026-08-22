@@ -51,7 +51,13 @@ class TrashResponse(BaseModel):
 
 
 async def _purge_file(db: AsyncSession, file_item: FileItem):
-    """Enqueue file for background deletion, reclaim quota, and remove DB record immediately."""
+    """Enqueue file for background deletion, reclaim quota, and remove DB record
+    immediately. This is the actual permanent-delete choke point every real
+    deletion path (manual purge from trash, the 30-day auto-purge) goes
+    through — a note's own delete button only soft-trashes it first.
+    enqueue_file also cleans up any images/video/files this note's editor
+    uploaded directly into its own content — see DeletionService's
+    _cleanup_note_embedded_media."""
     await deletion_service.enqueue_file(db, file_item)
     await quota_service.record_storage_freed(
         db=db,

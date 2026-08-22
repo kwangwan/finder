@@ -1,5 +1,6 @@
 from app.models.folder import Folder
 from app.models.file import FileItem
+from app.models.file_version import FileVersion
 from app.models.chunk import DocumentChunk
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
@@ -7,9 +8,10 @@ from app.models.invitation import Invitation
 from app.models.deletion_queue import DeletionQueueItem
 
 __all__ = [
-    "Folder", 
-    "FileItem", 
-    "DocumentChunk", 
+    "Folder",
+    "FileItem",
+    "FileVersion",
+    "DocumentChunk",
     "User",
     "Workspace",
     "WorkspaceMember",

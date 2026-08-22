@@ -8,6 +8,7 @@ from app.routers import folders, files, storage, search, system, auth, admin, wo
 from app.routers.trash import _auto_purge_expired
 from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files, backfill_missing_thumbnails
 from app.routers.folders import reconcile_orphaned_trashed_files
+from app.routers.files import prune_old_file_versions
 
 from app.services.deletion_service import deletion_service
 
@@ -16,8 +17,9 @@ async def _periodic_trash_cleanup():
     upload sessions older than 24 hours, phantom file rows (a FileItem whose
     storage object doesn't actually exist — e.g. from a write that failed
     after the row was already committed) younger than 48 hours, files left
-    behind under an already-trashed folder, and image/video files missing a
-    thumbnail, every 12 hours."""
+    behind under an already-trashed folder, image/video files missing a
+    thumbnail, and note version-history rows beyond the per-file retention
+    cap, every 12 hours."""
     while True:
         try:
             await asyncio.sleep(43200) # 12 hours
@@ -40,6 +42,10 @@ async def _periodic_trash_cleanup():
                 generated = await backfill_missing_thumbnails(db)
                 if generated:
                     print(f"[{settings.APP_NAME}] Generated {generated} thumbnails that were missing.")
+            async with AsyncSessionLocal() as db:
+                pruned = await prune_old_file_versions(db)
+                if pruned:
+                    print(f"[{settings.APP_NAME}] Pruned {pruned} old note version-history rows.")
         except asyncio.CancelledError:
             break
         except Exception as e:

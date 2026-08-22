@@ -617,6 +617,31 @@ export async function updateMarkdownNote(fileId, { name, folder_id, workspace_id
   return res.json();
 }
 
+export async function listFileVersions(fileId) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/versions`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to list versions');
+  return res.json();
+}
+
+export async function getFileVersion(fileId, versionId) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/versions/${versionId}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to get version');
+  return res.json();
+}
+
+export async function restoreFileVersion(fileId, versionId) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/versions/${versionId}/restore`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to restore version');
+  return res.json();
+}
+
 export async function moveFile(fileId, folder_id) {
   const res = await fetch(`${API_BASE}/files/${fileId}/move`, {
     method: 'PUT',

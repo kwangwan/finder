@@ -1,6 +1,6 @@
 import uuid
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
@@ -9,12 +9,12 @@ from sqlalchemy import select, or_, and_, desc, asc, func
 import urllib.parse
 from fastapi.responses import StreamingResponse
 from app.core.database import get_db
-from app.models import FileItem, Folder, User, WorkspaceMember
+from app.models import FileItem, FileVersion, Folder, User, WorkspaceMember
 from app.core.security import get_current_approved_user
 from app.schemas.file import (
     NoteCreate, NoteUpdate, FileMetadataCreate, FileMoveRequest,
     FileRenameRequest, FileResponse, FileDetailResponse, PagedFileResponse,
-    BatchDownloadRequest, BatchMoveRequest
+    BatchDownloadRequest, BatchMoveRequest, FileVersionResponse, FileVersionDetailResponse
 )
 from app.routers.folders import _collect_folder_files_recursive
 from app.services.s3_service import s3_service, build_storage_key
@@ -26,6 +26,13 @@ from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
+
+# How long a version snapshot must "cover" before another autosave is allowed
+# to create a new one — otherwise every debounced keystroke-driven save would
+# produce its own row. Mirrors how Notion groups edits into sessions.
+VERSION_SNAPSHOT_MIN_INTERVAL = timedelta(minutes=10)
+# Per file, how many historical snapshots to keep — pruned by the periodic job.
+VERSION_RETENTION_COUNT = 100
 
 def _display_name(user: Optional[User]) -> Optional[str]:
     if not user:
@@ -347,14 +354,22 @@ async def update_markdown_note(
             raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
 
     old_size = file_item.size_bytes or 0
-    content_changed = False
+    old_content = file_item.content
+    old_name = file_item.name
+    old_last_edited_by = file_item.last_edited_by
+    # Compare against the actual previous content, not just "was a content
+    # field sent" — the editor's 1s autosave debounce can fire a PUT whose
+    # content is identical to what's already stored (e.g. focus/blur with no
+    # real edit), and that shouldn't count as a change for re-embedding or
+    # version history purposes.
+    content_changed = req.content is not None and req.content != (old_content or "")
     if req.name is not None:
         file_item.name = req.name
     if req.folder_id is not None:
         file_item.folder_id = req.folder_id
     if req.workspace_id is not None:
         file_item.workspace_id = req.workspace_id
-    if req.content is not None:
+    if content_changed:
         new_size = len(req.content.encode("utf-8"))
         size_delta = new_size - old_size
         if size_delta > 0:
@@ -362,11 +377,18 @@ async def update_markdown_note(
         file_item.content = req.content
         file_item.size_bytes = new_size
         file_item.last_edited_by = current_user.id
-        content_changed = True
     if req.tags is not None:
         file_item.tags = req.tags
     if req.is_favorite is not None:
         file_item.is_favorite = req.is_favorite
+
+    if content_changed and old_content and old_content.strip():
+        last_version = (await db.execute(
+            select(FileVersion).where(FileVersion.file_id == file_item.id)
+            .order_by(FileVersion.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if not last_version or (datetime.utcnow() - last_version.created_at) > VERSION_SNAPSHOT_MIN_INTERVAL:
+            db.add(FileVersion(file_id=file_item.id, name=old_name, content=old_content, edited_by=old_last_edited_by))
 
     await db.commit()
     await db.refresh(file_item)
@@ -391,6 +413,114 @@ async def update_markdown_note(
     last_editor_name = creator_name
     if file_item.last_edited_by and file_item.last_edited_by != file_item.created_by:
         last_editor_name = _display_name(await db.get(User, file_item.last_edited_by))
+    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=last_editor_name)
+
+def _to_version_response(version: FileVersion, editor_name: Optional[str], include_content: bool) -> dict:
+    data = {
+        "id": version.id,
+        "file_id": version.file_id,
+        "name": version.name,
+        "edited_by": version.edited_by,
+        "editor_name": editor_name,
+        "created_at": version.created_at,
+    }
+    if include_content:
+        data["content"] = version.content
+    return data
+
+@router.get("/{file_id}/versions", response_model=List[FileVersionResponse])
+async def list_file_versions(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """List a note's past version snapshots, newest first. Content is omitted
+    here — fetch a single version (below) to preview or restore it."""
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+
+    versions = (await db.execute(
+        select(FileVersion).where(FileVersion.file_id == file_id).order_by(FileVersion.created_at.desc())
+    )).scalars().all()
+    editor_ids = {v.edited_by for v in versions if v.edited_by}
+    names = {}
+    if editor_ids:
+        users = (await db.execute(select(User).where(User.id.in_(editor_ids)))).scalars().all()
+        names = {u.id: _display_name(u) for u in users}
+    return [_to_version_response(v, names.get(v.edited_by), include_content=False) for v in versions]
+
+@router.get("/{file_id}/versions/{version_id}", response_model=FileVersionDetailResponse)
+async def get_file_version(
+    file_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Fetch one past version's full content, for read-only preview."""
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+
+    version = await db.get(FileVersion, version_id)
+    if not version or version.file_id != file_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    editor_name = _display_name(await db.get(User, version.edited_by)) if version.edited_by else None
+    return _to_version_response(version, editor_name, include_content=True)
+
+@router.post("/{file_id}/versions/{version_id}/restore", response_model=FileDetailResponse)
+async def restore_file_version(
+    file_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Restore a note to a past version's content. Goes through the exact
+    same content-write path a normal save does (size/quota bookkeeping, MinIO
+    backup, re-embedding) so restored content is searchable again without any
+    separate logic. The state being replaced is snapshotted first (regardless
+    of the usual 10-minute spacing) so restoring is itself never a one-way
+    trip."""
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일을 수정할 권한이 없습니다.")
+
+    file_item = await db.get(FileItem, file_id)
+    if not file_item:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    version = await db.get(FileVersion, version_id)
+    if not version or version.file_id != file_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    if (file_item.content or "") != version.content:
+        db.add(FileVersion(file_id=file_item.id, name=file_item.name, content=file_item.content or "", edited_by=file_item.last_edited_by))
+
+    old_size = file_item.size_bytes or 0
+    new_size = len(version.content.encode("utf-8"))
+    size_delta = new_size - old_size
+    if size_delta > 0:
+        await quota_service.check_quota(db, file_item.workspace_id, current_user, size_delta)
+
+    file_item.content = version.content
+    file_item.size_bytes = new_size
+    file_item.last_edited_by = current_user.id
+    await db.commit()
+    await db.refresh(file_item)
+
+    await quota_service.record_storage_added(db, file_item.workspace_id, current_user, new_size - old_size)
+
+    if file_item.s3_key:
+        try:
+            await run_in_threadpool(s3_service.put_object, file_item.s3_key, file_item.content.encode("utf-8"), "text/markdown; charset=utf-8")
+        except Exception as e:
+            print(f"[MinIO Backup Warning] Could not update MinIO note: {e}")
+
+    try:
+        await document_service.index_file_chunks(db, file_item)
+    except Exception as e:
+        print(f"[Embedding Warning] Re-indexing failed for note {file_item.id}: {e}")
+
+    creator_name = _display_name(await db.get(User, file_item.created_by)) if file_item.created_by else None
+    last_editor_name = _display_name(current_user)
     return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=last_editor_name)
 
 @router.post("/metadata", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
@@ -555,6 +685,9 @@ async def delete_file(
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # enqueue_file also cleans up any images/video/files this note's editor
+    # uploaded directly into its own content — see DeletionService's
+    # _cleanup_note_embedded_media.
     await deletion_service.enqueue_file(db, file_item)
 
     # Reclaim storage quota from workspace owner immediately
@@ -681,5 +814,32 @@ async def batch_move_files(
 
     await db.commit()
     return {"moved_count": moved_count, "folder_id": req.folder_id}
+
+
+async def prune_old_file_versions(db: AsyncSession, keep_per_file: int = VERSION_RETENTION_COUNT) -> int:
+    """Keep only the newest `keep_per_file` version snapshots per note; called
+    by the periodic cleanup job so version history doesn't grow unbounded for
+    a note that's edited often over a long time."""
+    overflowing = (await db.execute(
+        select(FileVersion.file_id).group_by(FileVersion.file_id)
+        .having(func.count(FileVersion.id) > keep_per_file)
+    )).scalars().all()
+
+    removed = 0
+    for file_id in overflowing:
+        keep_ids = (await db.execute(
+            select(FileVersion.id).where(FileVersion.file_id == file_id)
+            .order_by(FileVersion.created_at.desc()).limit(keep_per_file)
+        )).scalars().all()
+        old_versions = (await db.execute(
+            select(FileVersion).where(FileVersion.file_id == file_id, FileVersion.id.notin_(keep_ids))
+        )).scalars().all()
+        for v in old_versions:
+            await db.delete(v)
+            removed += 1
+
+    if removed:
+        await db.commit()
+    return removed
 
 

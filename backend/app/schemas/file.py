@@ -80,6 +80,19 @@ class PagedFileResponse(BaseModel):
     page_size: int
     total_pages: int
 
+class FileVersionResponse(BaseModel):
+    id: uuid.UUID
+    file_id: uuid.UUID
+    name: Optional[str] = None
+    edited_by: Optional[uuid.UUID] = None
+    editor_name: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class FileVersionDetailResponse(FileVersionResponse):
+    content: str
+
 class BatchDownloadRequest(BaseModel):
     workspace_id: uuid.UUID
     file_ids: List[uuid.UUID] = []

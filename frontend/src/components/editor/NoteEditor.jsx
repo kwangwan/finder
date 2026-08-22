@@ -2,7 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useCreateBlockNote } from '@blocknote/react';
+import { SuggestionMenuController } from '@blocknote/react';
 import { BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core';
+import { getDefaultReactSlashMenuItems } from '@blocknote/react';
+import { filterSuggestionItems } from '@blocknote/core';
+import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
@@ -13,8 +17,12 @@ import {
   FileText,
   Star,
   Trash2,
-  Loader2
+  Loader2,
+  Paperclip,
+  Clock
 } from '../../utils/icons';
+import AttachExistingFileModal from './AttachExistingFileModal';
+import VersionHistoryModal from './VersionHistoryModal';
 import { uploadNoteImage, ensureMediaToken, getMediaPreviewUrl, getStoredToken, getAuthConfig } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
@@ -186,6 +194,8 @@ export default function NoteEditor({
   const [syncUrl, setSyncUrl] = useState(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isAttachModalOpen, setIsAttachModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   const saveTimeoutRef = useRef(null);
   const fileRef = useRef(file);
@@ -392,6 +402,25 @@ export default function NoteEditor({
     triggerAutoSave(titleRef.current, tagsRef.current);
   };
 
+  const handleInsertAttachedFile = (snippet) => {
+    const blocks = editor.tryParseMarkdownToBlocks(snippet);
+    const cursor = editor.getTextCursorPosition();
+    editor.insertBlocks(blocks, cursor.block, 'after');
+    handleEditorChange();
+  };
+
+  // Restoring a version already persisted the new content on the backend —
+  // this just makes the live editor (and, via Yjs, every other connected
+  // client) reflect it, by replacing blocks the exact same way the initial
+  // collaborative bootstrap does. That replaceBlocks call is itself a normal
+  // local edit, so the usual autosave fires afterward and re-PUTs the same
+  // (now-matching) content — redundant but harmless, no special-casing needed.
+  const handleVersionRestored = async (updatedFile) => {
+    const processed = await refreshImageTokensInMarkdown(updatedFile.content || '');
+    const blocks = editor.tryParseMarkdownToBlocks(processed || ' ');
+    editor.replaceBlocks(editor.document, blocks);
+  };
+
   const handleExportMarkdown = () => {
     const markdown = editor.blocksToMarkdownLossy(editor.document);
     const blob = new Blob([markdown], { type: 'text/markdown' });
@@ -476,6 +505,13 @@ export default function NoteEditor({
             <>
               <button
                 className="btn-icon"
+                onClick={() => setIsHistoryModalOpen(true)}
+                title="문서 히스토리"
+              >
+                <Clock size={16} />
+              </button>
+              <button
+                className="btn-icon"
                 onClick={() => onToggleFavorite(file)}
                 title="즐겨찾기 토글"
               >
@@ -512,9 +548,45 @@ export default function NoteEditor({
       {/* 3. Block Editor */}
       <div className="editor-panes">
         <div className="editor-pane-blocknote">
-          <BlockNoteView editor={editor} theme={BN_THEME} onChange={handleEditorChange} />
+          <BlockNoteView editor={editor} theme={BN_THEME} onChange={handleEditorChange} slashMenu={false}>
+            <SuggestionMenuController
+              triggerCharacter="/"
+              getItems={async (query) => filterSuggestionItems(
+                [
+                  ...getDefaultReactSlashMenuItems(editor),
+                  {
+                    title: '보관함 파일 첨부',
+                    onItemClick: () => {
+                      insertOrUpdateBlockForSlashMenu(editor, { type: 'paragraph' });
+                      setIsAttachModalOpen(true);
+                    },
+                    aliases: ['file', 'attach', '파일', '첨부', '보관함'],
+                    group: '미디어',
+                    icon: <Paperclip size={18} />,
+                    subtext: '보관함에 이미 저장된 파일을 첨부합니다'
+                  }
+                ],
+                query
+              )}
+            />
+          </BlockNoteView>
         </div>
       </div>
+
+      <AttachExistingFileModal
+        isOpen={isAttachModalOpen}
+        onClose={() => setIsAttachModalOpen(false)}
+        onInsertMarkdown={handleInsertAttachedFile}
+      />
+
+      {file && (
+        <VersionHistoryModal
+          fileId={file.id}
+          isOpen={isHistoryModalOpen}
+          onClose={() => setIsHistoryModalOpen(false)}
+          onRestored={handleVersionRestored}
+        />
+      )}
     </div>
   );
 }
