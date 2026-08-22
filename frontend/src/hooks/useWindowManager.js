@@ -1,8 +1,71 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+
+const RESIZE_MIN_X = 0;
+const RESIZE_MIN_Y = 48; // keeps the header below the topbar, matching handleDragMove's clamp
+const RESIZE_EDGE_MARGIN = 10;
+const RESIZE_MIN_WIDTH = 320;
+const RESIZE_MIN_HEIGHT = 240;
+
+// Re-fits one window's position/size into a (possibly-shrunk) viewport so it
+// can never end up dragged/resized off-screen and unreachable after the
+// browser window itself is resized.
+function fitWindowToViewport(win, screenWidth, screenHeight, isMobile) {
+  if (win.isMaximized) {
+    const pad = isMobile ? 4 : 12;
+    const topPad = isMobile ? 54 : 58;
+    const bottomPad = isMobile ? 70 : 64;
+    return {
+      ...win,
+      position: { x: pad, y: topPad },
+      size: {
+        width: Math.max(RESIZE_MIN_WIDTH, screenWidth - pad * 2),
+        height: Math.max(RESIZE_MIN_HEIGHT, screenHeight - topPad - bottomPad)
+      }
+    };
+  }
+
+  const maxWidth = Math.max(RESIZE_MIN_WIDTH, screenWidth - RESIZE_EDGE_MARGIN * 2);
+  const maxHeight = Math.max(RESIZE_MIN_HEIGHT, screenHeight - RESIZE_EDGE_MARGIN * 2);
+  const width = Math.min(win.size.width, maxWidth);
+  const height = Math.min(win.size.height, maxHeight);
+
+  const maxX = Math.max(RESIZE_MIN_X, screenWidth - width - RESIZE_EDGE_MARGIN);
+  const maxY = Math.max(RESIZE_MIN_Y, screenHeight - height - RESIZE_EDGE_MARGIN);
+  const x = Math.min(Math.max(RESIZE_MIN_X, win.position.x), maxX);
+  const y = Math.min(Math.max(RESIZE_MIN_Y, win.position.y), maxY);
+
+  if (x === win.position.x && y === win.position.y && width === win.size.width && height === win.size.height) {
+    return win;
+  }
+  return { ...win, position: { x, y }, size: { width, height } };
+}
 
 export function useWindowManager() {
   const [windows, setWindows] = useState([]);
   const nextZIndexRef = useRef(100);
+  const resizeFrameRef = useRef(null);
+
+  useEffect(() => {
+    const handleViewportResize = () => {
+      if (resizeFrameRef.current) return;
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const isMobile = screenWidth <= 768;
+        setWindows((prev) => {
+          if (prev.length === 0) return prev;
+          return prev.map((w) => fitWindowToViewport(w, screenWidth, screenHeight, isMobile));
+        });
+      });
+    };
+
+    window.addEventListener('resize', handleViewportResize);
+    return () => {
+      window.removeEventListener('resize', handleViewportResize);
+      if (resizeFrameRef.current) cancelAnimationFrame(resizeFrameRef.current);
+    };
+  }, []);
 
   const getInitialPositionAndSize = useCallback((index, file) => {
     const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
