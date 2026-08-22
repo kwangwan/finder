@@ -736,13 +736,7 @@ body {
   gap: 0.35rem;
   min-width: 0;
   flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
   font-size: 0.9rem;
-}
-.breadcrumb-nav::-webkit-scrollbar {
-  display: none;
 }
 
 .breadcrumb-item {
@@ -830,10 +824,16 @@ body {
   font-size: 0.82rem;
   color: var(--text-secondary);
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.breadcrumb-dropdown-item-name {
+  display: inline-block;
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: all 0.15s ease;
 }
 
 .breadcrumb-dropdown-item:hover {
@@ -1746,15 +1746,8 @@ h1, h2, h3, h4, h5, h6,
     display: flex !important;
     align-items: center !important;
     gap: 0.2rem !important;
-    overflow-x: auto !important;
-    white-space: nowrap !important;
-    scrollbar-width: none !important;
     flex: 1 !important;
     min-width: 0 !important;
-  }
-
-  .breadcrumb-nav::-webkit-scrollbar {
-    display: none;
   }
 
   .breadcrumb-item {

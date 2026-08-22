@@ -415,13 +415,14 @@ export default function FolderExplorer({
                       <div
                         key={f.id}
                         className="breadcrumb-dropdown-item"
+                        title={f.name}
                         onClick={() => {
                           setIsBreadcrumbOpen(false);
                           onSelectFolder(f.id);
                         }}
                       >
-                        <FolderIcon size={14} color="var(--accent-primary)" />
-                        <span>{f.name}</span>
+                        <FolderIcon size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+                        <span className="breadcrumb-dropdown-item-name">{f.name}</span>
                       </div>
                     ))}
                   </div>
