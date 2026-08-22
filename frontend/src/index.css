@@ -1,4 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=VT323&family=Silkscreen:wght@400;700&family=Press+Start+2P&display=swap');
+/* Galmuri: a pixel-art bitmap font covering full Hangul (11,172 syllables) +
+   Latin + numbers — VT323/Press Start 2P/Silkscreen above are Latin-only and
+   fall back to a non-pixel font for Korean text. Used for the matrix theme. */
+@import url('https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css');
 
 :root {
   /* Color Palette - Deep Slate Dark (Default) */
@@ -93,8 +97,8 @@
   --glass-border: 1px solid rgba(34, 197, 94, 0.3);
   --glass-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
   
-  --font-sans: 'VT323', 'JetBrains Mono', monospace;
-  --font-mono: 'VT323', 'JetBrains Mono', monospace;
+  --font-sans: 'Galmuri11', 'JetBrains Mono', monospace;
+  --font-mono: 'Galmuri11', 'JetBrains Mono', monospace;
 }
 
 * {
