@@ -37,7 +37,7 @@ import {
   Eye,
   FileArchive,
   FolderInput
-} from 'lucide-react';
+} from './utils/icons';
 import { 
   getMe,
   logout,
@@ -67,6 +67,7 @@ import {
   batchMoveFiles
 } from './api';
 import { useDialog } from './context/DialogContext';
+import { ThemeProvider } from './context/ThemeContext';
 
 // Helper to find folder and build breadcrumb path
 function findFolderById(nodeList, id) {
@@ -1174,47 +1175,56 @@ export default function App() {
   // 1. Loading state
   if (isAuthLoading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
-        인증 상태를 확인하고 있습니다...
-      </div>
+      <ThemeProvider theme={theme}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
+          인증 상태를 확인하고 있습니다...
+        </div>
+      </ThemeProvider>
     );
   }
 
   // 2. Not logged in -> Show Login
   if (!currentUser) {
     return (
-      <LoginModal 
-        isOpen={true} 
-        onLoginSuccess={(user) => {
-          setCurrentUser(user);
-        }} 
-      />
+      <ThemeProvider theme={theme}>
+        <LoginModal
+          isOpen={true}
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+          }}
+        />
+      </ThemeProvider>
     );
   }
 
   // 3. Logged in but not approved and not admin -> Show Pending Approval
   if (!currentUser.is_approved && !currentUser.is_admin) {
     return (
-      <PendingApprovalScreen
-        user={currentUser}
-        onApproved={(user) => setCurrentUser(user)}
-        onLogout={handleLogout}
-      />
+      <ThemeProvider theme={theme}>
+        <PendingApprovalScreen
+          user={currentUser}
+          onApproved={(user) => setCurrentUser(user)}
+          onLogout={handleLogout}
+        />
+      </ThemeProvider>
     );
   }
 
   // 4. Admin Dashboard View
   if (activeView === 'admin') {
     return (
-      <AdminDashboard
-        currentUser={currentUser}
-        onBackToApp={() => setActiveView('all')}
-      />
+      <ThemeProvider theme={theme}>
+        <AdminDashboard
+          currentUser={currentUser}
+          onBackToApp={() => setActiveView('all')}
+        />
+      </ThemeProvider>
     );
   }
 
   // 5. Main Knowledge Base App
   return (
+    <ThemeProvider theme={theme}>
     <div className="app-container">
       {/* Mobile Drawer Backdrop */}
       {!isSidebarCollapsed && (
@@ -1476,5 +1486,6 @@ export default function App() {
         onClearCompleted={handleClearCompletedTransfers}
       />
     </div>
+    </ThemeProvider>
   );
 }

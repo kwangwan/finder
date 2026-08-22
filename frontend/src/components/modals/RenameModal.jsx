@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Edit3, Palette, X, Check, Folder, FileText } from 'lucide-react';
+import { Edit3, Palette, X, Check, Folder, FileText } from '../../utils/icons';
 import { useDialog } from '../../context/DialogContext';
 
 const FOLDER_COLORS = [

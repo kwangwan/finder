@@ -13,7 +13,7 @@ import {
   Square,
   Ban,
   Check
-} from 'lucide-react';
+} from '../../utils/icons';
 
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
 import Select from '../common/Select';

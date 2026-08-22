@@ -7,7 +7,7 @@ import {
   X, 
   Square,
   ChevronRight
-} from 'lucide-react';
+} from '../../utils/icons';
 
 export default function UploadProgressBanner({
   uploadManager,

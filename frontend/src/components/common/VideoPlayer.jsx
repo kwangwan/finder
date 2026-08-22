@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Film, Play, Download, AlertCircle, RefreshCw, Volume2, Sparkles } from 'lucide-react';
+import { Film, Play, Download, AlertCircle, RefreshCw, Volume2, Sparkles } from '../../utils/icons';
 import { getThumbnailUrl } from '../../api';
 
 export default function VideoPlayer({

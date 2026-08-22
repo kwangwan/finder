@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown } from '../../utils/icons';
 
 /**
  * Custom-styled dropdown replacing the browser's native <select>, whose

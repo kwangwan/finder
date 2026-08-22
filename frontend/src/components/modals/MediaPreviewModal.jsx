@@ -20,7 +20,7 @@ import {
   Moon,
   Grid,
   Loader2
-} from 'lucide-react';
+} from '../../utils/icons';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 import VideoPlayer from '../common/VideoPlayer';
 

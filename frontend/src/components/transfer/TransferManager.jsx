@@ -12,7 +12,7 @@ import {
   File,
   Loader2,
   Trash2
-} from 'lucide-react';
+} from '../../utils/icons';
 
 export default function TransferManager({
   transfers = [],

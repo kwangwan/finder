@@ -20,7 +20,7 @@ import {
   Calendar,
   Clock,
   HardDrive
-} from 'lucide-react';
+} from '../../utils/icons';
 import { getFileDetail, getMediaPreviewUrl } from '../../api';
 import VideoPlayer from '../common/VideoPlayer';
 

@@ -3,11 +3,11 @@ import {
   Search,
   ChevronsRight,
   Sun,
-  Moon, 
-  FilePlus, 
-  UploadCloud, 
-  ShieldCheck, 
-  LogOut, 
+  Moon,
+  FilePlus,
+  UploadCloud,
+  ShieldCheck,
+  LogOut,
   Mail,
   MoreHorizontal,
   Folder,
@@ -15,7 +15,7 @@ import {
   HardDrive,
   Palette,
   Terminal
-} from 'lucide-react';
+} from '../../utils/icons';
 
 const formatBytes = (bytes) => {
   if (!bytes) return '0 B';
@@ -216,22 +216,24 @@ export default function TopBar({
                         }}
                         style={{
                           height: 34,
-                          padding: '0 0.4rem',
+                          padding: '0 0.25rem',
                           background: isActive ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
                           color: isActive ? '#ffffff' : 'var(--text-secondary)',
                           border: isActive ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
                           borderRadius: 'var(--radius-md)',
-                          fontSize: '0.78rem',
+                          fontSize: '0.72rem',
                           fontWeight: isActive ? 700 : 500,
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: 5,
+                          gap: 4,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
                           transition: 'all 0.15s ease'
                         }}
                       >
-                        <IconComponent size={13} />
+                        <IconComponent size={13} style={{ flexShrink: 0 }} />
                         <span>{t.label}</span>
                       </button>
                     );

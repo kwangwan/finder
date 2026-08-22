@@ -1,5 +1,5 @@
 import React from 'react';
-import { Info, X } from 'lucide-react';
+import { Info, X } from '../../utils/icons';
 
 function formatBytes(bytes) {
   if (!bytes) return '0 B';

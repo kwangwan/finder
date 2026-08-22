@@ -16,7 +16,7 @@ import {
   Table,
   Image as ImageIcon,
   Film
-} from 'lucide-react';
+} from '../../utils/icons';
 import { searchDocuments } from '../../api';
 import Select from '../common/Select';
 

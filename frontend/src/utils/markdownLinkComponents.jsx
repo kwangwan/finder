@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Folder, ExternalLink, Download } from 'lucide-react';
+import { Folder, ExternalLink, Download } from './icons';
 import { getPresignedDownloadUrl, ensureMediaToken, getMediaPreviewUrl } from '../api';
 
 // Extract YouTube video ID from a URL (watch, share, or embed link forms)

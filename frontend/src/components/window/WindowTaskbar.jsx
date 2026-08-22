@@ -14,7 +14,7 @@ import {
   Maximize2,
   Sparkles,
   Grid
-} from 'lucide-react';
+} from '../../utils/icons';
 
 export default function WindowTaskbar({
   windows,

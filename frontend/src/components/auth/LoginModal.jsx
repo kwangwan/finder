@@ -10,7 +10,7 @@ import {
   Lock, 
   User as UserIcon,
   CheckCircle2
-} from 'lucide-react';
+} from '../../utils/icons';
 import { loginWithGoogle, loginWithPassword, registerWithPassword, getAuthConfig, verifyInvitationToken } from '../../api';
 
 // Set via VITE_ENABLE_PASSWORD_AUTH in .env if password test login is needed

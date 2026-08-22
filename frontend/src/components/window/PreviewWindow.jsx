@@ -28,7 +28,7 @@ import {
   Moon,
   Layers,
   Loader2
-} from 'lucide-react';
+} from '../../utils/icons';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
 import { createMarkdownLinkComponents } from '../../utils/markdownLinkComponents';

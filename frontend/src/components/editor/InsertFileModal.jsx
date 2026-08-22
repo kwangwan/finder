@@ -9,7 +9,7 @@ import {
   X, 
   Plus, 
   ExternalLink 
-} from 'lucide-react';
+} from '../../utils/icons';
 import { listFiles } from '../../api';
 
 export default function InsertFileModal({

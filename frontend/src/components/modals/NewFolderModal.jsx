@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FolderPlus, X, Palette, Check } from 'lucide-react';
+import { FolderPlus, X, Palette, Check } from '../../utils/icons';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
 

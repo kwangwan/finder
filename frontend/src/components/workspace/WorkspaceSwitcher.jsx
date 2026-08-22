@@ -13,7 +13,7 @@ import {
   Globe, 
   BookOpen, 
   Layers
-} from 'lucide-react';
+} from '../../utils/icons';
 
 const ICON_MAP = {
   briefcase: Briefcase,

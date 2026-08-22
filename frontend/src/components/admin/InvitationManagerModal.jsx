@@ -15,7 +15,7 @@ import {
   Link as LinkIcon,
   Shield,
   Briefcase
-} from 'lucide-react';
+} from '../../utils/icons';
 import { listInvitations, createInvitation, cancelInvitation } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';

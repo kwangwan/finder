@@ -15,7 +15,7 @@ import {
   Settings,
   Trash2,
   ChevronsLeft
-} from 'lucide-react';
+} from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 
 export default function Sidebar({

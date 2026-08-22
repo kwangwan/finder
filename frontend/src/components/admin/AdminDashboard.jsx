@@ -18,7 +18,7 @@ import {
   User as UserIcon,
   Clock,
   Database
-} from 'lucide-react';
+} from '../../utils/icons';
 import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 

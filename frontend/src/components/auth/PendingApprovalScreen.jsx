@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Clock, ShieldAlert, RefreshCw, LogOut, CheckCircle, Copy, Terminal } from 'lucide-react';
+import { Clock, ShieldAlert, RefreshCw, LogOut, CheckCircle, Copy, Terminal } from '../../utils/icons';
 import { getMe, logout } from '../../api';
 
 export default function PendingApprovalScreen({ user, onApproved, onLogout }) {

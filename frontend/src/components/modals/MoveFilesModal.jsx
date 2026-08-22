@@ -7,7 +7,7 @@ import {
   Check, 
   Search,
   Loader2
-} from 'lucide-react';
+} from '../../utils/icons';
 
 function flattenFolderTree(nodeList, depth = 0) {
   let result = [];

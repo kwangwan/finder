@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertTriangle, X, Replace, Copy, Ban } from 'lucide-react';
+import { AlertTriangle, X, Replace, Copy, Ban } from '../../utils/icons';
 
 const ACTIONS = [
   { key: 'replace', label: '대체', icon: Replace },

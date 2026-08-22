@@ -19,7 +19,7 @@ import {
   Lock,
   Eye,
   Loader2
-} from 'lucide-react';
+} from '../../utils/icons';
 import { 
   listTrash, 
   deletePermanentFile, 

@@ -28,7 +28,7 @@ import {
   Image as ImageIcon,
   Loader2,
   FileText
-} from 'lucide-react';
+} from '../../utils/icons';
 import InsertFileModal from './InsertFileModal';
 import { uploadNoteImage } from '../../api';
 import { useDialog } from '../../context/DialogContext';

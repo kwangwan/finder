@@ -18,7 +18,7 @@ import {
   BookOpen,
   Layers,
   Settings
-} from 'lucide-react';
+} from '../../utils/icons';
 import { 
   createWorkspace, 
   updateWorkspace, 

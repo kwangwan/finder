@@ -9,7 +9,7 @@ import {
   FileText,
   Folder,
   Trash2
-} from 'lucide-react';
+} from '../utils/icons';
 
 const DialogContext = createContext(null);
 
