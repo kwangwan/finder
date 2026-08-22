@@ -241,7 +241,8 @@ export default function VideoPlayer({
                 gap: '0.5rem',
                 padding: '0.55rem 1.25rem',
                 fontSize: '0.85rem',
-                fontWeight: 600
+                fontWeight: 600,
+                flex: 'none'
               }}
             >
               <Download size={15} />

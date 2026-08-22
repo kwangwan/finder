@@ -589,11 +589,11 @@ export default function PreviewWindow({
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>
               {formatFileSize(file.size_bytes)}
             </div>
-            <button 
-              type="button" 
-              className="btn-primary" 
+            <button
+              type="button"
+              className="btn-primary"
               onClick={handleDownload}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: '0 auto' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: '0 auto', flex: 'none' }}
             >
               <Download size={15} />
               <span>다운로드</span>

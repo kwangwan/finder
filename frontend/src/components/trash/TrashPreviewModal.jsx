@@ -399,7 +399,7 @@ export default function TrashPreviewModal({
                     type="button"
                     className="btn-primary"
                     onClick={() => onRestore(file)}
-                    style={{ marginTop: 8 }}
+                    style={{ marginTop: 8, flex: 'none' }}
                   >
                     <RotateCcw size={15} />
                     <span>원래 위치로 복구</span>
