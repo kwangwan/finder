@@ -4,15 +4,16 @@ import {
   X,
   File as FileIcon,
   CheckCircle2,
-  AlertCircle, 
-  Folder, 
-  FolderPlus, 
-  RotateCw, 
+  AlertCircle,
+  Folder,
+  FolderPlus,
+  RotateCw,
   Loader2,
   Trash2,
   Square,
   Ban,
-  Check
+  Check,
+  Home
 } from '../../utils/icons';
 
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
@@ -46,6 +47,10 @@ export default function ChunkedUploadModal({
   uploadManager
 }) {
   const workspaceName = (wsId) => workspaces.find(w => w.id === wsId)?.name || '알 수 없는 워크스페이스';
+  const flatFolders = flattenFolderTree(folders);
+  const folderName = (folderId) => (
+    folderId ? (flatFolders.find(f => f.id === folderId)?.name || '알 수 없는 폴더') : '홈'
+  );
   const [selectedFolder, setSelectedFolder] = useState(currentFolderId || '');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
@@ -151,8 +156,8 @@ export default function ChunkedUploadModal({
               value={selectedFolder}
               onChange={setSelectedFolder}
               options={[
-                { value: '', label: '🏠 홈 (기본 위치)' },
-                ...flattenFolderTree(folders).map(f => ({ value: f.id, label: f.displayName })),
+                { value: '', label: <><Home size={13} style={{ verticalAlign: -2, marginRight: 6 }} />홈 (기본 위치)</> },
+                ...flatFolders.map(f => ({ value: f.id, label: f.displayName })),
               ]}
             />
           </div>
@@ -426,6 +431,18 @@ export default function ChunkedUploadModal({
                         {item.statusText}
                       </span>
                     </div>
+
+                    {/* Actual destination folder — only resolvable for the
+                        currently active workspace's own folder tree; a
+                        cross-workspace item just relies on its badge above. */}
+                    {(!item.activeWorkspaceId || item.activeWorkspaceId === activeWorkspaceId) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px', fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden' }}>
+                        <Folder size={11} style={{ flexShrink: 0 }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={folderName(item.targetFolderId || item.baseFolderId)}>
+                          {folderName(item.targetFolderId || item.baseFolderId)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

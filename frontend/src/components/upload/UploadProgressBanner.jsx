@@ -81,9 +81,12 @@ export default function UploadProgressBanner({
           {currentItem && isUploading && (
             <div className="upload-banner-current-file">
               {currentItem.name} ({currentItem.percent || 0}%)
-              {currentItem.activeWorkspaceId && currentItem.activeWorkspaceId !== activeWorkspaceId && (
-                <> · {workspaces.find(w => w.id === currentItem.activeWorkspaceId)?.name || '다른 워크스페이스'}</>
-              )}
+            </div>
+          )}
+
+          {currentItem && isUploading && currentItem.activeWorkspaceId && currentItem.activeWorkspaceId !== activeWorkspaceId && (
+            <div className="upload-banner-workspace-line">
+              {workspaces.find(w => w.id === currentItem.activeWorkspaceId)?.name || '다른 워크스페이스'}
             </div>
           )}
         </div>

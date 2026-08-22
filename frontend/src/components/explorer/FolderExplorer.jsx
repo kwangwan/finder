@@ -157,26 +157,6 @@ export default function FolderExplorer({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // A queue item's targetFolderId is re-resolved from its original drop
-  // target (baseFolderId) down to the actual nested subfolder as folder-tree
-  // resolution completes in the background (see useUploadManager). Matching
-  // only targetFolderId undercounts: files already resolved into a subfolder
-  // no longer match the folder the whole batch was dropped into, even though
-  // they're still uploading "into" that folder's subtree. Match either end.
-  const matchesCurrentFolder = (folderId) => (
-    currentFolder?.id ? folderId === currentFolder.id : (!folderId || folderId === '')
-  );
-  // 'notes'/'favorites' are virtual filtered views, not real upload
-  // destinations — without this guard, an upload targeting the root folder
-  // (currentFolder == null) would also "match" these views (since they have
-  // no currentFolder either) and incorrectly show/lock them as if the
-  // upload were going into 문서/즐겨찾기 itself.
-  const isFolderBrowsingView = activeView !== 'notes' && activeView !== 'favorites';
-  const currentFolderUploads = isFolderBrowsingView ? (uploadManager?.queue || []).filter(
-    it => (it.status === 'uploading' || it.status === 'pending') &&
-    (matchesCurrentFolder(it.targetFolderId) || matchesCurrentFolder(it.baseFolderId))
-  ) : [];
-
   const toggleFileSelection = (fileId, e) => {
     if (e) e.stopPropagation();
     setSelectedFileIds(prev =>
@@ -553,38 +533,6 @@ export default function FolderExplorer({
         </div>
       </div>
 
-      {/* Active Folder Upload Progress Notification */}
-      {currentFolderUploads.length > 0 && (
-        <div style={{
-          margin: '0 0 1.25rem 0',
-          padding: '0.85rem 1.25rem',
-          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(139, 92, 246, 0.12))',
-          border: '1px solid rgba(59, 130, 246, 0.3)',
-          borderRadius: 'var(--radius-lg)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem',
-          backdropFilter: 'blur(8px)'
-        }}>
-          <div className="spinner" style={{ width: 18, height: 18, borderWidth: 2 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: '0.15rem' }}>
-              현재 이 폴더로 파일 업로드가 진행 중입니다 ({currentFolderUploads.length}개 파일 전송/대기 중)
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              전송이 완료되면 새로고침으로 확인할 수 있습니다.
-            </div>
-          </div>
-          <button
-            className="btn-secondary"
-            style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-            onClick={onOpenUpload}
-          >
-            상세 보기
-          </button>
-        </div>
-      )}
-
       {/* New files landed in this folder while an upload was running —
           refresh is manual so the current page's files don't keep getting
           silently bumped onto later pages as new arrivals sort to the top. */}
@@ -710,38 +658,7 @@ export default function FolderExplorer({
         </div>
 
         {files.length === 0 && (activeView === 'notes' || activeView === 'favorites' || sortedSubfolders.length === 0) ? (
-          currentFolderUploads.length > 0 ? (
-            <div style={{
-              padding: '4rem 2rem',
-              textAlign: 'center',
-              background: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px dashed var(--accent-primary)',
-              margin: '0.5rem 0'
-            }}>
-              <div style={{
-                width: 56,
-                height: 56,
-                borderRadius: '50%',
-                backgroundColor: 'rgba(59, 130, 246, 0.15)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 1.25rem'
-              }}>
-                <div className="spinner" style={{ width: 26, height: 26, borderWidth: 3 }} />
-              </div>
-              <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                파일을 이 폴더로 업로드하고 있습니다...
-              </h3>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
-                {currentFolderUploads.length}개의 파일이 전송 대기/진행 중입니다. 업로드가 완료되면 실시간으로 폴더에 표시됩니다.
-              </p>
-              <button className="btn-secondary" onClick={onOpenUpload} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
-                <span>업로드 큐 확인</span>
-              </button>
-            </div>
-          ) : activeView === 'notes' ? (
+          activeView === 'notes' ? (
             <div style={{
               padding: '4rem 2rem',
               textAlign: 'center',

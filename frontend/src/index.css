@@ -3750,6 +3750,15 @@ h1, h2, h3, h4, h5, h6,
   text-overflow: ellipsis;
 }
 
+.upload-banner-workspace-line {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--accent-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .upload-banner-actions {
   display: flex;
   align-items: center;

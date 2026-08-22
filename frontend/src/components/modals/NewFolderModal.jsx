@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FolderPlus, X, Palette, Check } from '../../utils/icons';
+import { FolderPlus, X, Palette, Check, Home } from '../../utils/icons';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
 
@@ -160,7 +160,7 @@ export default function NewFolderModal({
               value={selectedParent}
               onChange={setSelectedParent}
               options={[
-                { value: '', label: '🏠 홈 (최상위 폴더)' },
+                { value: '', label: <><Home size={13} style={{ verticalAlign: -2, marginRight: 6 }} />홈 (최상위 폴더)</> },
                 ...flatFolders.map(f => ({ value: f.id, label: f.displayName })),
               ]}
             />
