@@ -1,11 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
-import { useCreateBlockNote } from '@blocknote/react';
-import { SuggestionMenuController } from '@blocknote/react';
-import { BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core';
-import { getDefaultReactSlashMenuItems } from '@blocknote/react';
-import { filterSuggestionItems } from '@blocknote/core';
+import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react';
+import { BlockNoteSchema, defaultBlockSpecs, filterSuggestionItems } from '@blocknote/core';
 import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
@@ -32,12 +29,10 @@ const COLLAB_FRAGMENT_NAME = 'blocknote';
 
 // How long the editor waits after the last edit before treating the editing
 // session as "closed" and forcing a version-history checkpoint of the
-// current content — matches Notion's own history behavior (periodic
-// snapshots every 10 min while actively editing, see VERSION_SNAPSHOT_MIN_INTERVAL
-// on the backend, plus a session-end snapshot once editing stops for this
-// long), so a short sub-10-minute editing session still gets its own restore
-// point right when you stop, rather than only being captured retroactively
-// the next time the note happens to be edited again.
+// current content. The backend rolls one open FileVersion row forward on
+// every edit (see _roll_open_version in files.py) — this timer is what
+// finalizes that row into a permanent history entry once the session
+// actually ends, mirroring Notion's own session-end snapshot behavior.
 const IDLE_CHECKPOINT_DELAY = 2 * 60 * 1000;
 
 // Maps BlockNote's own hardcoded light/dark greys onto this app's CSS
@@ -198,8 +193,7 @@ export default function NoteEditor({
   onSave,
   onBack,
   onDelete,
-  onToggleFavorite,
-  onNavigateFolder
+  onToggleFavorite
 }) {
   const { showAlert } = useDialog();
   const [title, setTitle] = useState(file?.name || '제목 없는 문서');

@@ -1306,11 +1306,6 @@ export default function App() {
             onBack={() => setActiveFile(null)}
             onDelete={handleDeleteFile}
             onToggleFavorite={handleToggleFavorite}
-            onNavigateFolder={(folderId) => {
-              setActiveFile(null);
-              setActiveFolderId(folderId);
-              setActiveView(folderId ? 'folder' : 'all');
-            }}
           />
         ) : (
           <FolderExplorer

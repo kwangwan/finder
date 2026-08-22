@@ -6,9 +6,9 @@ import { listFiles } from '../../api';
 // insert a download-link card for it — distinct from BlockNote's own
 // image/video/file upload blocks, which upload a NEW file. This one refers
 // to an existing file the note doesn't own, so it's a plain download link +
-// folder shortcut, not a note-owned media block (see NoteEditor.jsx's
-// NOTE_MEDIA_FILE_ID_RE / delete_file cleanup, which deliberately skips
-// links in this format).
+// folder shortcut, not a note-owned media block (see deletion_service.py's
+// _cleanup_note_embedded_media, which deliberately skips links in this
+// format when deleting a note).
 export default function AttachExistingFileModal({ isOpen, onClose, onInsertMarkdown }) {
   const [files, setFiles] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
