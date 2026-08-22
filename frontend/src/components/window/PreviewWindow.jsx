@@ -79,8 +79,8 @@ export default function PreviewWindow({
     setMediaUrl(url);
 
     const fileNameLower = file.name?.toLowerCase() || '';
-    const isDoc = file.file_type === 'docx' || file.file_type === 'xlsx' || file.file_type === 'text' || 
-                  file.file_type === 'code' || file.file_type === 'markdown' ||
+    const isDoc = file.file_type === 'docx' || file.file_type === 'xlsx' || file.file_type === 'text' ||
+                  file.file_type === 'code' || file.is_markdown ||
                   fileNameLower.match(/\.(docx|doc|xlsx|xls|csv|txt|json|py|js|html|css|md|yaml|yml|ts|jsx|tsx|sh)$/i);
 
     if (isDoc && (!file.content || file.content.length < 5)) {
@@ -102,7 +102,7 @@ export default function PreviewWindow({
   const isPdf = file.file_type === 'pdf' || fileNameLower.endsWith('.pdf');
   const isExcel = file.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i);
   const isDocx = file.file_type === 'docx' || fileNameLower.match(/\.(docx|doc)$/i);
-  const isMarkdown = file.file_type === 'markdown' || fileNameLower.endsWith('.md') || fileNameLower.endsWith('.markdown');
+  const isMarkdown = file.is_markdown || fileNameLower.endsWith('.md') || fileNameLower.endsWith('.markdown');
   const isTextOrCode = file.file_type === 'text' || file.file_type === 'code' || isMarkdown || 
                        fileNameLower.match(/\.(txt|json|py|js|html|css|yaml|yml|ts|jsx|tsx|sh|sql|xml|env)$/i);
 

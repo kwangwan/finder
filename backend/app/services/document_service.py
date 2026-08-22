@@ -18,7 +18,7 @@ class DocumentService:
         file_name_lower = file_item.name.lower()
 
         # 1. Determine text to index based on file format
-        if file_item.is_markdown or file_name_lower.endswith(".md") or file_item.file_type in ["markdown", "text", "code"]:
+        if file_item.is_markdown or file_name_lower.endswith(".md") or file_item.file_type in ["text", "code"]:
             content_to_index = file_item.content or ""
         
         # 2. Extract from PDF

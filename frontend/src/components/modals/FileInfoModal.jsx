@@ -18,10 +18,10 @@ function formatDate(isoString) {
 export default function FileInfoModal({ file, onClose }) {
   if (!file) return null;
 
-  const isMarkdown = file.is_markdown || file.file_type === 'markdown';
+  const isMarkdown = file.is_markdown;
 
   const rows = [
-    { label: '종류', value: file.file_type },
+    { label: '종류', value: isMarkdown ? '문서' : (file.file_type ? file.file_type.toUpperCase() : '-') },
     { label: '크기', value: formatBytes(file.size_bytes) },
     { label: '업로드한 사람', value: file.creator_name || '알 수 없음' },
   ];

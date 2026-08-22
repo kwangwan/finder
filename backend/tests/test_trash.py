@@ -15,7 +15,7 @@ async def test_file_trash_and_restore(db_session):
     file_item = FileItem(
         folder_id=folder.id,
         name="테스트_문서.md",
-        file_type="markdown",
+        file_type="note",
         content="내용",
         is_markdown=True,
         is_trashed=False
@@ -64,7 +64,7 @@ async def test_folder_recursive_trash_and_restore(db_session):
     child_file = FileItem(
         folder_id=child.id,
         name="자식_문서.md",
-        file_type="markdown",
+        file_type="note",
         content="자식 내용",
         is_markdown=True,
         is_trashed=False
@@ -109,7 +109,7 @@ async def test_30_day_auto_purge(db_session):
     old_trashed_time = datetime.utcnow() - timedelta(days=31)
     old_file = FileItem(
         name="31일_전_삭제된_문서.md",
-        file_type="markdown",
+        file_type="note",
         content="오래된 문서 내용",
         is_markdown=True,
         is_trashed=True,
@@ -118,7 +118,7 @@ async def test_30_day_auto_purge(db_session):
     # 2. Create a recent trashed file (< 30 days old)
     recent_file = FileItem(
         name="최근_삭제된_문서.md",
-        file_type="markdown",
+        file_type="note",
         content="최근 삭제 문서",
         is_markdown=True,
         is_trashed=True,

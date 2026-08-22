@@ -14,7 +14,7 @@ class FileItem(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
     last_edited_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
     name = Column(String(255), nullable=False)
-    file_type = Column(String(50), nullable=False, default="other")  # markdown, pdf, word, excel, text, image, code, other
+    file_type = Column(String(50), nullable=False, default="other")  # note, pdf, docx, xlsx, text, image, video, audio, code, other
     mime_type = Column(String(100), nullable=True)
     size_bytes = Column(BigInteger, default=0, nullable=False)
     s3_key = Column(String(1024), nullable=True)  # MinIO storage key

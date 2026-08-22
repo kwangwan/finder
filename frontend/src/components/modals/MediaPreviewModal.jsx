@@ -82,7 +82,7 @@ export default function MediaPreviewModal({
   const isPdf = file.file_type === 'pdf' || fileNameLower.endsWith('.pdf');
   const isExcel = file.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i);
   const isDocx = file.file_type === 'docx' || fileNameLower.match(/\.(docx|doc)$/i);
-  const isTextOrCode = file.file_type === 'text' || file.file_type === 'code' || file.file_type === 'markdown' || fileNameLower.match(/\.(txt|json|py|js|html|css|md|yaml|yml|ts|jsx|tsx)$/i);
+  const isTextOrCode = file.file_type === 'text' || file.file_type === 'code' || file.is_markdown || fileNameLower.match(/\.(txt|json|py|js|html|css|md|yaml|yml|ts|jsx|tsx)$/i);
 
   const formatFileSize = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';

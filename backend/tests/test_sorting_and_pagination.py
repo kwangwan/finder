@@ -23,7 +23,7 @@ async def test_files_sorting_and_pagination(db_session):
     db_session.add(member)
 
     # Add 5 files with different names, sizes, and file_types
-    f1 = FileItem(name="Banana.md", workspace_id=ws.id, created_by=user.id, file_type="markdown", size_bytes=100, is_markdown=True)
+    f1 = FileItem(name="Banana.md", workspace_id=ws.id, created_by=user.id, file_type="note", size_bytes=100, is_markdown=True)
     f2 = FileItem(name="Apple.pdf", workspace_id=ws.id, created_by=user.id, file_type="pdf", size_bytes=500, is_markdown=False)
     f3 = FileItem(name="Cherry.docx", workspace_id=ws.id, created_by=user.id, file_type="docx", size_bytes=200, is_markdown=False)
     f4 = FileItem(name="Date.png", workspace_id=ws.id, created_by=user.id, file_type="image", size_bytes=900, is_markdown=False)

@@ -330,7 +330,7 @@ async def create_markdown_note(
         created_by=current_user.id,
         last_edited_by=current_user.id,
         name=display_name,
-        file_type="markdown",
+        file_type="note",
         mime_type="text/markdown",
         size_bytes=content_bytes,
         content=req.content,

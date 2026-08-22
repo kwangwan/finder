@@ -246,7 +246,7 @@ async def complete_multipart_upload(
     file_type = req.file_type or "other"
     is_markdown = False
     if name_lower.endswith(".md"):
-        file_type = "markdown"
+        file_type = "note"
         is_markdown = True
     elif name_lower.endswith(".pdf"):
         file_type = "pdf"
@@ -677,7 +677,7 @@ async def complete_chunk_upload(
     file_type = "other"
     is_markdown = False
     if name_lower.endswith(".md"):
-        file_type = "markdown"
+        file_type = "note"
         is_markdown = True
     elif name_lower.endswith(".pdf"):
         file_type = "pdf"
@@ -884,7 +884,7 @@ async def direct_upload(
     is_markdown = name_lower.endswith(".md")
     file_type = "other"
     if is_markdown:
-        file_type = "markdown"
+        file_type = "note"
     elif name_lower.endswith(".pdf"):
         file_type = "pdf"
     elif name_lower.endswith((".docx", ".doc")):

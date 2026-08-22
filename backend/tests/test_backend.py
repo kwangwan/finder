@@ -41,7 +41,7 @@ async def test_note_creation_and_search(db_session):
     note = FileItem(
         folder_id=folder.id,
         name="인공지능 지식 베이스 아키텍처.md",
-        file_type="markdown",
+        file_type="note",
         content="# 인공지능 지식저장소 구축\n\nFastAPI와 React를 사용하고 PostgreSQL pgvector를 통해 시맨틱 유사도 검색을 수행합니다.",
         is_markdown=True
     )

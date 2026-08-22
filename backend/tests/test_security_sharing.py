@@ -107,7 +107,7 @@ async def test_workspace_and_permission_isolation(db_session):
         workspace_id=ws_a.id,
         created_by=alice.id,
         name="Backend_Architecture_2026.md",
-        file_type="markdown",
+        file_type="note",
         content="FastAPI와 pgvector를 활용한 고성능 백엔드 설계 명세서입니다.",
         size_bytes=100,
         is_markdown=True
@@ -116,7 +116,7 @@ async def test_workspace_and_permission_isolation(db_session):
         workspace_id=ws_b.id,
         created_by=alice.id,
         name="Design_System_Figma.md",
-        file_type="markdown",
+        file_type="note",
         content="Figma 기반 다크 테마 및 유리모피즘 디자인 가이드입니다.",
         size_bytes=100,
         is_markdown=True

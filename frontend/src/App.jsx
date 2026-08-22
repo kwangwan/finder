@@ -701,7 +701,7 @@ export default function App() {
     } else if (activeView === 'all' || (activeView === 'folder' && !activeFolderId)) {
       params.root_only = true;
     } else if (activeView === 'notes') {
-      params.file_type = 'markdown';
+      params.file_type = 'note';
     } else if (activeView === 'favorites') {
       params.is_favorite = true;
     }

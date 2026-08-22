@@ -40,7 +40,7 @@ function flattenFolderTree(nodeList, depth = 0) {
 
 const FILE_TYPE_FILTERS = [
   { id: '', label: '모든 형식' },
-  { id: 'markdown', label: '마크다운 (.md)', icon: FileText },
+  { id: 'note', label: '문서', icon: FileText },
   { id: 'pdf', label: 'PDF 문서', icon: FileText },
   { id: 'docx', label: '워드 (.docx)', icon: FileText },
   { id: 'xlsx', label: '엑셀 (.xlsx)', icon: Table },
