@@ -64,9 +64,8 @@ function MarkdownImage({ src, alt }) {
 
 /**
  * Shared react-markdown `a`/`img` renderers: folder navigation links,
- * presigned-download links, YouTube/Vimeo URLs embedded as a responsive
- * iframe player, and images re-authenticated with a fresh media token on
- * every render. Used by both the note editor's preview pane and the
+ * presigned-download links, and images re-authenticated with a fresh media
+ * token on every render. Used by both the note editor's preview pane and the
  * standalone preview window, so both surfaces render attachments identically.
  */
 export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {}) {
@@ -141,41 +140,11 @@ export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {
         );
       }
 
-      // 3. YouTube/Vimeo URL directly as a link
-      const embedUrl = getVideoEmbedUrl(href);
-      if (embedUrl) {
-        return (
-          <span style={{ display: 'block', margin: '1.25rem 0' }}>
-            <span style={{
-              display: 'block',
-              position: 'relative',
-              paddingBottom: '56.25%',
-              height: 0,
-              overflow: 'hidden',
-              borderRadius: 'var(--radius-lg)',
-              boxShadow: 'var(--shadow-md)',
-              border: '1px solid var(--border-subtle)'
-            }}>
-              <iframe
-                src={embedUrl}
-                title="Video Player"
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  border: 'none'
-                }}
-              />
-            </span>
-          </span>
-        );
-      }
-
+      // A link that happens to point at YouTube/Vimeo is still just a link
+      // here — it's not auto-embedded. The only place a video actually plays
+      // inline is the live BlockNote editor's own video block (see
+      // NoteEditor.jsx), which is a deliberate, explicit insert; a link the
+      // user typed or pasted as plain text should render as a plain link.
       return (
         <a href={href} target="_blank" rel="noopener noreferrer" {...props} style={{ color: 'var(--accent-primary)' }}>
           {children}

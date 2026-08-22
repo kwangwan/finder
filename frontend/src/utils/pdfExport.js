@@ -93,8 +93,7 @@ async function resolveEmbeds(markdown) {
     return placeholder(`<a href="${escapeAttr(href)}" class="pdf-link">${escapeHtml(label)}</a>`);
   });
 
-  // 5. Bare URLs pasted directly into the text (how a YouTube link normally
-  // gets attached — see InsertFileModal's handleInsertYoutube) -> same treatment.
+  // 5. Bare URLs pasted directly into the text -> same treatment.
   text = text.replace(/(^|[\s(])(https?:\/\/[^\s)]+)/g, (full, pre, href) => {
     const ytId = extractYouTubeId(href);
     if (ytId) return pre + placeholder(youtubeEmbedHtml(ytId, null));

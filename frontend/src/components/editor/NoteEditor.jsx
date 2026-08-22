@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useCreateBlockNote } from '@blocknote/react';
@@ -13,10 +13,8 @@ import {
   FileText,
   Star,
   Trash2,
-  Loader2,
-  Paperclip
+  Loader2
 } from '../../utils/icons';
-import InsertFileModal from './InsertFileModal';
 import { uploadNoteImage, ensureMediaToken, getMediaPreviewUrl, getStoredToken, getAuthConfig } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
@@ -92,7 +90,13 @@ function videoBlockToExternalHTML(block, editor, context) {
   if (!embedUrl) return stockVideoSpec.implementation.toExternalHTML.call(this, block, editor, context);
   // Export as a plain link, not the iframe — keeps the markdown stored in
   // Postgres (the RAG embedding pipeline's source of truth) and PDF export's
-  // existing YouTube-thumbnail special-case working exactly as before.
+  // existing YouTube-thumbnail special-case working exactly as before. There
+  // is deliberately no reverse upgrade step that turns a plain YouTube/Vimeo
+  // link back into a video block on re-parse: a link the user just typed or
+  // pasted should stay a plain link (see markdownLinkComponents.jsx), so a
+  // collaborative doc that re-seeds from this markdown (e.g. after a
+  // sync-server restart) shows this as plain text rather than replaying it
+  // as an embed — a known, accepted trade-off, not a bug.
   const a = document.createElement('a');
   a.href = block.props.url;
   a.textContent = block.props.url;
@@ -112,26 +116,6 @@ const blockNoteSchema = BlockNoteSchema.create({
     }
   }
 });
-
-// A collaborative doc's Yjs room can come back empty (e.g. the sync server
-// restarted) and re-seed itself from the last markdown saved to Postgres —
-// see the bootstrap effect below. That markdown stores a video embed as a
-// plain link (see videoBlockToExternalHTML above), so re-parsing it would
-// otherwise degrade the embed back into plain link text. This walks freshly
-// parsed blocks and upgrades any paragraph that's just a bare/linked
-// YouTube or Vimeo URL back into a real video block.
-function upgradeVideoLinks(blocks) {
-  return blocks.map((block) => {
-    const children = block.children?.length ? upgradeVideoLinks(block.children) : block.children;
-    if (block.type === 'paragraph' && block.content?.length === 1) {
-      const node = block.content[0];
-      const href = node?.type === 'link' ? node.href : (node?.type === 'text' ? node.text : null);
-      const embedUrl = href && getVideoEmbedUrl(href);
-      if (embedUrl) return { type: 'video', props: { url: href }, children };
-    }
-    return children === block.children ? block : { ...block, children };
-  });
-}
 
 // The Vite build-time env var only bakes in on a plain `npm run build` — the
 // Docker build context is `frontend/` alone, so it never sees the repo-root
@@ -200,7 +184,6 @@ export default function NoteEditor({
   const [saveStatus, setSaveStatus] = useState('saved');
   const [syncStatus, setSyncStatus] = useState('connecting'); // 'connecting' | 'connected' | 'error'
   const [syncUrl, setSyncUrl] = useState(null);
-  const [isInsertModalOpen, setIsInsertModalOpen] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
@@ -272,7 +255,7 @@ export default function NoteEditor({
         try {
           if (newYdoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
             const processed = await refreshImageTokensInMarkdown(fileRef.current?.content || '');
-            const blocks = upgradeVideoLinks(editorRef.current.tryParseMarkdownToBlocks(processed || ' '));
+            const blocks = editorRef.current.tryParseMarkdownToBlocks(processed || ' ');
             editorRef.current.replaceBlocks(editorRef.current.document, blocks);
           }
         } finally {
@@ -409,13 +392,6 @@ export default function NoteEditor({
     triggerAutoSave(titleRef.current, tagsRef.current);
   };
 
-  const handleInsertFromModal = (snippet) => {
-    const blocks = editor.tryParseMarkdownToBlocks(snippet);
-    const cursor = editor.getTextCursorPosition();
-    editor.insertBlocks(blocks, cursor.block, 'after');
-    handleEditorChange();
-  };
-
   const handleExportMarkdown = () => {
     const markdown = editor.blocksToMarkdownLossy(editor.document);
     const blob = new Blob([markdown], { type: 'text/markdown' });
@@ -479,16 +455,6 @@ export default function NoteEditor({
 
         {/* Action controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <button
-            className="toolbar-btn"
-            onClick={() => setIsInsertModalOpen(true)}
-            title="보관함에 저장된 파일 첨부 (이미지/동영상 삽입 및 유튜브·비메오 임베드는 편집기의 '+'/'/' 메뉴를 사용하세요)"
-            style={{ color: 'var(--accent-primary)', fontWeight: 600, gap: 4 }}
-          >
-            <Paperclip size={14} />
-            <span>파일 첨부</span>
-          </button>
-
           <button className="btn-icon" onClick={handleExportMarkdown} title="마크다운 다운로드 (.md)">
             <Download size={16} />
           </button>
@@ -549,13 +515,6 @@ export default function NoteEditor({
           <BlockNoteView editor={editor} theme={BN_THEME} onChange={handleEditorChange} />
         </div>
       </div>
-
-      {/* Insert File Modal */}
-      <InsertFileModal
-        isOpen={isInsertModalOpen}
-        onClose={() => setIsInsertModalOpen(false)}
-        onInsertMarkdown={handleInsertFromModal}
-      />
     </div>
   );
 }
