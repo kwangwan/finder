@@ -46,6 +46,9 @@ class FileResponse(BaseModel):
     folder_id: Optional[uuid.UUID] = None
     workspace_id: Optional[uuid.UUID] = None
     created_by: Optional[uuid.UUID] = None
+    creator_name: Optional[str] = None
+    last_edited_by: Optional[uuid.UUID] = None
+    last_editor_name: Optional[str] = None
     name: str
     file_type: str
     mime_type: Optional[str] = None

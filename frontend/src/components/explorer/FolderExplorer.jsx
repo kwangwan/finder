@@ -970,6 +970,28 @@ export default function FolderExplorer({
                     {file.name}
                   </div>
 
+                  {(() => {
+                    const ownerLabel = file.is_markdown
+                      ? (file.last_editor_name ? `최종 수정: ${file.last_editor_name}` : null)
+                      : (file.creator_name ? `업로드: ${file.creator_name}` : null);
+                    return ownerLabel ? (
+                      <div
+                        className="file-card-owner"
+                        title={ownerLabel}
+                        style={{
+                          fontSize: '0.72rem',
+                          color: 'var(--text-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          marginTop: '0.15rem'
+                        }}
+                      >
+                        {ownerLabel}
+                      </div>
+                    ) : null;
+                  })()}
+
                   <div className="file-card-meta">
                     <div className="file-card-meta-left">
                       <span>{formatFileSize(file.size_bytes)}</span>

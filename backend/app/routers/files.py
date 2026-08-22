@@ -27,18 +27,37 @@ from app.core.config import settings
 
 router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
 
-def _to_file_response(f: FileItem) -> FileResponse:
+def _display_name(user: Optional[User]) -> Optional[str]:
+    if not user:
+        return None
+    return user.name or user.email.split("@")[0]
+
+async def _batch_user_names(db: AsyncSession, files: List[FileItem]) -> dict:
+    """Uploader (created_by) and last-editor (last_edited_by) names, fetched
+    in one query for a whole page of files rather than per-row."""
+    user_ids = {f.created_by for f in files if f.created_by} | {f.last_edited_by for f in files if f.last_edited_by}
+    if not user_ids:
+        return {}
+    res = await db.execute(select(User).where(User.id.in_(user_ids)))
+    return {u.id: _display_name(u) for u in res.scalars().all()}
+
+def _to_file_response(f: FileItem, users_by_id: Optional[dict] = None) -> FileResponse:
     resp = FileResponse.model_validate(f)
     if f.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{f.id}"
+    if users_by_id is not None:
+        resp.creator_name = users_by_id.get(f.created_by)
+        resp.last_editor_name = users_by_id.get(f.last_edited_by)
     return resp
 
-def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None) -> FileDetailResponse:
+def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None) -> FileDetailResponse:
     resp = FileDetailResponse.model_validate(f)
     if f.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{f.id}"
     resp.folder_name = folder_name
     resp.download_url = download_url
+    resp.creator_name = creator_name
+    resp.last_editor_name = last_editor_name
     return resp
 
 @router.get("", response_model=Union[PagedFileResponse, List[FileResponse]])
@@ -121,8 +140,9 @@ async def list_files(
             files = [f for f in files if tag in (f.tags or [])]
 
         total_pages = math.ceil(total_count / current_size) if current_size > 0 else 1
+        users_by_id = await _batch_user_names(db, files)
         return PagedFileResponse(
-            items=[_to_file_response(f) for f in files],
+            items=[_to_file_response(f, users_by_id) for f in files],
             total_count=total_count,
             page=current_page,
             page_size=current_size,
@@ -135,7 +155,8 @@ async def list_files(
         files = res.scalars().all()
         if tag:
             files = [f for f in files if tag in (f.tags or [])]
-        return [_to_file_response(f) for f in files]
+        users_by_id = await _batch_user_names(db, files)
+        return [_to_file_response(f, users_by_id) for f in files]
 
 
 @router.get("/watermark")
@@ -216,7 +237,19 @@ async def get_file_detail(
         except Exception as e:
             print(f"[Presigned URL Warning] Could not generate download url: {e}")
 
-    return _to_file_detail_response(file_item, folder_name=folder_name, download_url=download_url)
+    creator_name = None
+    if file_item.created_by:
+        creator = await db.get(User, file_item.created_by)
+        creator_name = _display_name(creator)
+    last_editor_name = creator_name
+    if file_item.last_edited_by and file_item.last_edited_by != file_item.created_by:
+        last_editor = await db.get(User, file_item.last_edited_by)
+        last_editor_name = _display_name(last_editor)
+
+    return _to_file_detail_response(
+        file_item, folder_name=folder_name, download_url=download_url,
+        creator_name=creator_name, last_editor_name=last_editor_name
+    )
 
 @router.post("/notes", response_model=FileDetailResponse, status_code=status.HTTP_201_CREATED)
 async def create_markdown_note(
@@ -252,6 +285,7 @@ async def create_markdown_note(
         folder_id=req.folder_id,
         workspace_id=workspace_id,
         created_by=current_user.id,
+        last_edited_by=current_user.id,
         name=display_name,
         file_type="markdown",
         mime_type="text/markdown",
@@ -281,7 +315,8 @@ async def create_markdown_note(
     except Exception as e:
         print(f"[Embedding Warning] Indexing failed for note {file_item.id}: {e}")
 
-    return _to_file_detail_response(file_item)
+    creator_name = _display_name(current_user)
+    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=creator_name)
 
 @router.put("/notes/{file_id}", response_model=FileDetailResponse)
 async def update_markdown_note(
@@ -326,6 +361,7 @@ async def update_markdown_note(
             await quota_service.check_quota(db, target_ws_id, current_user, size_delta)
         file_item.content = req.content
         file_item.size_bytes = new_size
+        file_item.last_edited_by = current_user.id
         content_changed = True
     if req.tags is not None:
         file_item.tags = req.tags
@@ -351,7 +387,11 @@ async def update_markdown_note(
         except Exception as e:
             print(f"[Embedding Warning] Re-indexing failed for note {file_item.id}: {e}")
 
-    return _to_file_detail_response(file_item)
+    creator_name = _display_name(await db.get(User, file_item.created_by)) if file_item.created_by else None
+    last_editor_name = creator_name
+    if file_item.last_edited_by and file_item.last_edited_by != file_item.created_by:
+        last_editor_name = _display_name(await db.get(User, file_item.last_edited_by))
+    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=last_editor_name)
 
 @router.post("/metadata", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
 async def create_file_metadata(

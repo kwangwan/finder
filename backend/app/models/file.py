@@ -12,6 +12,7 @@ class FileItem(Base):
     folder_id = Column(UUID(as_uuid=True), ForeignKey("kb_folders.id", ondelete="SET NULL"), nullable=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("kb_workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
+    last_edited_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
     name = Column(String(255), nullable=False)
     file_type = Column(String(50), nullable=False, default="other")  # markdown, pdf, word, excel, text, image, code, other
     mime_type = Column(String(100), nullable=True)
@@ -33,6 +34,7 @@ class FileItem(Base):
     folder = relationship("Folder", back_populates="files")
     workspace = relationship("Workspace", foreign_keys=[workspace_id])
     creator = relationship("User", foreign_keys=[created_by])
+    last_editor = relationship("User", foreign_keys=[last_edited_by])
     chunks = relationship("DocumentChunk", back_populates="file", cascade="all, delete-orphan")
 
     def to_dict(self, include_content: bool = True):
@@ -41,6 +43,7 @@ class FileItem(Base):
             "folder_id": str(self.folder_id) if self.folder_id else None,
             "workspace_id": str(self.workspace_id) if self.workspace_id else None,
             "created_by": str(self.created_by) if self.created_by else None,
+            "last_edited_by": str(self.last_edited_by) if self.last_edited_by else None,
             "name": self.name,
             "file_type": self.file_type,
             "mime_type": self.mime_type,

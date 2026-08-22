@@ -80,6 +80,8 @@ async def init_db():
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMP;",
             # Default (non-deletable, always-fallback) workspace per user
             "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;",
+            # Last editor (distinct from created_by/uploader) for markdown notes
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS last_edited_by UUID REFERENCES kb_users(id) ON DELETE SET NULL;",
         ]
         for sql in migrations:
             try:
@@ -138,4 +140,14 @@ async def init_db():
             """))
         except Exception as e:
             print(f"[DB Migration Warning] Could not backfill default workspaces: {e}")
+
+        # Backfill last_edited_by for files that predate that column — nobody
+        # has edited them since upload/creation, so the uploader/creator is
+        # the correct initial "last edited by".
+        try:
+            await conn.execute(text(
+                "UPDATE kb_files SET last_edited_by = created_by WHERE last_edited_by IS NULL AND created_by IS NOT NULL;"
+            ))
+        except Exception as e:
+            print(f"[DB Migration Warning] Could not backfill last_edited_by: {e}")
 
