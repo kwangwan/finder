@@ -441,6 +441,67 @@ async def cleanup_phantom_files(db: AsyncSession, max_age_hours: int = 48) -> in
             removed += 1
     return removed
 
+
+async def backfill_missing_thumbnails(db: AsyncSession, batch_size: int = 5) -> int:
+    """
+    (Re)generate thumbnails for image/video files that don't have one — e.g.
+    a transient failure during upload (a large video timing out, a momentary
+    S3/MinIO blip under heavy concurrent load). Unlike cleanup_phantom_files
+    this isn't scoped to a recent time window: a missing thumbnail should
+    stay rare regardless of how large the table grows, so scanning the whole
+    (small) "no thumbnail yet" set on every run is cheap — there's no ever-
+    growing backlog to bound.
+    """
+    res = await db.execute(
+        select(FileItem).where(
+            FileItem.is_trashed == False,
+            FileItem.file_type.in_(["image", "video"]),
+            FileItem.thumbnail_s3_key.is_(None),
+            FileItem.s3_key.isnot(None),
+        )
+    )
+    files = res.scalars().all()
+
+    async def _generate_one(f: FileItem) -> Optional[str]:
+        try:
+            if f.file_type == "image":
+                image_bytes = await run_in_threadpool(s3_service.get_object_content, f.s3_key)
+                if not image_bytes:
+                    return None
+                return await run_in_threadpool(
+                    thumbnail_service.create_and_store_thumbnail,
+                    file_uuid=str(f.id), filename=f.name, file_bytes=image_bytes, file_type="image"
+                )
+            else:
+                tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
+                        tmp_path = tmp.name
+                    await run_in_threadpool(
+                        s3_service.client.download_file, Bucket=s3_service.bucket_name, Key=f.s3_key, Filename=tmp_path
+                    )
+                    return await run_in_threadpool(
+                        thumbnail_service.create_and_store_thumbnail_from_path,
+                        file_uuid=str(f.id), filename=f.name, file_path=tmp_path, file_type="video"
+                    )
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+        except Exception as e:
+            print(f"[Thumbnail Backfill Warning] Failed for file {f.id}: {e}")
+            return None
+
+    generated = 0
+    for i in range(0, len(files), batch_size):
+        batch = files[i:i + batch_size]
+        results = await asyncio.gather(*(_generate_one(f) for f in batch))
+        for f, thumb_key in zip(batch, results):
+            if thumb_key:
+                f.thumbnail_s3_key = thumb_key
+                generated += 1
+        await db.commit()
+    return generated
+
 @router.post("/chunk/init", response_model=ChunkInitResponse)
 async def init_chunk_upload(
     req: ChunkInitRequest,
