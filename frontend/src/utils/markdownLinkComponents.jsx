@@ -10,6 +10,23 @@ export function extractYouTubeId(url) {
   return (match && match[2].length === 11) ? match[2] : null;
 }
 
+// Extract a Vimeo video ID from a URL (plain watch or player/embed link forms)
+export function extractVimeoId(url) {
+  if (!url) return null;
+  const match = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+  return match ? match[1] : null;
+}
+
+// Resolves a URL to a ready-to-embed iframe src for the video hosts this app
+// recognizes (YouTube, Vimeo), or null if the URL isn't one of those.
+export function getVideoEmbedUrl(url) {
+  const ytId = extractYouTubeId(url);
+  if (ytId) return `https://www.youtube.com/embed/${ytId}`;
+  const vimeoId = extractVimeoId(url);
+  if (vimeoId) return `https://player.vimeo.com/video/${vimeoId}`;
+  return null;
+}
+
 /**
  * An inserted image's markdown (`![name](/api/storage/preview/{id}?token=...)`)
  * has the media token baked into the stored text at insert time, but that
@@ -47,10 +64,10 @@ function MarkdownImage({ src, alt }) {
 
 /**
  * Shared react-markdown `a`/`img` renderers: folder navigation links,
- * presigned-download links, YouTube URLs embedded as a responsive iframe
- * player, and images re-authenticated with a fresh media token on every
- * render. Used by both the note editor's preview pane and the standalone
- * preview window, so both surfaces render attachments identically.
+ * presigned-download links, YouTube/Vimeo URLs embedded as a responsive
+ * iframe player, and images re-authenticated with a fresh media token on
+ * every render. Used by both the note editor's preview pane and the
+ * standalone preview window, so both surfaces render attachments identically.
  */
 export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {}) {
   return {
@@ -124,9 +141,9 @@ export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {
         );
       }
 
-      // 3. YouTube URL directly as a link
-      const ytId = extractYouTubeId(href);
-      if (ytId) {
+      // 3. YouTube/Vimeo URL directly as a link
+      const embedUrl = getVideoEmbedUrl(href);
+      if (embedUrl) {
         return (
           <span style={{ display: 'block', margin: '1.25rem 0' }}>
             <span style={{
@@ -140,8 +157,8 @@ export function createMarkdownLinkComponents({ onNavigateFolder, showAlert } = {
               border: '1px solid var(--border-subtle)'
             }}>
               <iframe
-                src={`https://www.youtube.com/embed/${ytId}`}
-                title="YouTube Video Player"
+                src={embedUrl}
+                title="Video Player"
                 frameBorder="0"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen

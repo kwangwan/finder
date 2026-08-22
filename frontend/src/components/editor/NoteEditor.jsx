@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useCreateBlockNote } from '@blocknote/react';
+import { BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core';
 import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
@@ -19,6 +20,7 @@ import InsertFileModal from './InsertFileModal';
 import { uploadNoteImage, ensureMediaToken, getMediaPreviewUrl, getStoredToken, getAuthConfig } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import { exportMarkdownToPdf } from '../../utils/pdfExport';
+import { getVideoEmbedUrl } from '../../utils/markdownLinkComponents';
 
 const COLLAB_FRAGMENT_NAME = 'blocknote';
 
@@ -44,6 +46,92 @@ const BN_THEME = {
   borderRadius: 8,
   fontFamily: 'var(--font-sans)'
 };
+
+// BlockNote's stock "video" block only understands a direct playable file
+// URL — its render() does a literal `video.src = url` on an HTML5 <video>
+// element. Pasting a YouTube/Vimeo watch-page URL into that block's own
+// built-in "Embed link" tab sets that same raw src and silently fails to
+// play, since a browser can't decode an HTML page as a video stream. This
+// overrides just the block's render/toExternalHTML to recognize those two
+// hosts and embed them as a responsive iframe, delegating to the original
+// implementation for everything else (uploads, direct video file URLs) so
+// upload/resize/caption behavior is untouched.
+const stockVideoSpec = defaultBlockSpecs.video;
+
+function renderVideoBlock(block, editor) {
+  const embedUrl = getVideoEmbedUrl(block.props.url);
+  if (!embedUrl) return stockVideoSpec.implementation.render.call(this, block, editor);
+
+  const wrapper = document.createElement('div');
+  wrapper.contentEditable = 'false';
+  wrapper.style.position = 'relative';
+  wrapper.style.paddingBottom = '56.25%';
+  wrapper.style.height = '0';
+  wrapper.style.overflow = 'hidden';
+  wrapper.style.borderRadius = 'var(--radius-lg)';
+  wrapper.style.margin = '0.4rem 0';
+
+  const iframe = document.createElement('iframe');
+  iframe.src = embedUrl;
+  iframe.title = 'Video Player';
+  iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+  iframe.allowFullscreen = true;
+  iframe.style.position = 'absolute';
+  iframe.style.top = '0';
+  iframe.style.left = '0';
+  iframe.style.width = '100%';
+  iframe.style.height = '100%';
+  iframe.style.border = 'none';
+
+  wrapper.appendChild(iframe);
+  return { dom: wrapper };
+}
+
+function videoBlockToExternalHTML(block, editor, context) {
+  const embedUrl = getVideoEmbedUrl(block.props.url);
+  if (!embedUrl) return stockVideoSpec.implementation.toExternalHTML.call(this, block, editor, context);
+  // Export as a plain link, not the iframe — keeps the markdown stored in
+  // Postgres (the RAG embedding pipeline's source of truth) and PDF export's
+  // existing YouTube-thumbnail special-case working exactly as before.
+  const a = document.createElement('a');
+  a.href = block.props.url;
+  a.textContent = block.props.url;
+  return { dom: a };
+}
+
+const blockNoteSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    video: {
+      ...stockVideoSpec,
+      implementation: {
+        ...stockVideoSpec.implementation,
+        render: renderVideoBlock,
+        toExternalHTML: videoBlockToExternalHTML
+      }
+    }
+  }
+});
+
+// A collaborative doc's Yjs room can come back empty (e.g. the sync server
+// restarted) and re-seed itself from the last markdown saved to Postgres —
+// see the bootstrap effect below. That markdown stores a video embed as a
+// plain link (see videoBlockToExternalHTML above), so re-parsing it would
+// otherwise degrade the embed back into plain link text. This walks freshly
+// parsed blocks and upgrades any paragraph that's just a bare/linked
+// YouTube or Vimeo URL back into a real video block.
+function upgradeVideoLinks(blocks) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? upgradeVideoLinks(block.children) : block.children;
+    if (block.type === 'paragraph' && block.content?.length === 1) {
+      const node = block.content[0];
+      const href = node?.type === 'link' ? node.href : (node?.type === 'text' ? node.text : null);
+      const embedUrl = href && getVideoEmbedUrl(href);
+      if (embedUrl) return { type: 'video', props: { url: href }, children };
+    }
+    return children === block.children ? block : { ...block, children };
+  });
+}
 
 // The Vite build-time env var only bakes in on a plain `npm run build` — the
 // Docker build context is `frontend/` alone, so it never sees the repo-root
@@ -184,7 +272,7 @@ export default function NoteEditor({
         try {
           if (newYdoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
             const processed = await refreshImageTokensInMarkdown(fileRef.current?.content || '');
-            const blocks = editorRef.current.tryParseMarkdownToBlocks(processed || ' ');
+            const blocks = upgradeVideoLinks(editorRef.current.tryParseMarkdownToBlocks(processed || ' '));
             editorRef.current.replaceBlocks(editorRef.current.document, blocks);
           }
         } finally {
@@ -202,6 +290,7 @@ export default function NoteEditor({
   const editor = useCreateBlockNote(
     collab
       ? withCollaboration({
+          schema: blockNoteSchema,
           dictionary: blockNoteKo,
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
@@ -221,7 +310,7 @@ export default function NoteEditor({
             provider: { awareness: collab.provider.awareness }
           }
         })
-      : { dictionary: blockNoteKo },
+      : { schema: blockNoteSchema, dictionary: blockNoteKo },
     [file?.id, syncUrl, collab]
   );
 
@@ -321,15 +410,7 @@ export default function NoteEditor({
   };
 
   const handleInsertFromModal = (snippet) => {
-    // The YouTube tab inserts a bare URL (no [text](url) syntax) expecting the
-    // existing bare-link-as-video-embed convention (see markdownLinkComponents.jsx)
-    // to pick it up — but that convention only fires for an actual markdown link
-    // mark, and a plain URL isn't guaranteed to autolink when parsed. Wrap a
-    // bare URL in explicit link syntax first so it always becomes a real link.
-    const trimmed = snippet.trim();
-    const isBareUrl = /^https?:\/\/\S+$/.test(trimmed);
-    const toParse = isBareUrl ? snippet.replace(trimmed, `[${trimmed}](${trimmed})`) : snippet;
-    const blocks = editor.tryParseMarkdownToBlocks(toParse);
+    const blocks = editor.tryParseMarkdownToBlocks(snippet);
     const cursor = editor.getTextCursorPosition();
     editor.insertBlocks(blocks, cursor.block, 'after');
     handleEditorChange();
@@ -401,11 +482,11 @@ export default function NoteEditor({
           <button
             className="toolbar-btn"
             onClick={() => setIsInsertModalOpen(true)}
-            title="기존 저장된 파일 첨부 / 유튜브 동영상 임베드"
+            title="보관함에 저장된 파일 첨부 (이미지/동영상 삽입 및 유튜브·비메오 임베드는 편집기의 '+'/'/' 메뉴를 사용하세요)"
             style={{ color: 'var(--accent-primary)', fontWeight: 600, gap: 4 }}
           >
             <Paperclip size={14} />
-            <span>파일/영상 첨부</span>
+            <span>파일 첨부</span>
           </button>
 
           <button className="btn-icon" onClick={handleExportMarkdown} title="마크다운 다운로드 (.md)">
@@ -469,7 +550,7 @@ export default function NoteEditor({
         </div>
       </div>
 
-      {/* Insert File / YouTube Modal */}
+      {/* Insert File Modal */}
       <InsertFileModal
         isOpen={isInsertModalOpen}
         onClose={() => setIsInsertModalOpen(false)}
