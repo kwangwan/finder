@@ -219,7 +219,14 @@ function makeIcon(Lucide, Pixel) {
       const pixelColor = (fill && fill !== 'none') ? fill : color;
       return <Pixel width={size} height={size} style={{ color: pixelColor, ...style }} {...rest} />;
     }
-    return <Lucide size={size} color={color} fill={fill} style={style} {...rest} />;
+    // Lucide's own <Icon> doesn't destructure `fill` separately — it flows
+    // through its `...rest` spread and clobbers Lucide's default fill:"none".
+    // Passing fill={undefined} here would make React omit the attribute
+    // entirely, and an SVG with no `fill` attribute at all defaults to literal
+    // black (not currentColor) — so only pass it through when actually set.
+    const lucideProps = { size, color, style, ...rest };
+    if (fill !== undefined) lucideProps.fill = fill;
+    return <Lucide {...lucideProps} />;
   };
 }
 
