@@ -176,7 +176,20 @@ export default function App() {
     activeViewRef.current = activeView;
   }, [activeView]);
 
+  // True once a background upload lands a file in the folder currently being
+  // viewed. Deliberately does NOT trigger an auto-refresh of the file list —
+  // with the default "최근 수정일순" sort, silently refetching would keep
+  // bumping the user's current page's files onto later pages as new arrivals
+  // take the top slots, making files the user is looking at seem to vanish
+  // even though they still exist. Surface a "새 파일이 추가되었습니다" prompt
+  // instead and let the user choose when to refresh.
+  const [hasNewFilesInView, setHasNewFilesInView] = useState(false);
+
   const [files, setFiles] = useState([]);
+  const filesRef = useRef(files);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
   const [activeFile, setActiveFile] = useState(null);
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -215,12 +228,33 @@ export default function App() {
       }
       refreshDebounceTimerRef.current = setTimeout(() => {
         if (!completedItem || !completedItem.activeWorkspaceId || completedItem.activeWorkspaceId === activeWorkspace?.id) {
-          refreshFiles(true);
           refreshFoldersAndStats();
+          const viewingUploadedFolder =
+            (activeViewRef.current === 'folder' && (completedItem?.targetFolderId || null) === (activeFolderIdRef.current || null)) ||
+            (activeViewRef.current === 'all' && !completedItem?.targetFolderId);
+          // An empty view going from 0 files to some isn't disruptive the way
+          // reshuffling an already-populated, paginated page is — let that
+          // case keep auto-refreshing so files still "just appear" as the
+          // empty-state message promises.
+          if (viewingUploadedFolder && filesRef.current.length > 0) {
+            // Don't silently refetch the folder the user is currently looking
+            // at — with the default recency sort, that would keep bumping
+            // whatever they're looking at onto later pages as new arrivals
+            // take the top slots. Let them choose when to refresh instead.
+            setHasNewFilesInView(true);
+          } else {
+            refreshFiles(true);
+          }
         }
       }, 300);
     }
   });
+
+  // Viewing a different folder/view makes any pending "new files" prompt
+  // moot — the normal refreshFiles effect already refetches on this change.
+  useEffect(() => {
+    setHasNewFilesInView(false);
+  }, [activeFolderId, activeView]);
 
   // Sync theme
   useEffect(() => {
@@ -1241,6 +1275,11 @@ export default function App() {
             onBatchDownload={handleBatchDownloadFiles}
             onBatchDelete={handleBatchTrashFiles}
             onDirectMoveFiles={handleDirectMoveFiles}
+            hasNewFiles={hasNewFilesInView}
+            onRefreshNewFiles={() => {
+              setHasNewFilesInView(false);
+              refreshFiles(true);
+            }}
             sortBy={sortBy}
             onSortByChange={(newSort) => {
               setSortBy(newSort);

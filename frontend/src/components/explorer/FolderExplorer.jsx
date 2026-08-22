@@ -32,7 +32,8 @@ import {
   Square,
   FolderInput,
   X,
-  Filter
+  Filter,
+  RefreshCw
 } from 'lucide-react';
 import { downloadFileChunked, getThumbnailUrl } from '../../api';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
@@ -80,6 +81,8 @@ export default function FolderExplorer({
   onBatchDownload,
   onBatchDelete,
   onDirectMoveFiles,
+  hasNewFiles = false,
+  onRefreshNewFiles,
   sortBy = 'updated_at',
   onSortByChange,
   sortOrder = 'desc',
@@ -522,17 +525,46 @@ export default function FolderExplorer({
               현재 이 폴더로 파일 업로드가 진행 중입니다 ({currentFolderUploads.length}개 파일 전송/대기 중)
             </div>
             <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              전송이 완료되면 자동으로 목록에 반영됩니다.
+              전송이 완료되면 새로고침으로 확인할 수 있습니다.
             </div>
           </div>
-          <button 
-            className="btn-secondary" 
+          <button
+            className="btn-secondary"
             style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
             onClick={onOpenUpload}
           >
             상세 보기
           </button>
         </div>
+      )}
+
+      {/* New files landed in this folder while an upload was running —
+          refresh is manual so the current page's files don't keep getting
+          silently bumped onto later pages as new arrivals sort to the top. */}
+      {hasNewFiles && (
+        <button
+          type="button"
+          onClick={onRefreshNewFiles}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            width: '100%',
+            margin: '0 0 1.25rem 0',
+            padding: '0.7rem 1.25rem',
+            background: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: 'var(--radius-lg)',
+            color: 'var(--accent-emerald)',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            textAlign: 'left'
+          }}
+        >
+          <RefreshCw size={15} />
+          새 파일이 추가되었습니다 · 새로고침
+        </button>
       )}
 
       {/* Loading Skeleton State */}
