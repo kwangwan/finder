@@ -43,7 +43,8 @@ import {
   logout,
   listWorkspaces,
   getFolderTree, 
-  listFiles, 
+  listFiles,
+  getFilesWatermark, 
   getFileDetail, 
   createMarkdownNote, 
   updateMarkdownNote, 
@@ -686,6 +687,25 @@ export default function App() {
 
   // Fetch Files for active workspace with sorting and pagination
   const refreshFilesRequestIdRef = useRef(0);
+  const lastWatermarkRef = useRef(null);
+
+  // The subset of refreshFiles' params that determine *which* files this
+  // view selects (not sort/page) — shared with the watermark poll below so
+  // both always agree on exactly what set of files they're checking.
+  const buildFileViewParams = useCallback(() => {
+    if (!activeWorkspace?.id) return null;
+    const params = { workspace_id: activeWorkspace.id };
+    if (activeView === 'folder' && activeFolderId) {
+      params.folder_id = activeFolderId;
+    } else if (activeView === 'all' || (activeView === 'folder' && !activeFolderId)) {
+      params.root_only = true;
+    } else if (activeView === 'notes') {
+      params.file_type = 'markdown';
+    } else if (activeView === 'favorites') {
+      params.is_favorite = true;
+    }
+    return params;
+  }, [activeWorkspace?.id, activeView, activeFolderId]);
 
   const refreshFiles = useCallback(async (silent = false) => {
     if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
@@ -711,23 +731,15 @@ export default function App() {
     // slower/stale response can't overwrite it with an outdated (or empty) result.
     const requestId = ++refreshFilesRequestIdRef.current;
     try {
+      const viewParams = buildFileViewParams();
       let params = {
-        workspace_id: activeWorkspace.id,
+        ...viewParams,
         sort_by: sortBy,
         sort_order: sortOrder,
         page: currentPage,
         page_size: pageSize,
         paged: true
       };
-      if (activeView === 'folder' && activeFolderId) {
-        params.folder_id = activeFolderId;
-      } else if (activeView === 'all' || (activeView === 'folder' && !activeFolderId)) {
-        params.root_only = true;
-      } else if (activeView === 'notes') {
-        params.file_type = 'markdown';
-      } else if (activeView === 'favorites') {
-        params.is_favorite = true;
-      }
 
       const res = await listFiles(params);
       if (requestId !== refreshFilesRequestIdRef.current) return; // a newer refresh superseded this one
@@ -749,6 +761,15 @@ export default function App() {
           page_size: pageSize
         });
       }
+
+      // Baseline for the watermark poll below — recorded from this same
+      // "real" refresh so a manual/auto refresh always resets it.
+      try {
+        const wm = await getFilesWatermark(viewParams);
+        if (requestId === refreshFilesRequestIdRef.current) {
+          lastWatermarkRef.current = wm?.watermark ?? null;
+        }
+      } catch (e) { /* polling baseline is best-effort */ }
     } catch (err) {
       console.error('Error fetching files:', err);
     } finally {
@@ -756,11 +777,39 @@ export default function App() {
         setIsLoading(false);
       }
     }
-  }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, activeView, activeFolderId, sortBy, sortOrder, currentPage, pageSize]);
+  }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, buildFileViewParams, sortBy, sortOrder, currentPage, pageSize]);
 
   useEffect(() => {
     refreshFiles();
   }, [refreshFiles]);
+
+  // Lets a viewer who ISN'T themselves uploading also notice the folder
+  // changed (onUploadSuccess above only fires in the tab actually doing the
+  // upload). Deliberately scoped down to avoid the DB-load-under-many-
+  // viewers problem a naive "poll everyone, all the time" version would
+  // have: only the one folder currently being viewed, only while this tab
+  // is actually visible, on a slow (45s) interval, comparing a single cheap
+  // aggregate rather than refetching the list. Compares a watermark (max
+  // updated_at), not just the count, so a net-zero change (one file added,
+  // one removed) still gets noticed.
+  useEffect(() => {
+    if (hasNewFilesInView) return;
+    const viewParams = buildFileViewParams();
+    if (!viewParams) return;
+
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const wm = await getFilesWatermark(viewParams);
+        const serverWatermark = wm?.watermark ?? null;
+        if (serverWatermark && serverWatermark !== lastWatermarkRef.current) {
+          setHasNewFilesInView(true);
+        }
+      } catch (e) { /* best-effort */ }
+    };
+    const intervalId = setInterval(poll, 45000);
+    return () => clearInterval(intervalId);
+  }, [hasNewFilesInView, buildFileViewParams]);
 
   // Global Keyboard Shortcut (Cmd+K / Ctrl+K)
   useEffect(() => {

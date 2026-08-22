@@ -560,6 +560,34 @@ export async function listFiles({
   return res.json();
 }
 
+/**
+ * Cheap polling signal for a file view (folder/root/notes/favorites): the
+ * most recent updated_at among matching files, plus the count. Lets a
+ * viewer who isn't themselves uploading notice the folder changed without
+ * refetching the whole list — comparing the watermark (not just the count)
+ * also catches a net-zero change like one file added and one removed.
+ */
+export async function getFilesWatermark({
+  workspace_id = null,
+  folder_id = null,
+  root_only = false,
+  file_type = null,
+  is_favorite = null,
+} = {}) {
+  const params = new URLSearchParams();
+  if (workspace_id) params.append('workspace_id', workspace_id);
+  if (root_only) params.append('root_only', 'true');
+  else if (folder_id) params.append('folder_id', folder_id);
+  if (file_type) params.append('file_type', file_type);
+  if (is_favorite !== null && is_favorite !== undefined) params.append('is_favorite', is_favorite);
+
+  const res = await fetch(`${API_BASE}/files/watermark?${params.toString()}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to get files watermark');
+  return res.json();
+}
+
 
 export async function getFileDetail(fileId) {
   const res = await fetch(`${API_BASE}/files/${fileId}`, {
