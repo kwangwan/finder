@@ -244,6 +244,34 @@ export default function NoteEditor({
   // what broke remote-update sync earlier (see the collab bootstrap effect).
   const [isContentLoading, setIsContentLoading] = useState(true);
 
+  // TEMPORARY DIAGNOSTIC (2026-08-23) — the mobile Enter-key bug has gone
+  // through two guessed-and-shipped fixes already without being confirmed
+  // fixed, and we have no way to attach real devtools to the user's phone.
+  // Logs the raw input/keyboard events the editor actually receives to an
+  // on-screen overlay so a plain screenshot from the phone tells us the
+  // real event sequence instead of more guessing. Remove this whole block
+  // (state, effect, and the overlay JSX near the bottom of the file) once
+  // the bug is actually diagnosed from what this reveals.
+  const [debugLog, setDebugLog] = useState([]);
+  useEffect(() => {
+    const relevant = ['beforeinput', 'keydown', 'keyup', 'compositionstart', 'compositionend', 'input'];
+    const handler = (e) => {
+      if (!e.target?.closest?.('.bn-editor')) return;
+      const parts = [e.type];
+      if (e.inputType !== undefined) parts.push(`inputType=${e.inputType}`);
+      if (e.key !== undefined) parts.push(`key=${JSON.stringify(e.key)}`);
+      if (e.keyCode !== undefined) parts.push(`keyCode=${e.keyCode}`);
+      if (e.isComposing !== undefined) parts.push(`composing=${e.isComposing}`);
+      if (e.data !== undefined) parts.push(`data=${JSON.stringify(e.data)}`);
+      if (e.defaultPrevented) parts.push('[prevented]');
+      const t = new Date();
+      const ts = `${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')}`;
+      setDebugLog((prev) => [...prev.slice(-24), `${ts} ${parts.join(' ')}`]);
+    };
+    relevant.forEach((type) => document.addEventListener(type, handler, true));
+    return () => relevant.forEach((type) => document.removeEventListener(type, handler, true));
+  }, []);
+
   const saveTimeoutRef = useRef(null);
   const saveRetryTimeoutRef = useRef(null);
   const saveRetryCountRef = useRef(0);
@@ -827,6 +855,17 @@ export default function NoteEditor({
           onClose={() => setIsHistoryModalOpen(false)}
           onRestored={handleVersionRestored}
         />
+      )}
+
+      {/* TEMPORARY DIAGNOSTIC — see the state/effect above. Remove together. */}
+      {debugLog.length > 0 && (
+        <div style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, maxHeight: '38vh', overflowY: 'auto',
+          background: 'rgba(0,0,0,0.9)', color: '#4ade80', fontFamily: 'monospace', fontSize: '10px',
+          lineHeight: 1.4, padding: '6px 8px', zIndex: 99999, whiteSpace: 'pre-wrap', wordBreak: 'break-all'
+        }}>
+          {debugLog.join('\n')}
+        </div>
       )}
     </div>
   );
