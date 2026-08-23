@@ -8,9 +8,6 @@ import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
-import { Extension } from '@tiptap/core';
-import { TextSelection } from 'prosemirror-state';
-import { isInTable, selectedRect, addRow } from 'prosemirror-tables';
 import {
   ArrowLeft,
   Download,
@@ -164,57 +161,6 @@ const blockNoteSchema = BlockNoteSchema.create({
         toExternalHTML: videoBlockToExternalHTML
       }
     }
-  }
-});
-
-// WORKAROUND, not a Finder bug — see explanation below. Remove this whole
-// extension (and the addKeyboardShortcuts-related imports above) if a future
-// @blocknote/core upgrade changes or fixes this upstream, or if it's ever
-// found to behave inconsistently between mobile and desktop (it's currently
-// verified identical on both, since the underlying binding it overrides
-// isn't itself mobile-specific).
-//
-// Users reported Enter appearing to do nothing / jump sideways instead of
-// starting a new line — this reproduces specifically with the cursor inside
-// a table cell. BlockNote's own table block (via prosemirror-tables' table
-// keymap, wired up in @blocknote/core's TableExtension.ts) binds Enter to
-// "move the selection to the next cell down in the same column" — useful for
-// spreadsheet-style navigation, but reads as "Enter is broken" for anyone
-// expecting the same "start a new line" behavior every other block gives.
-// This extension instead makes Enter insert an actual new row below and move
-// into it, which is both closer to that expectation and closer to how
-// Notion's own tables behave.
-//
-// It has to be registered via `_tiptapOptions.extensions` (appended last)
-// rather than BlockNote's public `extensions` option: @blocknote/core's
-// ExtensionManager.getTiptapExtensions() builds the final extension list as
-// [built-ins (incl. the table extension), ...blocknote-extension-derived
-// ones, ...this], then TipTap's own plugin resolution reverses that list and
-// stable-sorts by priority (equal by default) before turning each
-// extension's keyboard shortcuts into a ProseMirror keymap plugin — so being
-// LAST in the source list puts this extension's keymap FIRST in the actual
-// plugin order, letting it intercept Enter before the table extension's own
-// binding ever sees it. Returning `false` outside a table leaves every other
-// key/context completely untouched.
-const TableEnterInsertsRowExtension = Extension.create({
-  name: 'finderTableEnterInsertsRow',
-  addKeyboardShortcuts() {
-    return {
-      Enter: () => {
-        if (!isInTable(this.editor.state)) return false;
-        return this.editor.commands.command(({ state, dispatch }) => {
-          const rect = selectedRect(state);
-          let rowPos = rect.tableStart;
-          for (let i = 0; i < rect.bottom; i++) rowPos += rect.table.child(i).nodeSize;
-          if (dispatch) {
-            const tr = addRow(state.tr, rect, rect.bottom);
-            const $pos = tr.doc.resolve(Math.min(rowPos + 1, tr.doc.content.size));
-            dispatch(tr.setSelection(TextSelection.near($pos, 1)).scrollIntoView());
-          }
-          return true;
-        });
-      }
-    };
   }
 });
 
@@ -397,7 +343,6 @@ export default function NoteEditor({
       ? withCollaboration({
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
-          _tiptapOptions: { extensions: [TableEnterInsertsRowExtension] },
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
             try {
@@ -416,7 +361,7 @@ export default function NoteEditor({
             provider: { awareness: collab.provider.awareness }
           }
         })
-      : { schema: blockNoteSchema, dictionary: blockNoteKo, _tiptapOptions: { extensions: [TableEnterInsertsRowExtension] } },
+      : { schema: blockNoteSchema, dictionary: blockNoteKo },
     [file?.id, syncUrl, collab]
   );
 
