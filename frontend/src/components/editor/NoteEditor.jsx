@@ -8,6 +8,9 @@ import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
+import { Extension } from '@tiptap/core';
+import { TextSelection } from 'prosemirror-state';
+import { isInTable, selectedRect, addRow } from 'prosemirror-tables';
 import {
   ArrowLeft,
   Download,
@@ -34,6 +37,15 @@ const COLLAB_FRAGMENT_NAME = 'blocknote';
 // finalizes that row into a permanent history entry once the session
 // actually ends, mirroring Notion's own session-end snapshot behavior.
 const IDLE_CHECKPOINT_DELAY = 2 * 60 * 1000;
+
+// A marathon editing session that never pauses for IDLE_CHECKPOINT_DELAY
+// would otherwise never get a permanent history entry at all — the open row
+// just keeps rolling forward in place forever. Force a checkpoint on this
+// cadence too so continuous editing still gets a restore point periodically,
+// matching the ~10-minute-while-actively-editing behavior described on the
+// backend's checkpoint endpoint (which, before this, only actually happened
+// via the idle/tab-hide paths below).
+const PERIODIC_CHECKPOINT_INTERVAL = 10 * 60 * 1000;
 
 // Maps BlockNote's own hardcoded light/dark greys onto this app's CSS
 // variables instead, so the editor blends into whichever theme (dark/light/
@@ -155,6 +167,57 @@ const blockNoteSchema = BlockNoteSchema.create({
   }
 });
 
+// WORKAROUND, not a Finder bug — see explanation below. Remove this whole
+// extension (and the addKeyboardShortcuts-related imports above) if a future
+// @blocknote/core upgrade changes or fixes this upstream, or if it's ever
+// found to behave inconsistently between mobile and desktop (it's currently
+// verified identical on both, since the underlying binding it overrides
+// isn't itself mobile-specific).
+//
+// Users reported Enter appearing to do nothing / jump sideways instead of
+// starting a new line — this reproduces specifically with the cursor inside
+// a table cell. BlockNote's own table block (via prosemirror-tables' table
+// keymap, wired up in @blocknote/core's TableExtension.ts) binds Enter to
+// "move the selection to the next cell down in the same column" — useful for
+// spreadsheet-style navigation, but reads as "Enter is broken" for anyone
+// expecting the same "start a new line" behavior every other block gives.
+// This extension instead makes Enter insert an actual new row below and move
+// into it, which is both closer to that expectation and closer to how
+// Notion's own tables behave.
+//
+// It has to be registered via `_tiptapOptions.extensions` (appended last)
+// rather than BlockNote's public `extensions` option: @blocknote/core's
+// ExtensionManager.getTiptapExtensions() builds the final extension list as
+// [built-ins (incl. the table extension), ...blocknote-extension-derived
+// ones, ...this], then TipTap's own plugin resolution reverses that list and
+// stable-sorts by priority (equal by default) before turning each
+// extension's keyboard shortcuts into a ProseMirror keymap plugin — so being
+// LAST in the source list puts this extension's keymap FIRST in the actual
+// plugin order, letting it intercept Enter before the table extension's own
+// binding ever sees it. Returning `false` outside a table leaves every other
+// key/context completely untouched.
+const TableEnterInsertsRowExtension = Extension.create({
+  name: 'finderTableEnterInsertsRow',
+  addKeyboardShortcuts() {
+    return {
+      Enter: () => {
+        if (!isInTable(this.editor.state)) return false;
+        return this.editor.commands.command(({ state, dispatch }) => {
+          const rect = selectedRect(state);
+          let rowPos = rect.tableStart;
+          for (let i = 0; i < rect.bottom; i++) rowPos += rect.table.child(i).nodeSize;
+          if (dispatch) {
+            const tr = addRow(state.tr, rect, rect.bottom);
+            const $pos = tr.doc.resolve(Math.min(rowPos + 1, tr.doc.content.size));
+            dispatch(tr.setSelection(TextSelection.near($pos, 1)).scrollIntoView());
+          }
+          return true;
+        });
+      }
+    };
+  }
+});
+
 // The Vite build-time env var only bakes in on a plain `npm run build` — the
 // Docker build context is `frontend/` alone, so it never sees the repo-root
 // .env there, and would silently resolve to the fallback (pointing every
@@ -219,6 +282,7 @@ export default function NoteEditor({
   const [title, setTitle] = useState(file?.name || '제목 없는 문서');
   const [tags, setTags] = useState(file?.tags || []);
   const [saveStatus, setSaveStatus] = useState('saved');
+  const [saveError, setSaveError] = useState(null);
   const [syncStatus, setSyncStatus] = useState('connecting'); // 'connecting' | 'connected' | 'error'
   const [syncUrl, setSyncUrl] = useState(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -233,6 +297,8 @@ export default function NoteEditor({
   const [isContentLoading, setIsContentLoading] = useState(true);
 
   const saveTimeoutRef = useRef(null);
+  const saveRetryTimeoutRef = useRef(null);
+  const saveRetryCountRef = useRef(0);
   const idleCheckpointTimeoutRef = useRef(null);
   const fileRef = useRef(file);
   const workspaceIdRef = useRef(activeWorkspaceId);
@@ -317,6 +383,10 @@ export default function NoteEditor({
         clearTimeout(idleCheckpointTimeoutRef.current);
         idleCheckpointTimeoutRef.current = null;
       }
+      if (saveRetryTimeoutRef.current) {
+        clearTimeout(saveRetryTimeoutRef.current);
+        saveRetryTimeoutRef.current = null;
+      }
       newProvider.destroy();
       newYdoc.destroy();
     };
@@ -327,6 +397,7 @@ export default function NoteEditor({
       ? withCollaboration({
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
+          _tiptapOptions: { extensions: [TableEnterInsertsRowExtension] },
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
             try {
@@ -345,7 +416,7 @@ export default function NoteEditor({
             provider: { awareness: collab.provider.awareness }
           }
         })
-      : { schema: blockNoteSchema, dictionary: blockNoteKo },
+      : { schema: blockNoteSchema, dictionary: blockNoteKo, _tiptapOptions: { extensions: [TableEnterInsertsRowExtension] } },
     [file?.id, syncUrl, collab]
   );
 
@@ -356,6 +427,8 @@ export default function NoteEditor({
     setTitle(file.name);
     setTags(file.tags || []);
     setSaveStatus('saved');
+    setSaveError(null);
+    saveRetryCountRef.current = 0;
   }, [file?.id]);
 
   // Long-open notes can outlast the 15-min media token — periodically re-point any
@@ -392,19 +465,50 @@ export default function NoteEditor({
       const markdown = editor.blocksToMarkdownLossy(editor.document);
       await onSave({ name: newTitle, content: markdown, tags: newTags });
       setSaveStatus('saved');
+      setSaveError(null);
+      saveRetryCountRef.current = 0;
     } catch (err) {
+      const message = err?.message || '알 수 없는 오류';
       setSaveStatus('unsaved');
+      setSaveError(message);
       console.error('Auto-save error:', err);
+      // Most failures here are transient (a network blip, a momentarily
+      // expired token) and would otherwise leave the note silently stuck on
+      // "미저장" with no explanation until the user happens to type again.
+      // Retry a couple of times with backoff before giving up — bounded so a
+      // persistent failure (e.g. quota exceeded) doesn't retry forever; the
+      // error message stays visible either way via the status tooltip.
+      if (saveRetryCountRef.current < 2) {
+        saveRetryCountRef.current += 1;
+        if (saveRetryTimeoutRef.current) clearTimeout(saveRetryTimeoutRef.current);
+        saveRetryTimeoutRef.current = setTimeout(() => {
+          saveRetryTimeoutRef.current = null;
+          doSave(newTitle, newTags);
+        }, saveRetryCountRef.current * 5000);
+      }
     }
   }, [editor, onSave]);
 
   const triggerAutoSave = useCallback((newTitle, newTags) => {
     setSaveStatus('unsaved');
+    saveRetryCountRef.current = 0;
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    if (saveRetryTimeoutRef.current) {
+      clearTimeout(saveRetryTimeoutRef.current);
+      saveRetryTimeoutRef.current = null;
+    }
 
     saveTimeoutRef.current = setTimeout(() => {
       saveTimeoutRef.current = null;
-      if (!isSaveLeader()) return;
+      if (!isSaveLeader()) {
+        // Only the leader persists to Postgres, but this client's own edits
+        // are already merged into the shared Yjs doc the instant they're
+        // made — nothing is actually at risk of being lost. Showing a
+        // permanent "미저장" here (which used to just return and never
+        // recover) misrepresented that as a real failure.
+        setSaveStatus('saved');
+        return;
+      }
       doSave(newTitle, newTags);
     }, 1000);
   }, [doSave, isSaveLeader]);
@@ -421,6 +525,21 @@ export default function NoteEditor({
       checkpointFileVersion(fileRef.current.id).catch(() => {});
     }, IDLE_CHECKPOINT_DELAY);
   }, [isSaveLeader]);
+
+  // Independent of the idle timer above: forces a checkpoint on a fixed
+  // cadence regardless of how long editing continues without a pause, so a
+  // long uninterrupted session still accumulates real history entries along
+  // the way instead of just one at the very end. Checkpointing is a no-op
+  // on the backend if nothing changed since the last one, so firing this
+  // unconditionally every interval is harmless.
+  useEffect(() => {
+    if (!file?.id) return;
+    const interval = setInterval(() => {
+      if (!isSaveLeader()) return;
+      checkpointFileVersion(file.id).catch(() => {});
+    }, PERIODIC_CHECKPOINT_INTERVAL);
+    return () => clearInterval(interval);
+  }, [file?.id, isSaveLeader]);
 
   // Flush a pending save immediately when the tab is hidden/closed, instead of
   // losing up to 1s of edits (the autosave debounce window) or waiting for the
@@ -526,14 +645,17 @@ export default function NoteEditor({
             <ArrowLeft size={18} />
           </button>
 
-          <span style={{
-            fontSize: '0.75rem',
-            color: saveStatus === 'saved' ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.3rem'
-          }}>
-            {saveStatus === 'saved' ? '● 자동 저장됨' : (saveStatus === 'saving' ? '⟳ 저장 중...' : '○ 미저장')}
+          <span
+            style={{
+              fontSize: '0.75rem',
+              color: saveStatus === 'saved' ? 'var(--accent-emerald)' : (saveStatus === 'unsaved' && saveError ? 'var(--accent-rose)' : 'var(--accent-amber)'),
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+            title={saveStatus === 'unsaved' && saveError ? `저장 실패: ${saveError}` : undefined}
+          >
+            {saveStatus === 'saved' ? '● 자동 저장됨' : (saveStatus === 'saving' ? '⟳ 저장 중...' : (saveError ? '⚠ 저장 실패' : '○ 미저장'))}
           </span>
 
           {syncStatus === 'error' && (

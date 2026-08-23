@@ -613,7 +613,10 @@ export async function updateMarkdownNote(fileId, { name, folder_id, workspace_id
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, folder_id, workspace_id, content, tags, is_favorite }),
   });
-  if (!res.ok) throw new Error('Failed to update note');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '문서 저장 실패');
+  }
   return res.json();
 }
 

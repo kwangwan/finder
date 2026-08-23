@@ -13,7 +13,11 @@ function formatDate(isoString) {
 
 function formatTime(isoString) {
   const d = new Date(isoString);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  // Seconds matter here: two versions closed out moments apart (e.g. an
+  // idle-checkpoint close followed immediately by the next edit's open row)
+  // are genuinely distinct entries, but without seconds they render as an
+  // identical-looking HH:MM and look like a duplicate/bug at a glance.
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
 
 function groupByDate(versions) {
@@ -159,7 +163,12 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
           <div className="version-history-preview" style={{ flex: 1, overflowY: 'auto', padding: '1.25rem', minWidth: 0 }}>
             {!selectedVersion ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', marginTop: '2rem' }}>
-                왼쪽에서 버전을 선택하면 그 시점의 내용을 볼 수 있습니다.
+                {/* No "왼쪽에서"/"위에서" direction wording — the list sits
+                    left of this pane on desktop but above it on mobile
+                    (.version-history-body switches to flex-direction:
+                    column below 768px), so a direction-specific string would
+                    be wrong on one of the two layouts. */}
+                버전을 선택하면 그 시점의 내용을 볼 수 있습니다.
               </div>
             ) : isLoadingPreview || selectedVersion.content === null ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}>
