@@ -14,7 +14,8 @@ import {
   Layers,
   Settings,
   Trash2,
-  ChevronsLeft
+  ChevronsLeft,
+  Loader2
 } from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 
@@ -26,6 +27,7 @@ export default function Sidebar({
   onOpenCreateWorkspace,
   onOpenWorkspaceSettings,
   folders = [],
+  isFoldersLoading = false,
   activeFolderId,
   onSelectFolder,
   activeView,
@@ -241,15 +243,23 @@ export default function Sidebar({
         >
           <Layers size={16} />
           <span>전체 파일</span>
-          {stats?.total_files > 0 && <span className="menu-badge">{stats.total_files}</span>}
+          {isFoldersLoading ? (
+            <Loader2 size={12} className="spin" color="var(--text-muted)" />
+          ) : (
+            stats?.total_files > 0 && <span className="menu-badge">{stats.total_files}</span>
+          )}
         </li>
-        <li 
+        <li
           className={`menu-item ${activeView === 'notes' ? 'active' : ''}`}
           onClick={() => onSelectView('notes')}
         >
           <FileText size={16} />
           <span>문서</span>
-          {stats?.note_count > 0 && <span className="menu-badge">{stats.note_count}</span>}
+          {isFoldersLoading ? (
+            <Loader2 size={12} className="spin" color="var(--text-muted)" />
+          ) : (
+            stats?.note_count > 0 && <span className="menu-badge">{stats.note_count}</span>
+          )}
         </li>
         <li 
           className={`menu-item ${activeView === 'favorites' ? 'active' : ''}`}
@@ -283,7 +293,11 @@ export default function Sidebar({
 
       <div className="folder-tree" style={{ padding: '0.15rem 0.85rem' }}>
         <div className="folder-tree-inner">
-          {folders.length === 0 ? (
+          {isFoldersLoading ? (
+            <div style={{ padding: '1.5rem', display: 'flex', justifyContent: 'center' }}>
+              <Loader2 size={16} className="spin" color="var(--text-muted)" />
+            </div>
+          ) : folders.length === 0 ? (
             <div style={{ padding: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
               생성된 폴더가 없습니다.
             </div>

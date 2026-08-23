@@ -817,16 +817,7 @@ export default function FolderExplorer({
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                      {previewable && (
-                        <button
-                          className="btn-icon card-action-btn"
-                          onClick={(e) => { e.stopPropagation(); onOpenMediaPreview(file); }}
-                          title="파일 미리보기"
-                        >
-                          <Eye size={14} color="var(--accent-primary)" />
-                        </button>
-                      )}
-                      <button 
+                      <button
                         className="btn-icon card-action-btn" 
                         onClick={(e) => { e.stopPropagation(); onToggleFavorite(file); }}
                         title="즐겨찾기"

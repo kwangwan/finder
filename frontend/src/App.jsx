@@ -147,6 +147,13 @@ export default function App() {
 
   // Navigation & View (Initialize from URL query params)
   const [folders, setFolders] = useState([]);
+  // True only while the folder tree/stats being shown belong to a DIFFERENT
+  // workspace than activeWorkspace — i.e. an actual workspace switch, not
+  // every routine refresh (a background upload completing shouldn't flash
+  // this). Lets the sidebar hide the stale previous workspace's folders/
+  // counts instead of showing them until the new data happens to arrive.
+  const [isFoldersLoading, setIsFoldersLoading] = useState(false);
+  const loadedFoldersWorkspaceIdRef = useRef(null);
   const [activeFolderId, setActiveFolderId] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -605,9 +612,14 @@ export default function App() {
     if (!isWorkspacesLoaded) return;
     if (!activeWorkspace?.id) {
       refreshFoldersRequestIdRef.current += 1;
+      loadedFoldersWorkspaceIdRef.current = null;
       setFolders([]);
       setStats(null);
+      setIsFoldersLoading(false);
       return;
+    }
+    if (loadedFoldersWorkspaceIdRef.current !== activeWorkspace.id) {
+      setIsFoldersLoading(true);
     }
     // Guard against out-of-order responses: an upload completing in the
     // background (or any other trigger) can call this for a workspace the
@@ -626,6 +638,8 @@ export default function App() {
       if (requestId !== refreshFoldersRequestIdRef.current) return; // a newer refresh superseded this one
       setFolders(tree);
       setStats(systemStats);
+      loadedFoldersWorkspaceIdRef.current = wsId;
+      setIsFoldersLoading(false);
 
       // On first load after workspace loads, restore folder from URL if present
       if (!isInitialFolderRestoredRef.current) {
@@ -663,6 +677,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error loading folders/stats:', err);
+      setIsFoldersLoading(false);
     }
   }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, updateUrlParams]);
 
@@ -1270,6 +1285,7 @@ export default function App() {
           setIsWorkspaceModalOpen(true);
         }}
         folders={folders}
+        isFoldersLoading={isFoldersLoading}
         activeFolderId={activeFolderId}
         onSelectFolder={handleSelectFolder}
         activeView={activeView}

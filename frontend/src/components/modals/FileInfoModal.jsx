@@ -72,10 +72,9 @@ export default function FileInfoModal({ file, onClose }) {
                 fontSize: '0.78rem',
                 color: 'var(--text-muted)',
                 marginTop: '2px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }} title={file.name}>
+                overflowWrap: 'break-word',
+                wordBreak: 'break-word'
+              }}>
                 {file.name}
               </p>
             </div>
