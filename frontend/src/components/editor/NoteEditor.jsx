@@ -244,34 +244,6 @@ export default function NoteEditor({
   // what broke remote-update sync earlier (see the collab bootstrap effect).
   const [isContentLoading, setIsContentLoading] = useState(true);
 
-  // TEMPORARY DIAGNOSTIC (2026-08-23) — the mobile Enter-key bug has gone
-  // through two guessed-and-shipped fixes already without being confirmed
-  // fixed, and we have no way to attach real devtools to the user's phone.
-  // Logs the raw input/keyboard events the editor actually receives to an
-  // on-screen overlay so a plain screenshot from the phone tells us the
-  // real event sequence instead of more guessing. Remove this whole block
-  // (state, effect, and the overlay JSX near the bottom of the file) once
-  // the bug is actually diagnosed from what this reveals.
-  const [debugLog, setDebugLog] = useState([]);
-  useEffect(() => {
-    const relevant = ['beforeinput', 'keydown', 'keyup', 'compositionstart', 'compositionend', 'input'];
-    const handler = (e) => {
-      if (!e.target?.closest?.('.bn-editor')) return;
-      const parts = [e.type];
-      if (e.inputType !== undefined) parts.push(`inputType=${e.inputType}`);
-      if (e.key !== undefined) parts.push(`key=${JSON.stringify(e.key)}`);
-      if (e.keyCode !== undefined) parts.push(`keyCode=${e.keyCode}`);
-      if (e.isComposing !== undefined) parts.push(`composing=${e.isComposing}`);
-      if (e.data !== undefined) parts.push(`data=${JSON.stringify(e.data)}`);
-      if (e.defaultPrevented) parts.push('[prevented]');
-      const t = new Date();
-      const ts = `${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')}`;
-      setDebugLog((prev) => [...prev.slice(-24), `${ts} ${parts.join(' ')}`]);
-    };
-    relevant.forEach((type) => document.addEventListener(type, handler, true));
-    return () => relevant.forEach((type) => document.removeEventListener(type, handler, true));
-  }, []);
-
   const saveTimeoutRef = useRef(null);
   const saveRetryTimeoutRef = useRef(null);
   const saveRetryCountRef = useRef(0);
@@ -373,8 +345,8 @@ export default function NoteEditor({
   // with no table involved) and NOT a Yjs remote-update/IME-composition
   // collision (reproduces solo, in a brand-new note, with plain ASCII).
   //
-  // The on-screen diagnostic overlay (see the debugLog state/effect above)
-  // captured the real event sequence on the failing Android phone: for
+  // A temporary on-screen diagnostic overlay (since removed) captured the
+  // real event sequence on the failing Android phone: for
   // every Enter press, a real `keydown key="Enter"` fires FIRST, THEN a
   // `beforeinput inputType=insertParagraph` follows it — meaning BlockNote/
   // ProseMirror's own keydown-based keymap did NOT call preventDefault for
@@ -416,12 +388,11 @@ export default function NoteEditor({
   // of its own core guarantee — so there should be no more "model updated
   // but screen didn't" gap to separately work around.
   //
-  // STILL UNVERIFIED on a real device. If this doesn't work either, stop
-  // guessing at DOM-event-level mitigations entirely — the next step is
-  // checking whether some plugin's `handleKeyDown` is itself swallowing
-  // Enter without acting on it in this exact context (cursor at the end
-  // of a plain paragraph after a blank line), which would need actual
-  // remote debugging (`chrome://inspect`) to see the command chain run.
+  // CONFIRMED WORKING (2026-08-23) on both the originally-failing Android
+  // phone (Samsung Browser and Chrome) and desktop. Remove this whole
+  // workaround once BlockNote/prosemirror-view ship real `beforeinput`
+  // support and Enter is no longer split across two competing event paths
+  // on Android.
   const AndroidBeforeInputEnterFix = Extension.create({
     name: 'finderAndroidBeforeInputEnterFix',
     addProseMirrorPlugins() {
@@ -836,17 +807,6 @@ export default function NoteEditor({
           onClose={() => setIsHistoryModalOpen(false)}
           onRestored={handleVersionRestored}
         />
-      )}
-
-      {/* TEMPORARY DIAGNOSTIC — see the state/effect above. Remove together. */}
-      {debugLog.length > 0 && (
-        <div style={{
-          position: 'fixed', left: 0, right: 0, bottom: 0, maxHeight: '38vh', overflowY: 'auto',
-          background: 'rgba(0,0,0,0.9)', color: '#4ade80', fontFamily: 'monospace', fontSize: '10px',
-          lineHeight: 1.4, padding: '6px 8px', zIndex: 99999, whiteSpace: 'pre-wrap', wordBreak: 'break-all'
-        }}>
-          {debugLog.join('\n')}
-        </div>
       )}
     </div>
   );
