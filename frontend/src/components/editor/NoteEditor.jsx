@@ -368,70 +368,60 @@ export default function NoteEditor({
     };
   }, [file?.id, syncUrl]);
 
-  // WORKAROUND for an Android-only bug, unverified on a real device — see
-  // explanation below. Confirmed NOT caused by BlockNote's table keymap
-  // (reverted — reproduced with no table involved) and NOT a Yjs remote-
-  // update/IME-composition collision (reproduces solo, in a brand-new
-  // note, with plain ASCII, and persists across a full page reload — so
-  // it isn't a stale in-tab render desync either). The one thing every
-  // report has in common is a real Android device (Samsung Internet AND
-  // Chrome both show it — same OS, different engines — so it's not one
-  // browser's bug specifically).
+  // WORKAROUND for a real, confirmed Android bug — see explanation below.
+  // Confirmed NOT caused by BlockNote's table keymap (reverted — reproduced
+  // with no table involved) and NOT a Yjs remote-update/IME-composition
+  // collision (reproduces solo, in a brand-new note, with plain ASCII).
   //
-  // prosemirror-view's own source (see its `handlers.beforeinput`) admits
-  // it barely handles `beforeinput` events: "support is so spotty that
-  // I'm still waiting to see where they are going" — Enter is normally
-  // handled purely via the legacy `keydown` → keymap path. But several
-  // Android keyboards (Gboard, Samsung Keyboard) commit text and newlines
-  // through the modern `beforeinput`/`InputConnection` API instead of a
-  // clean `keydown`, so BOTH paths can fire for one Enter press: the
-  // keymap's own controlled transaction, AND the browser's native,
-  // uncontrolled contenteditable mutation that ProseMirror's DOM-mutation
-  // observer then has to reverse-engineer — which is exactly the kind of
-  // guesswork that can split freshly-typed text into arbitrary chunks in
-  // a collaborative (Yjs-backed) document.
+  // The on-screen diagnostic overlay (see the debugLog state/effect above)
+  // captured the real event sequence on the failing Android phone: for
+  // every Enter press, a real `keydown key="Enter"` fires FIRST, THEN a
+  // `beforeinput inputType=insertParagraph` follows it — meaning BlockNote/
+  // ProseMirror's own keydown-based keymap did NOT call preventDefault for
+  // Enter in this exact spot, so the browser went on to its own native,
+  // beforeinput-driven insertion path. prosemirror-view's own source (see
+  // its `handlers.beforeinput`) admits it barely handles `beforeinput`
+  // events at all ("support is so spotty that I'm still waiting to see
+  // where they are going") — so once the browser is in that native path,
+  // nothing here was ever going to intercept it cleanly by fighting the
+  // DOM event system.
   //
-  // Mitigation: intercept `beforeinput` directly, suppress the browser's
-  // own native mutation with `preventDefault()`, and re-dispatch a real
-  // synthetic `Enter` `keydown` so ONLY ProseMirror's own (already
-  // correct) keymap path ever runs — never the native/observer path. This
-  // mirrors a pattern ProseMirror's own view code already uses internally
-  // for a different Android backspace bug (same file, `beforeinput.
-  // deleteContentBackward` case) — not a novel technique.
+  // First two attempts at a fix both re-dispatched a synthetic
+  // `KeyboardEvent('keydown', ...)` via `view.dom.dispatchEvent(...)` to
+  // force ProseMirror's own handling to run a second time. Real-device
+  // retests showed this doesn't reliably work: round 1 seemingly updated
+  // the document (a second client watching over Yjs saw the line break)
+  // but the originating phone's own screen never refreshed; round 2 added
+  // a blur/refocus resync (mirroring prosemirror-view's own fix for an
+  // unrelated Android backspace bug) and regressed further — repeated
+  // Enter presses produced the identical event sequence every time but
+  // never touched the document at all (`kb_files.updated_at` never moved
+  // across 5 real presses, confirmed via direct DB query). Re-dispatching
+  // through the DOM and hoping it re-enters the right handler turned out
+  // to be exactly the kind of fragile, hard-to-reason-about approach it
+  // looked like from the start.
   //
-  // Round-1 real-device result: the underlying document DID update
-  // correctly (another connected client watching the same note over Yjs
-  // saw a normal line break appear) — so the transaction dispatch below
-  // works. But the Android device's OWN screen showed no visible change
-  // at all. This matches a known Android WebView/Chrome quirk: calling
-  // `preventDefault()` inside `beforeinput` stops the native mutation as
-  // intended, but can also leave the on-screen caret/composited text
-  // layer desynced from the real DOM/model, since the system-level
-  // IME/InputConnection never got the native completion signal it
-  // expected. prosemirror-view's own source hits the exact same problem
-  // for a different Android input quirk (`beforeinput.
-  // deleteContentBackward`, same file) and fixes it the same way: blur
-  // and refocus the view shortly after, forcing the OS to resync its
-  // rendered view with the actual document.
+  // This version instead calls the handler directly — the same technique
+  // prosemirror-view's own internal Android-backspace workaround uses
+  // (`view.someProp("handleKeyDown", f => f(view, keyEvent(8,
+  // "Backspace")))`, same file): `view.someProp('handleKeyDown', ...)`
+  // walks every plugin's `handleKeyDown` prop (which is exactly what a
+  // real keydown event resolves to internally, including the keymap
+  // plugin that actually owns Enter's split-block command) and invokes it
+  // synchronously with a plain fake-event object — no DOM dispatch, no
+  // re-entrant event handling, no dependency on some other listener
+  // picking the event back up correctly. If a command handles it, the
+  // resulting transaction is applied through the normal `view.dispatch`
+  // path, which always keeps the local DOM in sync with the model as part
+  // of its own core guarantee — so there should be no more "model updated
+  // but screen didn't" gap to separately work around.
   //
-  // Scoped to mobile browsers generally, not just Android specifically:
-  // the confirmed real-device symptom (no visible change, model correct)
-  // is Android, but a separate still-unexplained report — the same
-  // corruption showing up in Chrome DevTools' mobile-emulation mode, on
-  // a long-lived desktop tab, with a REAL physical keyboard — hasn't been
-  // pinned down to Android's virtual-keyboard input path at all, so an
-  // iOS/other-mobile version of this exact desync is plausible too. The
-  // resync trick is cheap (a momentary focus flash) on a device that
-  // didn't actually need it, so err on the broader side here.
-  const isMobileBrowser = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
-  // UNVERIFIED beyond the one real-device round described above — this is
-  // still based on the mechanism being a documented, known gap rather
-  // than a confirmed fix. If the blur/refocus resync doesn't help either,
-  // remove this whole extension rather than layering more guesses on top
-  // — the next diagnostic step at that point is capturing the actual
-  // `beforeinput`/`keydown` event sequence on the failing device via
-  // remote debugging (`chrome://inspect`), not more source-reading.
+  // STILL UNVERIFIED on a real device. If this doesn't work either, stop
+  // guessing at DOM-event-level mitigations entirely — the next step is
+  // checking whether some plugin's `handleKeyDown` is itself swallowing
+  // Enter without acting on it in this exact context (cursor at the end
+  // of a plain paragraph after a blank line), which would need actual
+  // remote debugging (`chrome://inspect`) to see the command chain run.
   const AndroidBeforeInputEnterFix = Extension.create({
     name: 'finderAndroidBeforeInputEnterFix',
     addProseMirrorPlugins() {
@@ -442,21 +432,12 @@ export default function NoteEditor({
               beforeinput(view, event) {
                 if (event.inputType !== 'insertParagraph' && event.inputType !== 'insertLineBreak') return false;
                 event.preventDefault();
-                view.dom.dispatchEvent(new KeyboardEvent('keydown', {
-                  key: 'Enter',
-                  code: 'Enter',
-                  keyCode: 13,
-                  which: 13,
-                  shiftKey: event.inputType === 'insertLineBreak',
-                  bubbles: true,
-                  cancelable: true
-                }));
-                if (isMobileBrowser) {
-                  setTimeout(() => {
-                    view.dom.blur();
-                    view.focus();
-                  }, 50);
-                }
+                const fakeEvent = document.createEvent('Event');
+                fakeEvent.initEvent('keydown', true, true);
+                fakeEvent.keyCode = 13;
+                fakeEvent.key = fakeEvent.code = 'Enter';
+                fakeEvent.shiftKey = event.inputType === 'insertLineBreak';
+                view.someProp('handleKeyDown', (f) => f(view, fakeEvent));
                 return true;
               }
             }
