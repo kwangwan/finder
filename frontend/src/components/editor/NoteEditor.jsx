@@ -371,15 +371,39 @@ export default function NoteEditor({
   // for a different Android backspace bug (same file, `beforeinput.
   // deleteContentBackward` case) — not a novel technique.
   //
-  // UNVERIFIED: could not reproduce this bug at all via automation (no
-  // tool available here can simulate a real Android virtual keyboard's
-  // actual event sequence), so this fix is based on the mechanism being a
-  // documented, known gap rather than on confirming it actually resolves
-  // the reported symptom. Needs a real-device retest. If it doesn't help,
-  // remove it rather than layering more guesses on top — the next
-  // diagnostic step at that point is capturing the actual `beforeinput`/
-  // `keydown` event sequence on the failing device (e.g. via remote
-  // debugging / chrome://inspect) rather than reasoning from source code.
+  // Round-1 real-device result: the underlying document DID update
+  // correctly (another connected client watching the same note over Yjs
+  // saw a normal line break appear) — so the transaction dispatch below
+  // works. But the Android device's OWN screen showed no visible change
+  // at all. This matches a known Android WebView/Chrome quirk: calling
+  // `preventDefault()` inside `beforeinput` stops the native mutation as
+  // intended, but can also leave the on-screen caret/composited text
+  // layer desynced from the real DOM/model, since the system-level
+  // IME/InputConnection never got the native completion signal it
+  // expected. prosemirror-view's own source hits the exact same problem
+  // for a different Android input quirk (`beforeinput.
+  // deleteContentBackward`, same file) and fixes it the same way: blur
+  // and refocus the view shortly after, forcing the OS to resync its
+  // rendered view with the actual document.
+  //
+  // Scoped to mobile browsers generally, not just Android specifically:
+  // the confirmed real-device symptom (no visible change, model correct)
+  // is Android, but a separate still-unexplained report — the same
+  // corruption showing up in Chrome DevTools' mobile-emulation mode, on
+  // a long-lived desktop tab, with a REAL physical keyboard — hasn't been
+  // pinned down to Android's virtual-keyboard input path at all, so an
+  // iOS/other-mobile version of this exact desync is plausible too. The
+  // resync trick is cheap (a momentary focus flash) on a device that
+  // didn't actually need it, so err on the broader side here.
+  const isMobileBrowser = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+  // UNVERIFIED beyond the one real-device round described above — this is
+  // still based on the mechanism being a documented, known gap rather
+  // than a confirmed fix. If the blur/refocus resync doesn't help either,
+  // remove this whole extension rather than layering more guesses on top
+  // — the next diagnostic step at that point is capturing the actual
+  // `beforeinput`/`keydown` event sequence on the failing device via
+  // remote debugging (`chrome://inspect`), not more source-reading.
   const AndroidBeforeInputEnterFix = Extension.create({
     name: 'finderAndroidBeforeInputEnterFix',
     addProseMirrorPlugins() {
@@ -399,6 +423,12 @@ export default function NoteEditor({
                   bubbles: true,
                   cancelable: true
                 }));
+                if (isMobileBrowser) {
+                  setTimeout(() => {
+                    view.dom.blur();
+                    view.focus();
+                  }, 50);
+                }
                 return true;
               }
             }
