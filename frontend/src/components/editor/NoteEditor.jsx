@@ -8,6 +8,8 @@ import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
+import { Extension } from '@tiptap/core';
+import { Plugin } from 'prosemirror-state';
 import {
   ArrowLeft,
   Download,
@@ -338,25 +340,80 @@ export default function NoteEditor({
     };
   }, [file?.id, syncUrl]);
 
-  // KNOWN ISSUE, unresolved (2026-08-23): on Android, pressing Enter can
-  // corrupt/scramble the document content right where new text was being
-  // inserted. Confirmed identical in both Samsung Internet and Chrome on
-  // the same device, so it isn't one browser engine's bug. Two hypotheses
-  // were investigated and ruled out: (1) BlockNote's default table-cell
-  // Enter keymap (reverted — reproduces with no table involved at all,
-  // plain bullet list), and (2) a Yjs remote-update/IME-composition
-  // collision (reproduces solo, alone, in a brand-new note, with no other
-  // client connected, and with plain ASCII input — not composition-
-  // related). Root cause not found — desktop-synthetic keydown testing via
-  // browser automation cannot reproduce whatever a real Android virtual
-  // keyboard actually sends. Revisit if a future @blocknote/core or
-  // prosemirror-view release changes Android/mobile Enter handling, or if
-  // a concrete repro (screen recording, exact device+keyboard) surfaces.
+  // WORKAROUND for an Android-only bug, unverified on a real device — see
+  // explanation below. Confirmed NOT caused by BlockNote's table keymap
+  // (reverted — reproduced with no table involved) and NOT a Yjs remote-
+  // update/IME-composition collision (reproduces solo, in a brand-new
+  // note, with plain ASCII, and persists across a full page reload — so
+  // it isn't a stale in-tab render desync either). The one thing every
+  // report has in common is a real Android device (Samsung Internet AND
+  // Chrome both show it — same OS, different engines — so it's not one
+  // browser's bug specifically).
+  //
+  // prosemirror-view's own source (see its `handlers.beforeinput`) admits
+  // it barely handles `beforeinput` events: "support is so spotty that
+  // I'm still waiting to see where they are going" — Enter is normally
+  // handled purely via the legacy `keydown` → keymap path. But several
+  // Android keyboards (Gboard, Samsung Keyboard) commit text and newlines
+  // through the modern `beforeinput`/`InputConnection` API instead of a
+  // clean `keydown`, so BOTH paths can fire for one Enter press: the
+  // keymap's own controlled transaction, AND the browser's native,
+  // uncontrolled contenteditable mutation that ProseMirror's DOM-mutation
+  // observer then has to reverse-engineer — which is exactly the kind of
+  // guesswork that can split freshly-typed text into arbitrary chunks in
+  // a collaborative (Yjs-backed) document.
+  //
+  // Mitigation: intercept `beforeinput` directly, suppress the browser's
+  // own native mutation with `preventDefault()`, and re-dispatch a real
+  // synthetic `Enter` `keydown` so ONLY ProseMirror's own (already
+  // correct) keymap path ever runs — never the native/observer path. This
+  // mirrors a pattern ProseMirror's own view code already uses internally
+  // for a different Android backspace bug (same file, `beforeinput.
+  // deleteContentBackward` case) — not a novel technique.
+  //
+  // UNVERIFIED: could not reproduce this bug at all via automation (no
+  // tool available here can simulate a real Android virtual keyboard's
+  // actual event sequence), so this fix is based on the mechanism being a
+  // documented, known gap rather than on confirming it actually resolves
+  // the reported symptom. Needs a real-device retest. If it doesn't help,
+  // remove it rather than layering more guesses on top — the next
+  // diagnostic step at that point is capturing the actual `beforeinput`/
+  // `keydown` event sequence on the failing device (e.g. via remote
+  // debugging / chrome://inspect) rather than reasoning from source code.
+  const AndroidBeforeInputEnterFix = Extension.create({
+    name: 'finderAndroidBeforeInputEnterFix',
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          props: {
+            handleDOMEvents: {
+              beforeinput(view, event) {
+                if (event.inputType !== 'insertParagraph' && event.inputType !== 'insertLineBreak') return false;
+                event.preventDefault();
+                view.dom.dispatchEvent(new KeyboardEvent('keydown', {
+                  key: 'Enter',
+                  code: 'Enter',
+                  keyCode: 13,
+                  which: 13,
+                  shiftKey: event.inputType === 'insertLineBreak',
+                  bubbles: true,
+                  cancelable: true
+                }));
+                return true;
+              }
+            }
+          }
+        })
+      ];
+    }
+  });
+
   const editor = useCreateBlockNote(
     collab
       ? withCollaboration({
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
+          _tiptapOptions: { extensions: [AndroidBeforeInputEnterFix] },
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
             try {
@@ -375,7 +432,7 @@ export default function NoteEditor({
             provider: { awareness: collab.provider.awareness }
           }
         })
-      : { schema: blockNoteSchema, dictionary: blockNoteKo },
+      : { schema: blockNoteSchema, dictionary: blockNoteKo, _tiptapOptions: { extensions: [AndroidBeforeInputEnterFix] } },
     [file?.id, syncUrl, collab]
   );
 
