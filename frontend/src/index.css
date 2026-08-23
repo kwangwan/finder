@@ -3295,6 +3295,13 @@ h1, h2, h3, h4, h5, h6,
   align-items: center;
   gap: 5px;
   overflow-x: auto;
+  /* overflow-x: auto forces overflow-y to auto too (per spec, an axis can't
+     stay "visible" once the other isn't), which clips the hover translateY
+     lift on .dock-tab-item below. Reserve the lift's space with padding and
+     cancel it with a matching negative margin so the row's rendered size
+     (and its flex centering) is unaffected. */
+  padding-top: 4px;
+  margin-top: -4px;
   scrollbar-width: none;
   max-width: 60vw;
 }

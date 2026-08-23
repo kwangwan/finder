@@ -316,16 +316,31 @@ export default function PreviewWindow({
   if (minimizePhase === 'hidden') return null;
 
   const isMinimizingOut = minimizePhase === 'closing';
-  const dockTargetX = (typeof window !== 'undefined' ? window.innerWidth / 2 : 0) - 40;
-  const dockTargetY = typeof window !== 'undefined' ? window.innerHeight - 40 : 0;
+  // Transform-origin defaults to the box's own center, so translate+scale
+  // together land the box's center at (target + size/2), not at target —
+  // for a wide window that drifts the shrink point noticeably off-center.
+  // Anchoring at the top-left corner makes the translate target exactly the
+  // final box's top-left, so we can center the shrunk box precisely by
+  // offsetting for its own (post-scale) size.
+  const MINIMIZE_SCALE = 0.05;
+  let dockTargetX = 0;
+  let dockTargetY = 0;
+  if (typeof document !== 'undefined') {
+    const dockRect = document.querySelector('.os-desktop-dock')?.getBoundingClientRect();
+    const centerX = dockRect ? dockRect.left + dockRect.width / 2 : window.innerWidth / 2;
+    const centerY = dockRect ? dockRect.top + dockRect.height / 2 : window.innerHeight - 32;
+    dockTargetX = centerX - (size.width * MINIMIZE_SCALE) / 2;
+    dockTargetY = centerY - (size.height * MINIMIZE_SCALE) / 2;
+  }
 
   return (
     <div
       ref={windowRef}
       className={`os-preview-window ${isMaximized ? 'is-maximized' : ''} ${isMinimizingOut ? 'is-minimizing' : ''}`}
       style={{
+        transformOrigin: 'top left',
         transform: isMinimizingOut
-          ? `translate3d(${dockTargetX}px, ${dockTargetY}px, 0) scale(0.05)`
+          ? `translate3d(${dockTargetX}px, ${dockTargetY}px, 0) scale(${MINIMIZE_SCALE})`
           : `translate3d(${position.x}px, ${position.y}px, 0)`,
         width: `${size.width}px`,
         height: `${size.height}px`,
