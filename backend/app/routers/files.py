@@ -1,10 +1,11 @@
 import uuid
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, or_, and_, desc, asc, func
 import urllib.parse
 from fastapi.responses import StreamingResponse
@@ -51,7 +52,7 @@ async def _roll_open_version(db: AsyncSession, file_item: FileItem, content: str
         open_version.content = content
         open_version.name = name
         open_version.edited_by = edited_by
-        open_version.created_at = datetime.utcnow()
+        open_version.created_at = datetime.now(timezone.utc)
     else:
         db.add(FileVersion(file_id=file_item.id, name=name, content=content, edited_by=edited_by, is_open=True))
 
@@ -389,39 +390,57 @@ async def update_markdown_note(
         if folder and target_ws_id and folder.workspace_id and target_ws_id != folder.workspace_id:
             raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
 
-    old_size = file_item.size_bytes or 0
-    old_content = file_item.content
-    old_name = file_item.name
-    old_last_edited_by = file_item.last_edited_by
-    # Compare against the actual previous content, not just "was a content
-    # field sent" — the editor's 1s autosave debounce can fire a PUT whose
-    # content is identical to what's already stored (e.g. focus/blur with no
-    # real edit), and that shouldn't count as a change for re-embedding or
-    # version history purposes.
-    content_changed = req.content is not None and req.content != (old_content or "")
-    if req.name is not None:
-        file_item.name = req.name
-    if req.folder_id is not None:
-        file_item.folder_id = req.folder_id
-    if req.workspace_id is not None:
-        file_item.workspace_id = req.workspace_id
-    if content_changed:
-        new_size = len(req.content.encode("utf-8"))
-        size_delta = new_size - old_size
-        if size_delta > 0:
-            await quota_service.check_quota(db, target_ws_id, current_user, size_delta)
-        file_item.content = req.content
-        file_item.size_bytes = new_size
-        file_item.last_edited_by = current_user.id
-    if req.tags is not None:
-        file_item.tags = req.tags
-    if req.is_favorite is not None:
-        file_item.is_favorite = req.is_favorite
+    # Two saves for the same file landing in overlapping transactions (two
+    # tabs, or the editor's own bounded autosave retry racing a slow-but-not-
+    # actually-failed original request) can each see "no open version yet"
+    # and both try to open one — caught at commit time by the
+    # ux_file_versions_one_open_per_file unique index. Retry once against a
+    # freshly-fetched file_item: by then the other request's insert has
+    # committed, so _get_open_version sees it and updates it in place
+    # instead of colliding again.
+    for attempt in range(2):
+        if attempt > 0:
+            file_item = await db.get(FileItem, file_id)
 
-    if content_changed:
-        await _roll_open_version(db, file_item, old_content, old_name, old_last_edited_by)
+        old_size = file_item.size_bytes or 0
+        old_content = file_item.content
+        old_name = file_item.name
+        old_last_edited_by = file_item.last_edited_by
+        # Compare against the actual previous content, not just "was a content
+        # field sent" — the editor's 1s autosave debounce can fire a PUT whose
+        # content is identical to what's already stored (e.g. focus/blur with no
+        # real edit), and that shouldn't count as a change for re-embedding or
+        # version history purposes.
+        content_changed = req.content is not None and req.content != (old_content or "")
+        if req.name is not None:
+            file_item.name = req.name
+        if req.folder_id is not None:
+            file_item.folder_id = req.folder_id
+        if req.workspace_id is not None:
+            file_item.workspace_id = req.workspace_id
+        if content_changed:
+            new_size = len(req.content.encode("utf-8"))
+            size_delta = new_size - old_size
+            if size_delta > 0:
+                await quota_service.check_quota(db, target_ws_id, current_user, size_delta)
+            file_item.content = req.content
+            file_item.size_bytes = new_size
+            file_item.last_edited_by = current_user.id
+        if req.tags is not None:
+            file_item.tags = req.tags
+        if req.is_favorite is not None:
+            file_item.is_favorite = req.is_favorite
 
-    await db.commit()
+        if content_changed:
+            await _roll_open_version(db, file_item, old_content, old_name, old_last_edited_by)
+
+        try:
+            await db.commit()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 1:
+                raise
     await db.refresh(file_item)
 
     if content_changed:
@@ -703,7 +722,7 @@ async def trash_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     file_item.is_trashed = True
-    file_item.trashed_at = datetime.utcnow()
+    file_item.trashed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(file_item)
     return _to_file_response(file_item)

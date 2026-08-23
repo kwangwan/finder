@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import re
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -155,7 +155,7 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         is_approved=True,
         is_active=True,
         storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
-        last_login_at=datetime.utcnow()
+        last_login_at=datetime.now(timezone.utc)
     )
     db.add(user)
     await db.commit()
@@ -195,7 +195,7 @@ async def login_with_password(req: PasswordLoginRequest, db: AsyncSession = Depe
             detail="이메일 또는 비밀번호가 일치하지 않습니다."
         )
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
 
@@ -246,13 +246,13 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             is_approved=True,
             is_active=True,
             storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
-            last_login_at=datetime.utcnow()
+            last_login_at=datetime.now(timezone.utc)
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
     else:
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         if google_profile.get("picture"):
             user.picture = google_profile["picture"]
         if google_profile.get("name"):
@@ -302,13 +302,13 @@ async def dev_login(req: DevLoginRequest, db: AsyncSession = Depends(get_db)):
             is_admin=False,
             is_approved=False,
             is_active=True,
-            last_login_at=datetime.utcnow()
+            last_login_at=datetime.now(timezone.utc)
         )
         db.add(user)
         await db.commit()
         await db.refresh(user)
     else:
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         if req.name:
             user.name = req.name
         await db.commit()

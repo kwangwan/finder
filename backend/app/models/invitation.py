@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -15,9 +15,9 @@ class Invitation(Base):
     role = Column(String(50), default="member", nullable=False)  # 'admin' or 'member'
     invited_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="CASCADE"), nullable=False)
     is_admin_invite = Column(Boolean, default=False, nullable=False)  # If true, auto-approves user account on accept
-    expires_at = Column(DateTime, nullable=False)  # 7 days from creation
+    expires_at = Column(DateTime(timezone=True), nullable=False)  # 7 days from creation
     status = Column(String(50), default="pending", nullable=False)  # 'pending', 'accepted', 'expired', 'cancelled'
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     inviter = relationship("User", foreign_keys=[invited_by])
@@ -25,7 +25,7 @@ class Invitation(Base):
 
     @property
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def to_dict(self):
         return {

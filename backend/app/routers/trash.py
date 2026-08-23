@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -75,7 +75,7 @@ async def _purge_folder_recursive(db: AsyncSession, folder: Folder):
 
 async def _auto_purge_expired(db: AsyncSession):
     """Automatically purge trashed items older than 30 days."""
-    cutoff = datetime.utcnow() - timedelta(days=30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     
     # Purge expired files
     expired_files_res = await db.execute(
@@ -107,7 +107,7 @@ async def get_trash(
     except Exception as e:
         print(f"[Trash Auto-Purge Warning] {e}")
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     # 1. Query trashed folders
     folder_conditions = [Folder.is_trashed == True]

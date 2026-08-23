@@ -83,6 +83,43 @@ async def init_db():
             # Last editor (distinct from created_by/uploader) for markdown notes
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS last_edited_by UUID REFERENCES kb_users(id) ON DELETE SET NULL;",
         ]
+
+        # Every timestamp column was originally created as a naive
+        # TIMESTAMP, always populated via datetime.utcnow() — so every value
+        # already stored is UTC, just not labeled as such. FastAPI/Pydantic
+        # serializes a naive datetime with no offset, and per the JS Date
+        # spec, `new Date(isoStringWithNoOffset)` is parsed as browser-LOCAL
+        # time, not UTC — silently shifting every timestamp shown anywhere
+        # in the app by the viewer's UTC offset. Converting each column to
+        # TIMESTAMPTZ (reinterpreting the existing naive values as UTC, not
+        # shifting them) makes Postgres/asyncpg hand back tz-aware datetimes,
+        # which serialize with an explicit offset and let the browser convert
+        # correctly. Guarded by an information_schema check (not just
+        # IF NOT EXISTS, which ALTER COLUMN TYPE has no equivalent of) so
+        # this is a no-op — not a repeated, wrongly-double-shifting cast —
+        # on every startup after the first.
+        TIMESTAMPTZ_COLUMNS = [
+            ("kb_users", "created_at"), ("kb_users", "updated_at"), ("kb_users", "last_login_at"),
+            ("kb_files", "created_at"), ("kb_files", "updated_at"), ("kb_files", "trashed_at"),
+            ("kb_folders", "created_at"), ("kb_folders", "updated_at"), ("kb_folders", "trashed_at"),
+            ("kb_workspaces", "created_at"), ("kb_workspaces", "updated_at"),
+            ("kb_workspace_members", "created_at"),
+            ("kb_invitations", "created_at"), ("kb_invitations", "expires_at"),
+            ("kb_file_versions", "created_at"),
+            ("kb_document_chunks", "created_at"),
+            ("deletion_queue", "created_at"), ("deletion_queue", "updated_at"),
+        ]
+        for table, column in TIMESTAMPTZ_COLUMNS:
+            migrations.append(f"""
+                DO $$
+                BEGIN
+                    IF (SELECT data_type FROM information_schema.columns
+                        WHERE table_name = '{table}' AND column_name = '{column}') = 'timestamp without time zone' THEN
+                        ALTER TABLE {table} ALTER COLUMN {column} TYPE TIMESTAMPTZ USING {column} AT TIME ZONE 'UTC';
+                    END IF;
+                END $$;
+            """)
+
         for sql in migrations:
             try:
                 await conn.execute(text(sql))
@@ -97,6 +134,42 @@ async def init_db():
             ))
         except Exception as e:
             print(f"[DB Init Index Warning] Could not create HNSW index: {e}")
+
+        # At most one "open" (still-being-edited) version row per file — see
+        # FileVersion.is_open. Without this, two requests that both read "no
+        # open version yet" before either commits (a genuine race under
+        # concurrent edits — e.g. two tabs, or an autosave retry overlapping
+        # a slow-but-still-in-flight original request) could each insert
+        # their own open row, leaving a file with two simultaneously "open"
+        # versions — confirmed already present in existing data, not just a
+        # theoretical race. The retry path in update_markdown_note (files.py)
+        # is what turns the resulting IntegrityError into a clean recovery
+        # instead of a failed save going forward.
+        #
+        # A unique index can't be created while duplicates already violate
+        # it, so first close out every already-open row except the most
+        # recent one per file (into permanent history, same as any other
+        # session-end close — no content is discarded).
+        try:
+            await conn.execute(text("""
+                UPDATE kb_file_versions v
+                SET is_open = false
+                WHERE v.is_open = true
+                AND v.created_at < (
+                    SELECT MAX(v2.created_at) FROM kb_file_versions v2
+                    WHERE v2.file_id = v.file_id AND v2.is_open = true
+                );
+            """))
+        except Exception as e:
+            print(f"[DB Migration Warning] Could not dedupe pre-existing open file versions: {e}")
+
+        try:
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_file_versions_one_open_per_file "
+                "ON kb_file_versions (file_id) WHERE is_open = true;"
+            ))
+        except Exception as e:
+            print(f"[DB Init Index Warning] Could not create one-open-version-per-file index: {e}")
 
         # Recalculate each user's storage_used_bytes based on files in their owned workspaces.
         # Trashed files still occupy real storage until permanently purged, so they must stay

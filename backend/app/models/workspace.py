@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -21,8 +21,8 @@ class Workspace(Base):
     # "no workspace selected" state — the frontend falls back to it whenever
     # the previously active workspace is missing or unset.
     is_default = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     owner = relationship("User", foreign_keys=[owner_id])
@@ -62,7 +62,7 @@ class WorkspaceMember(Base):
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("kb_workspaces.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="CASCADE"), nullable=False)
     role = Column(String(50), default="member", nullable=False)  # 'owner', 'admin', 'member'
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("workspace_id", "user_id", name="uq_workspace_user"),

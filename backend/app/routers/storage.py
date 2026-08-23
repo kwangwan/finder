@@ -4,7 +4,7 @@ import json
 import asyncio
 import tempfile
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Response, UploadFile, File, Form, status
@@ -408,7 +408,7 @@ async def cleanup_phantom_files(db: AsyncSession, max_age_hours: int = 48) -> in
     as the table grows — anything older has already been checked by a
     previous run of this same periodic job.
     """
-    cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     res = await db.execute(
         select(FileItem).where(FileItem.created_at >= cutoff, FileItem.s3_key.isnot(None))
     )

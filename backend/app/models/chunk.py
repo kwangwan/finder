@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -15,7 +15,7 @@ class DocumentChunk(Base):
     chunk_index = Column(Integer, nullable=False, default=0)
     content = Column(Text, nullable=False)
     embedding = Column(Vector(settings.EMBEDDING_DIM), nullable=True) # 768-dim vector
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     file = relationship("FileItem", back_populates="chunks")

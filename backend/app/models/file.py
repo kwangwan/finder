@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, BigInteger, Boolean, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -25,10 +25,10 @@ class FileItem(Base):
     embedded_chunks_count = Column(BigInteger, default=0, nullable=False)
     is_favorite = Column(Boolean, default=False, nullable=False)
     is_trashed = Column(Boolean, default=False, nullable=False, index=True)
-    trashed_at = Column(DateTime, nullable=True)
+    trashed_at = Column(DateTime(timezone=True), nullable=True)
     tags = Column(JSON, default=list, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     folder = relationship("Folder", back_populates="files")

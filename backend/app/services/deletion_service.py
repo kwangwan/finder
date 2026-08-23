@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select, and_, delete, inspect as sql_inspect
@@ -153,7 +153,7 @@ class DeletionService:
                     item.status = "failed"
                     item.retry_count += 1
                     item.error_message = str(e)[:500]
-                    item.updated_at = datetime.utcnow()
+                    item.updated_at = datetime.now(timezone.utc)
 
             # Delete successfully processed queue items
             if deleted_ids:

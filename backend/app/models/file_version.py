@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, String, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
@@ -27,7 +27,7 @@ class FileVersion(Base):
     name = Column(String(255), nullable=True)  # the note's title at snapshot time
     content = Column(Text, nullable=False)
     edited_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     is_open = Column(Boolean, default=False, nullable=False)
 
     def to_dict(self, include_content: bool = True):

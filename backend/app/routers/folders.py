@@ -1,7 +1,7 @@
 import uuid
 import math
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
@@ -69,7 +69,7 @@ async def reconcile_orphaned_trashed_files(db: AsyncSession) -> int:
     for f in files:
         folder = await db.get(Folder, f.folder_id)
         f.is_trashed = True
-        f.trashed_at = folder.trashed_at or datetime.utcnow()
+        f.trashed_at = folder.trashed_at or datetime.now(timezone.utc)
     if files:
         await db.commit()
     return len(files)
@@ -358,7 +358,7 @@ async def trash_folder(
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
 
-    await _set_folder_trash_recursive(db, folder, is_trashed=True, trashed_at=datetime.utcnow())
+    await _set_folder_trash_recursive(db, folder, is_trashed=True, trashed_at=datetime.now(timezone.utc))
     await db.commit()
     await db.refresh(folder)
 

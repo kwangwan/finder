@@ -1,6 +1,6 @@
 import uuid
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
@@ -106,7 +106,7 @@ async def create_invitation(
             Invitation.email == email,
             Invitation.workspace_id == req.workspace_id,
             Invitation.status == "pending",
-            Invitation.expires_at > datetime.utcnow()
+            Invitation.expires_at > datetime.now(timezone.utc)
         )
     )
     if existing_inv.scalar_one_or_none():
@@ -116,7 +116,7 @@ async def create_invitation(
         )
 
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(days=7)  # 7 days expiration
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)  # 7 days expiration
 
     invitation = Invitation(
         email=email,
@@ -238,7 +238,7 @@ async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Dep
             is_admin=False,
             is_approved=inv.is_admin_invite,  # If admin invited -> auto approve!
             is_active=True,
-            last_login_at=datetime.utcnow()
+            last_login_at=datetime.now(timezone.utc)
         )
         db.add(user)
         await db.commit()
@@ -247,7 +247,7 @@ async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Dep
         # If existing user, auto-approve if invited by admin
         if inv.is_admin_invite:
             user.is_approved = True
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(user)
 
