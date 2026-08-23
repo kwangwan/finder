@@ -338,6 +338,20 @@ export default function NoteEditor({
     };
   }, [file?.id, syncUrl]);
 
+  // KNOWN ISSUE, unresolved (2026-08-23): on Android, pressing Enter can
+  // corrupt/scramble the document content right where new text was being
+  // inserted. Confirmed identical in both Samsung Internet and Chrome on
+  // the same device, so it isn't one browser engine's bug. Two hypotheses
+  // were investigated and ruled out: (1) BlockNote's default table-cell
+  // Enter keymap (reverted — reproduces with no table involved at all,
+  // plain bullet list), and (2) a Yjs remote-update/IME-composition
+  // collision (reproduces solo, alone, in a brand-new note, with no other
+  // client connected, and with plain ASCII input — not composition-
+  // related). Root cause not found — desktop-synthetic keydown testing via
+  // browser automation cannot reproduce whatever a real Android virtual
+  // keyboard actually sends. Revisit if a future @blocknote/core or
+  // prosemirror-view release changes Android/mobile Enter handling, or if
+  // a concrete repro (screen recording, exact device+keyboard) surfaces.
   const editor = useCreateBlockNote(
     collab
       ? withCollaboration({

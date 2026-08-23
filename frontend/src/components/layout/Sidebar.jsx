@@ -14,8 +14,7 @@ import {
   Layers,
   Settings,
   Trash2,
-  ChevronsLeft,
-  Loader2
+  ChevronsLeft
 } from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 
@@ -243,11 +242,7 @@ export default function Sidebar({
         >
           <Layers size={16} />
           <span>전체 파일</span>
-          {isFoldersLoading ? (
-            <Loader2 size={12} className="spin" color="var(--text-muted)" />
-          ) : (
-            stats?.total_files > 0 && <span className="menu-badge">{stats.total_files}</span>
-          )}
+          {!isFoldersLoading && stats?.total_files > 0 && <span className="menu-badge">{stats.total_files}</span>}
         </li>
         <li
           className={`menu-item ${activeView === 'notes' ? 'active' : ''}`}
@@ -255,11 +250,7 @@ export default function Sidebar({
         >
           <FileText size={16} />
           <span>문서</span>
-          {isFoldersLoading ? (
-            <Loader2 size={12} className="spin" color="var(--text-muted)" />
-          ) : (
-            stats?.note_count > 0 && <span className="menu-badge">{stats.note_count}</span>
-          )}
+          {!isFoldersLoading && stats?.note_count > 0 && <span className="menu-badge">{stats.note_count}</span>}
         </li>
         <li 
           className={`menu-item ${activeView === 'favorites' ? 'active' : ''}`}
@@ -294,8 +285,10 @@ export default function Sidebar({
       <div className="folder-tree" style={{ padding: '0.15rem 0.85rem' }}>
         <div className="folder-tree-inner">
           {isFoldersLoading ? (
-            <div style={{ padding: '1.5rem', display: 'flex', justifyContent: 'center' }}>
-              <Loader2 size={16} className="spin" color="var(--text-muted)" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.25rem 0' }}>
+              {[1, 2, 3].map(i => (
+                <div key={i} className="skeleton-box" style={{ height: 28, borderRadius: 'var(--radius-sm)' }} />
+              ))}
             </div>
           ) : folders.length === 0 ? (
             <div style={{ padding: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
