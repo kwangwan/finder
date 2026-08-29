@@ -16,6 +16,11 @@ class User(Base):
     picture = Column(String(1024), nullable=True)
     google_id = Column(String(255), nullable=True, index=True)
     hashed_password = Column(String(255), nullable=True)
+    # The account's public identity: lowercase ASCII, unique, and the name
+    # everything in a shared space is attributed to. Separate from `name`
+    # because a display name has to be able to be Korean, and an identity has
+    # to be impossible to imitate — see username_service.
+    username = Column(String(20), unique=True, index=True, nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
     # Not a person. Holds the shared workspace's storage quota so that pool is
     # separate from any real user's, and is hidden from the user list and from
@@ -59,6 +64,7 @@ class User(Base):
             "picture": self.picture,
             "google_id": self.google_id,
             "has_password": bool(self.hashed_password),
+            "username": self.username,
             "is_admin": self.is_admin,
             "is_system": self.is_system,
             "can_write_shared": self.can_write_shared,

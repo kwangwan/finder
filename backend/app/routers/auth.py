@@ -169,8 +169,23 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
     user_count = user_count_res.scalar_one_or_none() or 0
     is_first_user = (user_count == 0)
 
+    # The handle is the account's public identity, so it is settled at signup
+    # rather than left to be filled in later — everything in the shared space
+    # is attributed to it.
+    from app.services import username_service
+    if req.username:
+        try:
+            desired = username_service.validate(req.username)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if not await username_service.is_available(db, desired):
+            raise HTTPException(status_code=409, detail="이미 사용 중이거나 기존 아이디와 혼동되는 아이디입니다.")
+    else:
+        desired = await username_service.allocate(db, username_service.suggest_from_email(req.email))
+
     user = User(
         email=email,
+        username=desired,
         name=req.name or email.split("@")[0],
         hashed_password=hash_password(req.password),
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
@@ -260,8 +275,11 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
         user_count = user_count_res.scalar_one_or_none() or 0
         is_first_user = (user_count == 0)
 
+        from app.services import username_service as _uns
+        google_handle = await _uns.allocate(db, _uns.suggest_from_email(email))
         user = User(
             email=email,
+            username=google_handle,
             name=google_profile.get("name") or email.split("@")[0],
             picture=google_profile.get("picture"),
             google_id=google_profile.get("google_id"),
@@ -418,6 +436,7 @@ async def update_my_name(
         raise HTTPException(status_code=409, detail="이미 사용 중인 이름입니다. 다른 이름을 입력해 주세요.")
 
     await db.refresh(current_user)
+
     return {"id": str(current_user.id), "name": current_user.name}
 
 
@@ -438,3 +457,65 @@ async def check_name_available(
         )
     )).scalars().first()
     return {"available": clash is None}
+
+
+class UpdateUsernameRequest(BaseModel):
+    username: str = Field(..., max_length=20)
+
+
+@router.put("/me/username")
+async def update_my_username(
+    req: UpdateUsernameRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Change your handle.
+
+    Handles are compared by how they look, not by their bytes: "b0b" is not
+    available next to "bob". Without that, uniqueness would be satisfied by
+    strings nobody can tell apart, which is the whole problem it exists to
+    solve.
+    """
+    from app.services import username_service
+
+    try:
+        desired = username_service.validate(req.username)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if desired != (current_user.username or ""):
+        if not await username_service.is_available(db, desired, exclude_user_id=current_user.id):
+            raise HTTPException(status_code=409, detail="이미 사용 중이거나 기존 아이디와 혼동되는 아이디입니다.")
+
+    current_user.username = desired
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.")
+    await db.refresh(current_user)
+
+    # The personal folder is named by the handle, so it moves with it.
+    try:
+        from app.services.personal_folder_service import rename_personal_folder
+        await rename_personal_folder(db, current_user, desired)
+    except Exception:
+        pass
+
+    return {"id": str(current_user.id), "username": current_user.username}
+
+
+@router.get("/username-available")
+async def username_available(
+    username: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Open to unauthenticated callers so the signup form can check as you type."""
+    from app.services import username_service
+    try:
+        candidate = username_service.validate(username)
+    except ValueError as e:
+        return {"available": False, "reason": str(e)}
+    ok = await username_service.is_available(db, candidate)
+    return {"available": ok, "reason": None if ok else "이미 사용 중이거나 기존 아이디와 혼동되는 아이디입니다."}

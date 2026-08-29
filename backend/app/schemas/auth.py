@@ -10,6 +10,10 @@ class GoogleLoginRequest(BaseModel):
 class PasswordRegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=4, max_length=100)
+    # The account's public handle, chosen by the person signing up. Optional at
+    # the API level so an invitation flow that predates it still works; the
+    # signup form asks for it.
+    username: Optional[str] = Field(None, max_length=20)
     name: Optional[str] = None
     invite_token: Optional[str] = None
 
@@ -32,6 +36,7 @@ class UserResponse(BaseModel):
     email: str
     name: Optional[str] = None
     picture: Optional[str] = None
+    username: Optional[str] = None
     is_admin: bool
     is_approved: bool
     is_active: bool

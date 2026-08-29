@@ -4550,38 +4550,93 @@ select option {
    Shared workspace notice
    ========================================================================== */
 
-/* Everyone with an account can read this space, which is not obvious from a
-   file list that looks exactly like a private one — so it is stated on the
-   page rather than left to be discovered. */
+/* A standing rule about the space, not an alert — so it reads as a short
+   labelled list rather than a paragraph of bold text, and it can be folded
+   away once read instead of costing the same strip of screen every visit. */
 .shared-ws-notice {
   display: flex;
   align-items: flex-start;
-  gap: 0.6rem;
+  gap: 0.7rem;
   margin-bottom: 0.85rem;
-  padding: 0.7rem 0.9rem;
+  padding: 0.7rem 0.8rem;
   border-radius: var(--radius-md);
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid var(--accent-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent-primary);
+}
+
+.shared-ws-notice-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-primary);
+}
+
+.shared-ws-notice-body { flex: 1; min-width: 0; }
+
+.shared-ws-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 700;
   color: var(--text-primary);
-  font-size: 0.82rem;
-  line-height: 1.55;
+  margin-bottom: 3px;
+}
+
+.shared-ws-notice-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-amber);
+  color: #1a1205;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.shared-ws-notice-points {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
-.shared-ws-notice svg {
+.shared-ws-notice-close {
   flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
 }
+
+.shared-ws-notice-close:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
 .shared-ws-notice.is-readonly {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: var(--accent-amber);
+  border-left-color: var(--accent-amber);
 }
 
-.shared-ws-notice.is-readonly svg {
+.shared-ws-notice.is-readonly .shared-ws-notice-icon {
+  background: rgba(245, 158, 11, 0.14);
   color: var(--accent-amber);
+}
+
+@media (max-width: 480px) {
+  .shared-ws-notice { padding: 0.6rem 0.65rem; gap: 0.55rem; }
+  .shared-ws-notice-icon { width: 24px; height: 24px; }
 }
 
 /* Who uploaded a file, shown inline in a shared space where that is the first
@@ -4591,4 +4646,103 @@ select option {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 90px;
+}
+
+/* ==========================================================================
+   Selection action bar
+   ========================================================================== */
+
+/* Floats over the content it acts on, so it can be dragged out of the way —
+   the previous fixed position sat on top of the very rows being selected. */
+.batch-floating-bar {
+  position: fixed;
+  left: 50%;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.9rem 0.55rem 0.6rem;
+  max-width: calc(100vw - 1.5rem);
+  /* One row. Wrapping put the count on one line and the buttons on another,
+     which is what read as "not lined up" — and it made the bar taller, so a
+     remembered position no longer matched where it had been left. If it does
+     not fit, it scrolls sideways rather than restacking. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  justify-content: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.batch-floating-bar:active { cursor: grabbing; }
+
+.batch-bar-grip {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.batch-bar-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.batch-bar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* One rule for every button in the bar, so they share a height and baseline
+   instead of each carrying its own padding and drifting out of line. */
+.batch-floating-bar button:not(.batch-bar-close) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.batch-floating-bar button[data-danger="true"] { color: var(--accent-rose); }
+
+.batch-bar-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .batch-floating-bar {
+    left: 10px;
+    right: 10px;
+    max-width: none;
+    transform: none !important;
+  }
+
+  /* Labels are dropped on a phone rather than wrapped; the icons carry it and
+     the bar stays one row and one height. */
+  .batch-floating-bar button:not(.batch-bar-close) span:not(.hide-mobile) {
+    display: none;
+  }
 }

@@ -6,6 +6,7 @@
 import React from 'react';
 import {
   AlertCircle as LuAlertCircle,
+  AtSign as LuAtSign,
   AlertTriangle as LuAlertTriangle,
   ArrowDown as LuArrowDown,
   ArrowLeft as LuArrowLeft,
@@ -31,6 +32,7 @@ import {
   Code as LuCode,
   Columns as LuColumns,
   ClipboardPaste as LuClipboardPaste,
+  GripVertical as LuGripVertical,
   Copy as LuCopy,
   Scissors as LuScissors,
   CornerDownLeft as LuCornerDownLeft,
@@ -143,6 +145,7 @@ import {
   Collapse as PxCollapse,
   ColorsSwatch as PxColorsSwatch,
   Clipboard as PxClipboard,
+  Menu as PxMenu,
   Copy as PxCopy,
   Scissors as PxScissors,
   CornerDownLeft as PxCornerDownLeft,
@@ -241,6 +244,7 @@ export const ArrowLeft = makeIcon(LuArrowLeft, PxArrowLeft);
 export const ArrowRight = makeIcon(LuArrowRight, PxArrowRight);
 export const ArrowUp = makeIcon(LuArrowUp, PxArrowUp);
 export const ArrowUpDown = makeIcon(LuArrowUpDown, PxSortVertical);
+export const AtSign = makeIcon(LuAtSign, null);
 export const Ban = makeIcon(LuBan, PxCancel);
 export const Bold = makeIcon(LuBold, null);
 export const BookOpen = makeIcon(LuBookOpen, PxBookOpen);
@@ -260,6 +264,7 @@ export const Clock = makeIcon(LuClock, PxClock);
 export const Code = makeIcon(LuCode, PxCode);
 export const Columns = makeIcon(LuColumns, null);
 export const ClipboardPaste = makeIcon(LuClipboardPaste, PxClipboard);
+export const GripVertical = makeIcon(LuGripVertical, PxMenu);
 export const Copy = makeIcon(LuCopy, PxCopy);
 export const Scissors = makeIcon(LuScissors, PxScissors);
 export const CornerDownLeft = makeIcon(LuCornerDownLeft, PxCornerDownLeft);

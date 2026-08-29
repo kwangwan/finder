@@ -13,6 +13,12 @@ class Folder(Base):
     parent_id = Column(UUID(as_uuid=True), ForeignKey("kb_folders.id", ondelete="CASCADE"), nullable=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("kb_workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
+    # Set on a personal folder in the shared workspace: the one place its owner
+    # may write. SET NULL rather than CASCADE on purpose — when an account is
+    # removed the folder and everything in it stays, it simply stops having an
+    # owner who can write to it. Deleting a departed member's work is a
+    # decision for an administrator, not a side effect of closing an account.
+    owner_user_id = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True, index=True)
     icon = Column(String(50), nullable=True, default="folder")
     color = Column(String(50), nullable=True)
     is_trashed = Column(Boolean, default=False, nullable=False, index=True)

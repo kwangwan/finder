@@ -120,11 +120,11 @@ export async function loginWithGoogle(idToken, inviteToken = null) {
   return data;
 }
 
-export async function registerWithPassword(email, password, name = '', inviteToken = null) {
+export async function registerWithPassword(email, password, name = '', inviteToken = null, username = '') {
   const res = await fetch(`${API_BASE}/auth/register-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name, invite_token: inviteToken }),
+    body: JSON.stringify({ email, password, name, invite_token: inviteToken, username: username || undefined }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -133,6 +133,13 @@ export async function registerWithPassword(email, password, name = '', inviteTok
   const data = await res.json();
   setStoredToken(data.access_token);
   return data;
+}
+
+/** Open to unauthenticated callers so the signup form can check as you type. */
+export async function checkUsernameAvailable(username) {
+  const res = await fetch(`${API_BASE}/auth/username-available?username=${encodeURIComponent(username)}`);
+  if (!res.ok) return { available: false };
+  return res.json();
 }
 
 export async function loginWithPassword(email, password) {
@@ -201,6 +208,76 @@ export async function checkNameAvailable(name) {
   const res = await fetch(`${API_BASE}/auth/me/name-available?name=${encodeURIComponent(name)}`, { headers: authHeaders() });
   if (!res.ok) return { available: false };
   return res.json();
+}
+
+/** Folders at a workspace root, paged and searchable — the shared workspace
+ *  root holds one folder per person, so it cannot be listed whole. */
+export async function listRootFolders({ workspace_id, search = '', page = 1, page_size = 24 } = {}) {
+  const params = new URLSearchParams({ root_only: 'true', paged: 'true', page: String(page), page_size: String(page_size) });
+  if (workspace_id) params.append('workspace_id', workspace_id);
+  if (search) params.append('search', search);
+  const res = await fetch(`${API_BASE}/folders?${params.toString()}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('폴더 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function listFolderGrants(folderId) {
+  const res = await fetch(`${API_BASE}/folders/${folderId}/grants`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('공유 설정을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function addFolderGrant(folderId, email) {
+  const res = await fetch(`${API_BASE}/folders/${folderId}/grants`, {
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ email }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.detail || '권한을 부여하지 못했습니다.');
+  return body;
+}
+
+export async function removeFolderGrant(folderId, userId) {
+  const res = await fetch(`${API_BASE}/folders/${folderId}/grants/${userId}`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error('권한을 회수하지 못했습니다.');
+  return res.json();
+}
+
+export async function getReportReasons() {
+  const res = await fetch(`${API_BASE}/reports/reasons`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('신고 사유를 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function reportContent(fileId, reason, detail = '') {
+  const res = await fetch(`${API_BASE}/reports`, {
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ file_id: fileId, reason, detail }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.detail || '신고를 접수하지 못했습니다.');
+  return body;
+}
+
+export async function listReports(status = 'pending') {
+  const res = await fetch(`${API_BASE}/reports?status=${status}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('신고 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getPendingReportCount() {
+  const res = await fetch(`${API_BASE}/reports/pending-count`, { headers: authHeaders() });
+  if (!res.ok) return { pending: 0 };
+  return res.json();
+}
+
+export async function resolveReport(reportId, action, note = '') {
+  const res = await fetch(`${API_BASE}/reports/${reportId}/resolve`, {
+    method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ action, note }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.detail || '처리하지 못했습니다.');
+  return body;
 }
 
 export async function getSharedPolicy() {

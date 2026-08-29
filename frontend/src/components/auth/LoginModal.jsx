@@ -9,9 +9,10 @@ import {
   Mail, 
   Lock, 
   User as UserIcon,
-  CheckCircle2
+  CheckCircle2,
+  AtSign
 } from '../../utils/icons';
-import { loginWithGoogle, loginWithPassword, registerWithPassword, getAuthConfig, verifyInvitationToken } from '../../api';
+import { loginWithGoogle, loginWithPassword, registerWithPassword, getAuthConfig, verifyInvitationToken, checkUsernameAvailable } from '../../api';
 
 // Set via VITE_ENABLE_PASSWORD_AUTH in .env if password test login is needed
 const SHOW_TEST_AUTH = import.meta.env.VITE_ENABLE_PASSWORD_AUTH === 'true';
@@ -19,6 +20,23 @@ const SHOW_TEST_AUTH = import.meta.env.VITE_ENABLE_PASSWORD_AUTH === 'true';
 export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken = null }) {
   const [activeTab, setActiveTab] = useState('google'); // 'google' | 'password'
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [username, setUsername] = useState('');
+  const [usernameState, setUsernameState] = useState('idle'); // idle | checking | free | taken
+  const [usernameMsg, setUsernameMsg] = useState('');
+
+  useEffect(() => {
+    if (authMode !== 'register' || username.length < 3) { setUsernameState('idle'); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await checkUsernameAvailable(username);
+        setUsernameState(res.available ? 'free' : 'taken');
+        setUsernameMsg(res.reason || '');
+      } catch (e) {
+        setUsernameState('idle');
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [username, authMode]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -119,7 +137,7 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
     setError('');
     try {
       if (authMode === 'register') {
-        const data = await registerWithPassword(email.trim(), password.trim(), name.trim(), inviteToken);
+        const data = await registerWithPassword(email.trim(), password.trim(), name.trim(), inviteToken, username.trim());
         onLoginSuccess(data.user);
       } else {
         const data = await loginWithPassword(email.trim(), password.trim());
@@ -300,6 +318,47 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
                 {authMode === 'login' ? '회원가입 하기 →' : '기존 계정 로그인 →'}
               </button>
             </div>
+
+            {authMode === 'register' && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                  아이디
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <AtSign size={15} color="var(--text-muted)" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }} />
+                  <input
+                    type="text"
+                    required
+                    placeholder="hong_gildong"
+                    value={username}
+                    onChange={e => {
+                      // Normalised as it is typed, so what you see is exactly
+                      // what will be stored — there is only one way to write
+                      // any handle.
+                      const next = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
+                      setUsername(next);
+                      setUsernameState(next.length >= 3 ? 'checking' : 'idle');
+                    }}
+                    maxLength={20}
+                    style={{
+                      width: '100%',
+                      background: 'var(--bg-tertiary)',
+                      border: `1px solid ${usernameState === 'taken' ? 'var(--accent-rose)' : usernameState === 'free' ? 'var(--accent-emerald)' : 'var(--border-subtle)'}`,
+                      borderRadius: 'var(--radius-md)',
+                      padding: '0.55rem 0.75rem 0.55rem 2rem',
+                      fontSize: '0.85rem',
+                      color: 'var(--text-primary)',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+                <div style={{ fontSize: '0.7rem', marginTop: 4, color: usernameState === 'taken' ? 'var(--accent-rose)' : usernameState === 'free' ? 'var(--accent-emerald)' : 'var(--text-muted)' }}>
+                  {usernameState === 'taken' ? (usernameMsg || '사용할 수 없는 아이디입니다.')
+                    : usernameState === 'free' ? '사용할 수 있는 아이디입니다.'
+                    : '영문 소문자·숫자·밑줄(_) 3~20자. 다른 이용자에게 표시되는 고유 아이디입니다.'}
+                </div>
+              </div>
+            )}
 
             {authMode === 'register' && (
               <div style={{ marginBottom: '0.75rem' }}>

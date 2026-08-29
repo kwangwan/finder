@@ -145,6 +145,14 @@ async def list_my_workspaces(
     for shared in shared_res.scalars().unique().all():
         if shared.id not in known:
             workspaces.append(shared)
+        # Everyone needs the one folder they may write in to exist before they
+        # can do anything, and this is the first call every client makes.
+        if not current_user.is_admin:
+            try:
+                from app.services.personal_folder_service import ensure_personal_folder
+                await ensure_personal_folder(db, current_user, shared.id)
+            except Exception:
+                pass
 
     workspaces.sort(key=lambda w: (not w.is_shared, w.name))
     payload = []

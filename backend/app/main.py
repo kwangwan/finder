@@ -1,10 +1,11 @@
 import asyncio
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
-from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state
+from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state, reports
 from app.routers.trash import _auto_purge_expired
 from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files, backfill_missing_thumbnails
 from app.routers.folders import reconcile_orphaned_trashed_files
@@ -14,6 +15,29 @@ from app.services.media_metadata_service import backfill_media_metadata
 from app.services.deletion_service import deletion_service
 from app.services.copy_service import copy_service
 from app.services import shared_workspace_service
+
+async def _daily_storage_alert():
+    """
+    Re-send the shared-pool storage warning once a day while it is still over
+    its line.
+
+    A single mail at the moment of crossing is easy to miss — it arrives once
+    and nothing follows it. This wakes hourly and defers to the service, which
+    sends at most one message per calendar day and stops as soon as the pool
+    comes back under the threshold.
+    """
+    from app.services.shared_policy_service import send_daily_threshold_reminder, get_setting
+    while True:
+        try:
+            await asyncio.sleep(3600)  # check hourly; the service rate-limits to daily
+            async with AsyncSessionLocal() as db:
+                hour = int(await get_setting(db, "shared.alert_daily_hour_utc") or 0)
+                if datetime.now(timezone.utc).hour == hour:
+                    if await send_daily_threshold_reminder(db):
+                        print(f"[{settings.APP_NAME}] Daily shared-storage warning sent.")
+        except Exception as e:
+            print(f"[{settings.APP_NAME}] Daily storage alert error: {e}")
+
 
 async def _periodic_trash_cleanup():
     """Periodically purge trashed items older than 30 days, abandoned chunk
@@ -73,8 +97,21 @@ async def lifespan(app: FastAPI):
     # Start background deletion queue worker & periodic 30-day trash cleanup
     # Everyone needs somewhere to work from the moment they are approved, so
     # the shared workspace is ensured at startup rather than created on demand.
+    # Accounts created before handles existed get one derived from their email
+    # so nothing is left without an identity; they can change it afterwards.
+    try:
+        from app.core.database import AsyncSessionLocal as _S
+        from app.services import username_service
+        async with _S() as _db:
+            n = await username_service.backfill_all(_db)
+            if n:
+                print(f"[{settings.APP_NAME}] Assigned handles to {n} existing account(s).")
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] Username backfill skipped: {e}")
+
     await shared_workspace_service.ensure_on_startup()
 
+    daily_alert_task = asyncio.create_task(_daily_storage_alert())
     deletion_service.start_worker()
     # A job left mid-flight by the previous shutdown is nobody's work now;
     # put it back on the queue before the worker starts draining.
@@ -85,6 +122,7 @@ async def lifespan(app: FastAPI):
     yield
     
     cleanup_task.cancel()
+    daily_alert_task.cancel()
     await deletion_service.stop_worker()
     await copy_service.stop_worker()
     print(f"[{settings.APP_NAME}] Shutting down...")
@@ -124,6 +162,7 @@ app.include_router(folders.router)
 app.include_router(files.router)
 app.include_router(trash.router)
 app.include_router(storage.router)
+app.include_router(reports.router)
 app.include_router(search.router)
 app.include_router(system.router)
 app.include_router(window_state.router)

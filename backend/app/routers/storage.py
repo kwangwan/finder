@@ -190,7 +190,7 @@ async def get_presigned_upload_url(
         folder = await db.get(Folder, req.folder_id)
         if folder:
             workspace_id = folder.workspace_id
-    await access_service.require_write(db, current_user, workspace_id)
+    await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
     await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
@@ -293,7 +293,7 @@ async def initiate_multipart_upload(
         folder = await db.get(Folder, req.folder_id)
         if folder:
             workspace_id = folder.workspace_id
-    await access_service.require_write(db, current_user, workspace_id)
+    await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
     await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
@@ -647,7 +647,7 @@ async def init_chunk_upload(
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
-        await access_service.require_write(db, current_user, workspace_id)
+        await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
 
     # Reserve the declared size up front rather than just checking it, so a
     # second large upload starting seconds later (possibly from another
@@ -1031,7 +1031,7 @@ async def direct_upload(
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
     # Reserve the size up front (atomically checked-and-claimed in one UPDATE)
-        await access_service.require_write(db, current_user, workspace_id)
+        await access_service.require_write_at(db, current_user, workspace_id, folder_id)
     # rather than just checking it, so two direct uploads landing at nearly
     # the same moment can't both pass the check against the same stale
     # storage_used_bytes and together exceed quota — same reasoning as the

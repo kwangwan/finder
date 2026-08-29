@@ -77,9 +77,16 @@ async def _close_open_version(db: AsyncSession, file_item: FileItem, content: Op
     return True
 
 def _display_name(user: Optional[User]) -> Optional[str]:
+    """
+    Who a file is attributed to.
+
+    The handle, not the display name: a display name is free-form and can be
+    made to look like someone else's, which is exactly the confusion this is
+    meant to resolve when the file sits in a space everyone shares.
+    """
     if not user:
         return None
-    return user.name or user.email.split("@")[0]
+    return user.username or user.name or user.email.split("@")[0]
 
 async def _batch_user_names(db: AsyncSession, files: List[FileItem]) -> dict:
     """Uploader (created_by) and last-editor (last_edited_by) names, fetched
@@ -495,7 +502,7 @@ async def create_markdown_note(
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
-        await access_service.require_write(db, current_user, workspace_id)
+        await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
 
     name = req.name.strip()
     display_name = name
@@ -558,7 +565,7 @@ async def update_markdown_note(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="Note not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     target_ws_id = req.workspace_id if req.workspace_id is not None else file_item.workspace_id
     if req.workspace_id is not None and req.workspace_id != file_item.workspace_id:
@@ -716,7 +723,7 @@ async def checkpoint_file_version(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         return {"closed": False}
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     closed = await _close_open_version(db, file_item)
     if closed:
@@ -761,7 +768,7 @@ async def restore_file_version(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="Note not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     version = await db.get(FileVersion, version_id)
     if not version or version.file_id != file_id:
@@ -867,7 +874,8 @@ async def move_file(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, req.folder_id)
 
     if req.folder_id:
         if not await access_service.can_access_folder(db, current_user, req.folder_id):
@@ -900,7 +908,7 @@ async def rename_file(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     file_item.name = req.name.strip()
     await db.commit()
@@ -920,7 +928,7 @@ async def trash_file(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     file_item.is_trashed = True
     file_item.trashed_at = datetime.now(timezone.utc)
@@ -944,7 +952,7 @@ async def restore_file(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     # If parent folder is still trashed, restore file to root
     if file_item.folder_id:
@@ -971,7 +979,7 @@ async def delete_file(
     file_item = await db.get(FileItem, file_id)
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
-    await access_service.require_write(db, current_user, file_item.workspace_id)
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     # enqueue_file also cleans up any images/video/files this note's editor
     # uploaded directly into its own content — see DeletionService's
@@ -1076,7 +1084,7 @@ async def batch_move_files(
     if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
         raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
 
-    await access_service.require_write(db, current_user, req.workspace_id)
+    await access_service.require_write_at(db, current_user, req.workspace_id, req.folder_id)
     if req.folder_id:
         target_folder = await db.get(Folder, req.folder_id)
         if not target_folder or target_folder.workspace_id != req.workspace_id or target_folder.is_trashed:
@@ -1096,13 +1104,25 @@ async def batch_move_files(
     files_to_move = files_res.scalars().all()
 
     moved_count = 0
+    skipped_no_permission = 0
     for f in files_to_move:
-        if await access_service.can_access_file(db, current_user, f.id):
-            f.folder_id = req.folder_id
-            moved_count += 1
+        if not await access_service.can_access_file(db, current_user, f.id):
+            continue
+        # Taking a file out of where it sits is a write there as well. Without
+        # this, a move would be a way around the rule that you may only change
+        # things inside your own folder.
+        if not await access_service.can_write_at(db, current_user, f.workspace_id, f.folder_id):
+            skipped_no_permission += 1
+            continue
+        f.folder_id = req.folder_id
+        moved_count += 1
 
     await db.commit()
-    return {"moved_count": moved_count, "folder_id": req.folder_id}
+    return {
+        "moved_count": moved_count,
+        "skipped_no_permission": skipped_no_permission,
+        "folder_id": req.folder_id,
+    }
 
 
 @router.post("/batch-copy")
@@ -1132,7 +1152,7 @@ async def batch_copy_items(
         raise HTTPException(status_code=403, detail="대상 워크스페이스에 접근할 권한이 없습니다.")
     if source_workspace_id != req.workspace_id and not await access_service.is_workspace_member(db, current_user, source_workspace_id):
         raise HTTPException(status_code=403, detail="원본 워크스페이스에 접근할 권한이 없습니다.")
-    await access_service.require_write(db, current_user, req.workspace_id)
+    await access_service.require_write_at(db, current_user, req.workspace_id, req.folder_id)
 
     if req.folder_id:
         target = await db.get(Folder, req.folder_id)

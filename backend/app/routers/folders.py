@@ -11,6 +11,7 @@ from sqlalchemy import select, func, delete, and_, or_, desc, asc
 import re
 import urllib.parse
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from app.core.database import get_db
 from app.models import Folder, FileItem, User, WorkspaceMember
 from app.core.security import get_current_approved_user
@@ -79,6 +80,8 @@ async def reconcile_orphaned_trashed_files(db: AsyncSession) -> int:
 async def list_folders(
     workspace_id: Optional[uuid.UUID] = None,
     parent_id: Optional[uuid.UUID] = None, 
+    search: Optional[str] = Query(None, description="Filter by folder name"),
+    root_only: Optional[bool] = Query(False, description="Only folders at the workspace root"),
     sort_by: Optional[str] = Query("name", description="Sort field: name, updated_at, created_at, file_count"),
     sort_order: Optional[str] = Query("asc", description="Sort order: asc or desc"),
     page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed)"),
@@ -132,8 +135,14 @@ async def list_folders(
         else:
             conditions.append(and_(Folder.workspace_id.is_(None), Folder.created_by == current_user.id))
 
-    if parent_id is not None:
+    if root_only:
+        # The shared workspace's root holds one folder per person, so it is
+        # paged and searchable rather than listed whole.
+        conditions.append(Folder.parent_id.is_(None))
+    elif parent_id is not None:
         conditions.append(Folder.parent_id == parent_id)
+    if search and search.strip():
+        conditions.append(Folder.name.ilike(f"%{search.strip()}%"))
 
     stmt = stmt.where(and_(*conditions))
 
@@ -253,7 +262,7 @@ async def create_folder(
         role = await access_service.get_workspace_role(db, current_user, workspace_id)
         if not role:
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
-        await access_service.require_write(db, current_user, workspace_id)
+        await access_service.require_write_at(db, current_user, workspace_id, req.parent_id)
 
     if req.parent_id:
         if not await access_service.can_access_folder(db, current_user, req.parent_id):
@@ -295,7 +304,7 @@ async def update_folder(
     folder = await db.get(Folder, folder_id)
     if not folder or folder.is_trashed:
         raise HTTPException(status_code=404, detail="Folder not found")
-    await access_service.require_write(db, current_user, folder.workspace_id)
+    await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 수정할 권한이 없습니다.")
@@ -310,6 +319,7 @@ async def update_folder(
     # back out to the root.
     if "parent_id" in req.model_fields_set:
         if req.parent_id is None:
+            await access_service.require_write_at(db, current_user, folder.workspace_id, None)
             folder.parent_id = None
         else:
             if req.parent_id == folder_id:
@@ -339,6 +349,9 @@ async def update_folder(
                     break
                 ancestor_id = ancestor.parent_id
 
+            # The destination has to accept it as well; the check above only
+            # covered taking it out of where it was.
+            await access_service.require_write_at(db, current_user, folder.workspace_id, req.parent_id)
             folder.parent_id = req.parent_id
     if req.icon is not None:
         folder.icon = req.icon
@@ -367,7 +380,7 @@ async def rename_folder(
     folder = await db.get(Folder, folder_id)
     if not folder or folder.is_trashed:
         raise HTTPException(status_code=404, detail="Folder not found")
-    await access_service.require_write(db, current_user, folder.workspace_id)
+    await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더명을 변경할 권한이 없습니다.")
@@ -394,7 +407,7 @@ async def trash_folder(
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    await access_service.require_write(db, current_user, folder.workspace_id)
+    await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
@@ -418,7 +431,7 @@ async def restore_folder(
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    await access_service.require_write(db, current_user, folder.workspace_id)
+    await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 복구할 권한이 없습니다.")
@@ -451,7 +464,7 @@ async def delete_folder(
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
-    await access_service.require_write(db, current_user, folder.workspace_id)
+    await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
@@ -501,7 +514,7 @@ async def ensure_folder_path(
         raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
 
     clean_path = req.relative_path.strip().replace('\\', '/')
-    await access_service.require_write(db, current_user, req.workspace_id)
+    await access_service.require_write_at(db, current_user, req.workspace_id, req.parent_id)
     parts = [p.strip() for p in clean_path.split('/') if p.strip()]
 
     if not parts:
@@ -643,3 +656,103 @@ async def download_folder_zip(
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# Sharing a personal folder
+# ---------------------------------------------------------------------------
+
+class GrantRequest(BaseModel):
+    email: str
+
+
+@router.get("/{folder_id}/grants")
+async def list_folder_grants(
+    folder_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Who the owner has given write access to inside this folder."""
+    from app.services.personal_folder_service import get_owning_personal_folder, list_grants
+    personal = await get_owning_personal_folder(db, folder_id)
+    if not personal:
+        raise HTTPException(status_code=404, detail="개인 폴더를 찾을 수 없습니다.")
+    if personal.owner_user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="본인 폴더의 공유 설정만 볼 수 있습니다.")
+    return {"folder_id": str(personal.id), "folder_name": personal.name, "grants": await list_grants(db, personal.id)}
+
+
+@router.post("/{folder_id}/grants")
+async def add_folder_grant(
+    folder_id: uuid.UUID,
+    req: GrantRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Let someone else write inside your folder.
+
+    Granted by the owner rather than by an administrator: the owner is the one
+    who knows who should be working on their material, and routing it through
+    an administrator would turn collaboration into a request queue.
+    """
+    from app.models import FolderWriteGrant
+    from app.services.personal_folder_service import get_owning_personal_folder
+
+    personal = await get_owning_personal_folder(db, folder_id)
+    if not personal:
+        raise HTTPException(status_code=404, detail="개인 폴더를 찾을 수 없습니다.")
+    if personal.owner_user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="본인 폴더만 공유할 수 있습니다.")
+
+    target = (await db.execute(
+        select(User).where(func.lower(User.email) == req.email.strip().lower())
+    )).scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail=f"'{req.email}' 사용자를 찾을 수 없습니다.")
+    if target.is_system:
+        raise HTTPException(status_code=400, detail="시스템 계정에는 권한을 줄 수 없습니다.")
+    if target.id == personal.owner_user_id:
+        raise HTTPException(status_code=400, detail="본인은 이미 이 폴더의 소유자입니다.")
+
+    existing = (await db.execute(
+        select(FolderWriteGrant).where(
+            FolderWriteGrant.folder_id == personal.id,
+            FolderWriteGrant.user_id == target.id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="이미 권한이 부여된 사용자입니다.")
+
+    db.add(FolderWriteGrant(folder_id=personal.id, user_id=target.id, granted_by=current_user.id))
+    await db.commit()
+    return {"ok": True, "user": {"id": str(target.id), "name": target.name or target.email}}
+
+
+@router.delete("/{folder_id}/grants/{user_id}")
+async def remove_folder_grant(
+    folder_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Withdraw someone's write access to your folder."""
+    from app.models import FolderWriteGrant
+    from app.services.personal_folder_service import get_owning_personal_folder
+
+    personal = await get_owning_personal_folder(db, folder_id)
+    if not personal:
+        raise HTTPException(status_code=404, detail="개인 폴더를 찾을 수 없습니다.")
+    if personal.owner_user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="본인 폴더만 관리할 수 있습니다.")
+
+    grant = (await db.execute(
+        select(FolderWriteGrant).where(
+            FolderWriteGrant.folder_id == personal.id,
+            FolderWriteGrant.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    if grant:
+        await db.delete(grant)
+        await db.commit()
+    return {"ok": True}

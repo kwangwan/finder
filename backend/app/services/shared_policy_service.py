@@ -20,8 +20,8 @@ DEFAULTS = {
     # Per user, per day, into the shared workspace. A total cap would let one
     # person take the whole pool once and keep it; a daily one bounds the
     # damage to a day and recovers on its own.
-    "shared.daily_limit_bytes": 500 * MB,
-    "shared.max_file_bytes": 200 * MB,
+    "shared.daily_limit_bytes": 50 * MB,
+    "shared.max_file_bytes": 50 * MB,
     # Refused outright in a space everyone can download from.
     "shared.blocked_extensions": [
         "exe", "msi", "bat", "cmd", "com", "scr", "pif", "cpl",
@@ -40,12 +40,17 @@ DEFAULTS = {
     # bounds what a bad account can do on the day it arrives, costs the
     # administrator nothing, and resolves itself for everyone else.
     "shared.new_account_days": 7,
-    "shared.new_account_daily_limit_bytes": 50 * MB,
+    "shared.new_account_daily_limit_bytes": 5 * MB,
     # Percentage of the shared pool at which administrators are emailed.
     "shared.alert_threshold_percent": 90,
     # Internal: the highest threshold already alerted on, so a pool sitting
     # above the line does not email on every single upload.
     "shared.alert_last_level": 0,
+    # Internal: the date the last warning went out, so a pool that stays full
+    # is reported again each day rather than once ever.
+    "shared.alert_last_sent_date": None,
+    # Hour (UTC) the daily reminder goes out.
+    "shared.alert_daily_hour_utc": 0,
 }
 
 
@@ -198,13 +203,73 @@ async def enforce_upload_rules(
 # Pool alerting
 # --------------------------------------------------------------------------
 
+async def _send_threshold_email(db: AsyncSession, account, percent: float) -> bool:
+    admins = (await db.execute(
+        select(User).where(User.is_admin == True, User.is_system == False)  # noqa: E712
+    )).scalars().all()
+    emails = [a.email for a in admins if a.email]
+    if not emails:
+        return False
+    used_gb = round(account.storage_used_bytes / GB, 2)
+    quota_gb = round(account.storage_quota_bytes / GB, 2)
+    subject = f"[Project Run : Finder] 공용 워크스페이스 저장 용량 {percent:.0f}% 사용"
+    html = f"""
+    <div style="font-family:sans-serif;line-height:1.6">
+      <h2>공용 워크스페이스 저장 용량 경고</h2>
+      <p>공용 워크스페이스의 저장 용량이 <strong>{percent:.1f}%</strong>에 도달했습니다.</p>
+      <p>사용량: <strong>{used_gb}GB</strong> / {quota_gb}GB</p>
+      <p>관리자 대시보드에서 용량을 늘리거나 오래된 파일을 정리해 주세요.</p>
+      <p style="color:#888;font-size:12px">이 안내는 용량이 기준 아래로 내려갈 때까지 매일 한 번 발송됩니다.</p>
+    </div>
+    """
+    text = f"공용 워크스페이스 저장 용량이 {percent:.1f}%에 도달했습니다 ({used_gb}GB / {quota_gb}GB)."
+    try:
+        email_service.send_notification(emails, subject, html, text)
+        return True
+    except Exception as e:
+        logger.error(f"[SharedPolicy] threshold email failed: {e}")
+        return False
+
+
+async def send_daily_threshold_reminder(db: AsyncSession) -> bool:
+    """
+    Re-send the storage warning once a day while the pool is still over its
+    line.
+
+    A single mail at the moment of crossing is easy to miss — it arrives once,
+    possibly overnight, and nothing follows it. Repeating daily keeps it in
+    front of whoever is actually going to act on it, and stops as soon as the
+    pool comes back down.
+    """
+    from app.services.shared_workspace_service import get_quota_account
+
+    account = await get_quota_account(db)
+    if not account or not account.storage_quota_bytes:
+        return False
+    percent = (account.storage_used_bytes / account.storage_quota_bytes) * 100
+    threshold = float(await get_setting(db, "shared.alert_threshold_percent") or 90)
+    if percent < threshold:
+        return False
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    if await get_setting(db, "shared.alert_last_sent_date") == today:
+        return False
+
+    sent = await _send_threshold_email(db, account, percent)
+    if sent:
+        await set_setting(db, "shared.alert_last_sent_date", today)
+    return sent
+
+
 async def check_pool_threshold(db: AsyncSession) -> None:
     """
     Email every administrator when the shared pool crosses its warning line.
 
     Only on the way up, and only once per crossing: a pool sitting above the
     threshold would otherwise send a message on every upload, which trains
-    people to ignore it. Falling back below resets it.
+    people to ignore it. Falling back below resets it. A daily reminder
+    (send_daily_threshold_reminder) covers the case where that one mail is
+    missed.
     """
     from app.services.shared_workspace_service import get_quota_account
 
@@ -223,27 +288,8 @@ async def check_pool_threshold(db: AsyncSession) -> None:
     if last_level >= threshold:
         return  # already told them about this crossing
 
-    admins = (await db.execute(
-        select(User).where(User.is_admin == True, User.is_system == False)  # noqa: E712
-    )).scalars().all()
-    emails = [a.email for a in admins if a.email]
-    if emails:
-        used_gb = round(account.storage_used_bytes / GB, 2)
-        quota_gb = round(account.storage_quota_bytes / GB, 2)
-        subject = f"[Project Run : Finder] 공용 워크스페이스 저장 용량 {percent:.0f}% 사용"
-        html = f"""
-        <div style="font-family:sans-serif;line-height:1.6">
-          <h2>공용 워크스페이스 저장 용량 경고</h2>
-          <p>공용 워크스페이스의 저장 용량이 <strong>{percent:.1f}%</strong>에 도달했습니다.</p>
-          <p>사용량: <strong>{used_gb}GB</strong> / {quota_gb}GB</p>
-          <p>관리자 대시보드에서 용량을 늘리거나 오래된 파일을 정리해 주세요.</p>
-        </div>
-        """
-        text = f"공용 워크스페이스 저장 용량이 {percent:.1f}%에 도달했습니다 ({used_gb}GB / {quota_gb}GB)."
-        try:
-            email_service.send_notification(emails, subject, html, text)
-        except Exception as e:
-            logger.error(f"[SharedPolicy] threshold email failed: {e}")
+    if await _send_threshold_email(db, account, percent):
+        await set_setting(db, "shared.alert_last_sent_date", datetime.now(timezone.utc).date().isoformat())
 
     await set_setting(db, "shared.alert_last_level", threshold)
 

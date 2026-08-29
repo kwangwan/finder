@@ -35,7 +35,9 @@ import {
   Info,
   Loader2,
   Scissors,
-  Copy
+  Copy,
+  GripVertical,
+  Users
 } from '../../utils/icons';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
@@ -126,6 +128,62 @@ export default function FolderExplorer({
   // Where a shift-click measures its range from — the last item picked out
   // individually, as in Explorer.
   const anchorRef = useRef(null);
+  // The action bar is pinned over the content, which is exactly where the
+  // items being acted on are. It can be dragged out of the way, and where the
+  // user puts it is remembered — having to move it again on every selection
+  // would be worse than not being able to move it at all.
+  const [noticeDismissed, setNoticeDismissed] = useState(() => {
+    try { return localStorage.getItem('kb_shared_notice_dismissed') === '1'; } catch (e) { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('kb_shared_notice_dismissed', noticeDismissed ? '1' : '0'); } catch (e) {}
+  }, [noticeDismissed]);
+
+  const [barOffset, setBarOffset] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('kb_batchbar_offset') || 'null');
+      if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) return saved;
+    } catch (e) {}
+    return { x: 0, y: 0 };
+  });
+  const barDragRef = useRef(null);
+
+  const handleBarDragStart = (e) => {
+    if (e.target.closest('button')) return;   // buttons stay clickable
+    e.preventDefault();
+    const point = e.touches ? e.touches[0] : e;
+    barDragRef.current = { startX: point.clientX, startY: point.clientY, originX: barOffset.x, originY: barOffset.y };
+
+    const move = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const next = {
+        x: barDragRef.current.originX + (p.clientX - barDragRef.current.startX),
+        y: barDragRef.current.originY + (p.clientY - barDragRef.current.startY),
+      };
+      // Kept within the viewport so it can never be dragged somewhere it
+      // cannot be reached again.
+      const limitX = Math.max(0, window.innerWidth / 2 - 80);
+      const limitY = Math.max(0, window.innerHeight - 140);
+      next.x = Math.max(-limitX, Math.min(limitX, next.x));
+      next.y = Math.max(-limitY, Math.min(60, next.y));
+      setBarOffset(next);
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('touchmove', move);
+      window.removeEventListener('touchend', up);
+      barDragRef.current = null;
+      setBarOffset(prev => {
+        try { localStorage.setItem('kb_batchbar_offset', JSON.stringify(prev)); } catch (e) {}
+        return prev;
+      });
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', up);
+  };
   // 'page' — the selection covers only what is rendered, and is dropped when
   // the page changes. 'folder' — the user explicitly asked for every file in
   // this folder, so it deliberately spans pages and must survive paging.
@@ -308,6 +366,11 @@ export default function FolderExplorer({
 
   const visibleFileIds = files.filter(f => !hiddenIds.has(f.id)).map(f => f.id);
   const selectedCount = selectedFileIds.length + selectedFolderIds.length;
+  // The shared workspace's root belongs to nobody: it holds one folder per
+  // person and nothing else. Offering upload or "new document" there would be
+  // inviting an action the server refuses.
+  const isSharedRoot = isSharedWorkspace && !currentFolder?.id;
+  const canWriteHere = canWrite && !isSharedRoot;
 
   // What an action triggered from `item` should apply to: the whole selection
   // when the item is part of it, otherwise just that item — the rule every
@@ -709,7 +772,7 @@ export default function FolderExplorer({
         {/* Action Buttons */}
         <div className="explorer-actions">
           {activeView === 'notes' ? (
-            <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} title={canWrite ? '새 문서 작성' : '읽기 전용 계정입니다'}>
+            <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWriteHere} title={canWriteHere ? '새 문서 작성' : isSharedRoot ? '본인 폴더 안에서만 만들 수 있습니다' : '읽기 전용 계정입니다'}>
               {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
               <span>새 문서</span>
             </button>
@@ -737,15 +800,15 @@ export default function FolderExplorer({
                   <span className="hide-mobile">ZIP 다운로드</span>
                 </button>
               )}
-              <button className="btn-secondary explorer-btn" onClick={onOpenUpload} disabled={!canWrite} title={canWrite ? '파일 및 폴더 업로드' : '읽기 전용 계정입니다'}>
+              <button className="btn-secondary explorer-btn" onClick={onOpenUpload} disabled={!canWriteHere} title={canWriteHere ? '파일 및 폴더 업로드' : isSharedRoot ? '본인 폴더 안에서만 올릴 수 있습니다' : '읽기 전용 계정입니다'}>
                 <UploadCloud size={15} />
                 <span className="hide-mobile">업로드</span>
               </button>
-              <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} disabled={!canWrite} title={canWrite ? '현재 경로에 새 폴더 생성' : '읽기 전용 계정입니다'}>
+              <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} disabled={!canWriteHere} title={canWriteHere ? '현재 경로에 새 폴더 생성' : isSharedRoot ? '홈에는 폴더를 만들 수 없습니다' : '읽기 전용 계정입니다'}>
                 <FolderPlus size={15} />
                 <span className="hide-mobile">새 폴더</span>
               </button>
-              <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} title={canWrite ? '새 문서 작성' : '읽기 전용 계정입니다'}>
+              <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWriteHere} title={canWriteHere ? '새 문서 작성' : isSharedRoot ? '본인 폴더 안에서만 만들 수 있습니다' : '읽기 전용 계정입니다'}>
                 {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
                 <span className="hide-mobile">새 문서</span>
               </button>
@@ -755,20 +818,34 @@ export default function FolderExplorer({
       </div>
 
       {/* Explorer Secondary Toolbar: Sort & Count Controls */}
-      {isSharedWorkspace && (
+      {isSharedWorkspace && !noticeDismissed && (
         <div className={`shared-ws-notice ${canWrite ? '' : 'is-readonly'}`}>
-          <Info size={15} />
-          <div>
-            <strong>공용 워크스페이스입니다.</strong>{' '}
-            여기에 올린 파일과 문서는 <strong>가입한 모든 이용자가 열람하고 내려받을 수 있으며</strong>,{' '}
-            <strong>관리자가 사전 통보 없이 삭제할 수 있습니다.</strong>{' '}
-            공개해도 괜찮은 자료만 올리고, 중요한 자료는 따로 보관해 주세요.
-            {!canWrite && (
-              <div style={{ marginTop: 4 }}>
-                현재 계정은 <strong>읽기 전용</strong>입니다. 올리기·수정·삭제가 제한되며, 문의는 관리자에게 해주세요.
-              </div>
-            )}
+          <span className="shared-ws-notice-icon">
+            <Users size={16} />
+          </span>
+
+          <div className="shared-ws-notice-body">
+            <div className="shared-ws-notice-title">
+              공용 워크스페이스
+              {!canWrite && <span className="shared-ws-notice-tag">읽기 전용</span>}
+            </div>
+
+            <ul className="shared-ws-notice-points">
+              <li>가입한 모든 이용자가 열람하고 내려받을 수 있습니다.</li>
+              <li>관리자가 사전 통보 없이 삭제할 수 있습니다.</li>
+              <li>파일은 본인 폴더 안에만 올릴 수 있습니다.</li>
+              {!canWrite && <li>현재 계정은 올리기·수정·삭제가 제한되어 있습니다.</li>}
+            </ul>
           </div>
+
+          <button
+            type="button"
+            className="shared-ws-notice-close"
+            onClick={() => setNoticeDismissed(true)}
+            title="이 안내 접기"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -988,8 +1065,9 @@ export default function FolderExplorer({
         </div>
       )}
 
-      {/* 2. Files Grid Section */}
-      <div>
+      {/* 2. Files Grid Section — absent at the shared root, which holds only
+             people's folders. */}
+      <div style={isSharedRoot ? { display: 'none' } : undefined}>
         <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
           {activeView === 'notes' ? `문서 (${totalItemCount})` : activeView === 'favorites' ? `즐겨찾기 항목 (${totalItemCount})` : `문서 및 파일 (${totalItemCount})`}
         </div>
@@ -1022,7 +1100,7 @@ export default function FolderExplorer({
               <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
                 아이디어, 메모, 지식을 자유롭게 작성하고 AI 검색으로 빠르게 찾아보세요.
               </p>
-              <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
+              <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote || !canWriteHere} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
                 {isCreatingNote ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
                 <span>새 문서 작성</span>
               </button>
@@ -1095,7 +1173,7 @@ export default function FolderExplorer({
                 새 문서를 작성하거나 미디어 파일을 드래그하여 업로드하세요.
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-                <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} style={{ padding: '0.6rem 1.25rem' }}>
+                <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote || !canWriteHere} style={{ padding: '0.6rem 1.25rem' }}>
                   {isCreatingNote ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
                   <span>새 문서 작성</span>
                 </button>
@@ -1307,26 +1385,21 @@ export default function FolderExplorer({
 
       {/* Floating Batch Action Bar */}
       {selectedCount > 0 && (
-        <div className={`batch-floating-bar ${hasOpenWindows ? 'has-open-windows' : ''}`} style={{
-          position: 'fixed',
-          bottom: hasOpenWindows ? '6.5rem' : '2rem',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'var(--bg-secondary)',
-          borderRadius: 'var(--radius-lg)',
-          padding: '0.65rem 1.25rem',
-          boxShadow: '0 14px 40px rgba(0, 0, 0, 0.45)',
-          border: '1px solid var(--border-subtle)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          zIndex: 9000,
-          maxWidth: 'calc(100vw - 1.5rem)',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          transition: 'bottom 0.2s ease',
-        }}>
-          <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+        <div
+          className={`batch-floating-bar ${hasOpenWindows ? 'has-open-windows' : ''}`}
+          onMouseDown={handleBarDragStart}
+          onTouchStart={handleBarDragStart}
+          style={{
+            bottom: hasOpenWindows ? '6.5rem' : '2rem',
+            transform: `translate(calc(-50% + ${barOffset.x}px), ${barOffset.y}px)`,
+            transition: barDragRef.current ? 'none' : 'bottom 0.2s ease',
+          }}
+        >
+          <span className="batch-bar-grip" title="드래그하여 위치 이동">
+            <GripVertical size={14} />
+          </span>
+
+          <div className="batch-bar-count">
             <CheckSquare size={16} color="var(--accent-primary)" />
             <span>
               {selectionScope === 'folder'
@@ -1339,7 +1412,7 @@ export default function FolderExplorer({
             </span>
           </div>
 
-          <div className="hide-mobile" style={{ height: '18px', width: '1px', background: 'var(--border-subtle)' }} />
+          <div className="batch-bar-divider hide-mobile" />
 
           <button
             type="button"
@@ -1353,7 +1426,7 @@ export default function FolderExplorer({
                 setSelectedFolderIds(sortedSubfolders.map(f => f.id));
               }
             }}
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+            
           >
             {isEverythingSelected ? <Square size={14} /> : <CheckSquare size={14} />}
             <span className="hide-mobile">{isEverythingSelected ? '선택 해제' : '전체 선택'}</span>
@@ -1364,7 +1437,7 @@ export default function FolderExplorer({
             className="btn-secondary"
             title="잘라내기 (Ctrl+X)"
             onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId)}
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+            
           >
             <Scissors size={15} />
             <span className="hide-mobile">잘라내기</span>
@@ -1375,7 +1448,7 @@ export default function FolderExplorer({
             className="btn-secondary"
             title="복사 (Ctrl+C)"
             onClick={() => onClipboardCopy?.(selectedFileIds, selectedFolderIds, workspaceId)}
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+            
           >
             <Copy size={15} />
             <span className="hide-mobile">복사</span>
@@ -1387,7 +1460,7 @@ export default function FolderExplorer({
             title="폴더로 이동"
             disabled={selectedFileIds.length === 0}
             onClick={() => onOpenMoveModal && onOpenMoveModal(selectedFileIds)}
-            style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+            
           >
             <FolderInput size={15} />
             <span className="hide-mobile">폴더로 이동</span>
@@ -1399,7 +1472,7 @@ export default function FolderExplorer({
             title="ZIP 다운로드"
             disabled={selectedFileIds.length === 0}
             onClick={() => onBatchDownload && onBatchDownload(selectedFileIds)}
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+            
           >
             <Download size={15} />
             <span className="hide-mobile">ZIP 다운로드</span>
@@ -1425,7 +1498,7 @@ export default function FolderExplorer({
               }
               setRemovingIds(new Set());
             }}
-            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--accent-rose)', whiteSpace: 'nowrap' }}
+            data-danger="true"
           >
             <Trash2 size={15} />
             <span className="hide-mobile">삭제</span>

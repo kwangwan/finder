@@ -89,6 +89,57 @@ class AccessService:
                 detail="공용 워크스페이스에 대한 쓰기 권한이 없습니다. 관리자에게 문의하세요."
             )
 
+    async def can_write_at(
+        self,
+        db: AsyncSession,
+        user: User,
+        workspace_id: Optional[uuid.UUID],
+        folder_id: Optional[uuid.UUID],
+    ) -> bool:
+        """Boolean form of require_write_at, for loops that skip rather than fail."""
+        try:
+            await self.require_write_at(db, user, workspace_id, folder_id)
+            return True
+        except Exception:
+            return False
+
+    async def require_write_at(
+        self,
+        db: AsyncSession,
+        user: User,
+        workspace_id: Optional[uuid.UUID],
+        folder_id: Optional[uuid.UUID],
+    ) -> None:
+        """
+        The location-aware check for the shared workspace.
+
+        Beyond "may this user write here at all", it asks "may they write *at
+        this spot*": the root belongs to nobody and everything else belongs to
+        one person's folder. Outside the shared workspace this is exactly the
+        old workspace-level check.
+        """
+        await self.require_write(db, user, workspace_id)
+        if user.is_admin or not workspace_id:
+            return
+
+        ws = await db.get(Workspace, workspace_id)
+        if ws is None or not ws.is_shared:
+            return
+
+        from fastapi import HTTPException
+        from app.services.personal_folder_service import can_write_in_folder
+
+        if folder_id is None:
+            raise HTTPException(
+                status_code=403,
+                detail="공용 워크스페이스의 홈에는 파일이나 폴더를 둘 수 없습니다. 본인 폴더 안에서 작업해 주세요."
+            )
+        if not await can_write_in_folder(db, user, folder_id):
+            raise HTTPException(
+                status_code=403,
+                detail="이 폴더에 대한 쓰기 권한이 없습니다. 본인 폴더이거나 권한을 받은 폴더에서만 작업할 수 있습니다."
+            )
+
     async def is_workspace_admin_or_owner(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> bool:
         """Check if user is a workspace owner or admin (or superadmin)."""
         if user.is_admin:
