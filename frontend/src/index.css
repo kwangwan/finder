@@ -6454,7 +6454,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 /* --- 일정 설정 ------------------------------------------------------------ */
 
-.dg-modal { max-width: 540px; padding: 0; }
+.dg-modal { max-width: 560px; padding: 0; }
 
 .dg-head {
   display: flex;
@@ -6481,14 +6481,42 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .dg-tabs button.on { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); font-weight: 700; }
 
-.dg-body { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+.dg-body { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
 
-.dg-note {
-  margin: 0;
-  font-size: 0.81rem;
-  color: var(--text-secondary);
-  line-height: 1.6;
-  word-break: keep-all;
+/* The facts as facts. A sentence carrying the zone name wrapped mid-phrase,
+   which is most of what made this modal look unfinished. */
+.dg-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+}
+
+.dg-sum-item { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; }
+.dg-sum-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); flex-shrink: 0; }
+.dg-sum-item strong { font-size: 0.82rem; color: var(--text-primary); white-space: nowrap; }
+.dg-sum-clock { font-variant-numeric: tabular-nums; }
+
+.dg-sum-tag {
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.71rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dg-sum-tag.on {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--accent-primary);
 }
 
 .dg-warn {
@@ -6503,12 +6531,37 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-size: 0.77rem;
 }
 
-.dg-field { display: flex; flex-direction: column; gap: 6px; }
-.dg-label { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
-.dg-field small { font-size: 0.72rem; color: var(--text-muted); line-height: 1.5; word-break: keep-all; }
+/* Label on the left, control on the right — every row starts at the same
+   place, and nothing has to share a line with a paragraph. */
+.dg-rows { display: flex; flex-direction: column; gap: 14px; }
+
+.dg-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.dg-row .dg-label {
+  padding-top: 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Controls start at the same left edge but keep their natural width — a
+   switch stretched across the row reads as a bar, not a switch. */
+.dg-control { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.dg-control > .dg-wide, .dg-control > .dg-time { align-self: stretch; }
+.dg-control small { font-size: 0.72rem; color: var(--text-muted); line-height: 1.45; }
 .dg-wide { width: 100%; }
-.dg-time { display: flex; gap: 6px; }
-.dg-time .ui-dd { flex: 1; }
+
+/* Equal halves: an hour box twice the width of the minute box is the kind of
+   detail that reads as nobody having looked. */
+.dg-time { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.dg-time .ui-dd { width: 100%; }
+
 .dg-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .dg-chip {
@@ -6520,13 +6573,16 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 0.79rem;
+  font-size: 0.78rem;
   font-family: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .dg-chip.on { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); font-weight: 700; }
 .dg-chip:disabled { cursor: default; opacity: 0.6; }
+
+.dg-foot-note { margin: 0; font-size: 0.74rem; color: var(--text-muted); }
 
 .dg-actions {
   display: flex;

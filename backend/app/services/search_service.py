@@ -126,7 +126,7 @@ class SearchService:
 
         # 1. Compute accessible workspace IDs for non-admin without specific workspace
         user_ws_ids = None
-        if current_user and not current_user.is_admin and not req.workspace_id:
+        if current_user and not current_user.is_superadmin and not req.workspace_id:
             user_ws_ids = await access_service.get_user_workspace_ids(db, current_user.id)
 
         # 2. Generate query embedding

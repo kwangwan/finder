@@ -34,7 +34,7 @@ async def get_system_stats(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="이 워크스페이스에 접근할 권한이 없습니다.")
         folder_conditions.append(Folder.workspace_id == workspace_id)
         file_conditions.append(FileItem.workspace_id == workspace_id)
-    elif not current_user.is_admin:
+    elif not current_user.is_superadmin:
         ws_ids = await access_service.get_user_workspace_ids(db, current_user.id)
         if ws_ids:
             folder_conditions.append(or_(

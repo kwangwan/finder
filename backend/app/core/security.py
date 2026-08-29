@@ -127,7 +127,7 @@ async def get_current_approved_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     """Ensure the user is approved by an administrator, or is an administrator."""
-    if current_user.is_admin or current_user.is_approved:
+    if current_user.is_superadmin or current_user.is_approved:
         return current_user
 
     raise HTTPException(
@@ -139,8 +139,8 @@ async def get_current_approved_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
-    """Ensure the user has administrator privileges (is_admin == True)."""
-    if not current_user.is_admin:
+    """Ensure the user has administrator privileges (is_superadmin == True)."""
+    if not current_user.is_superadmin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="관리자 권한이 필요합니다."
@@ -203,7 +203,7 @@ async def get_current_approved_user_query_or_header(
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account inactive or not found")
 
-    if not (user.is_admin or user.is_approved):
+    if not (user.is_superadmin or user.is_approved):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="가입 승인 대기 중입니다. 관리자의 승인 후 이용하실 수 있습니다.",

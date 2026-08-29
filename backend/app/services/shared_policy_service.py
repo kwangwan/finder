@@ -170,7 +170,7 @@ async def enforce_upload_rules(
     """
     if not await is_shared_workspace(db, workspace_id):
         return
-    if user.is_admin:
+    if user.is_superadmin:
         return
 
     max_file = int(await get_setting(db, "shared.max_file_bytes") or 0)
@@ -205,7 +205,7 @@ async def enforce_upload_rules(
 
 async def _send_threshold_email(db: AsyncSession, account, percent: float) -> bool:
     admins = (await db.execute(
-        select(User).where(User.is_admin == True, User.is_system == False)  # noqa: E712
+        select(User).where(User.is_superadmin == True, User.is_system == False)  # noqa: E712
     )).scalars().all()
     emails = [a.email for a in admins if a.email]
     if not emails:

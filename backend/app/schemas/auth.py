@@ -37,7 +37,7 @@ class UserResponse(BaseModel):
     name: Optional[str] = None
     picture: Optional[str] = None
     username: Optional[str] = None
-    is_admin: bool
+    is_superadmin: bool
     is_approved: bool
     is_active: bool
     # Write access to the shared workspace; managed instead of removing the
@@ -54,7 +54,7 @@ class UserApproveRequest(BaseModel):
     is_approved: bool
 
 class UserAdminRequest(BaseModel):
-    is_admin: bool
+    is_superadmin: bool
 
 class UserQuotaRequest(BaseModel):
     storage_quota_bytes: int = Field(..., ge=0, description="Storage quota in bytes")

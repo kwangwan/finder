@@ -118,7 +118,7 @@ async def can_write_in_folder(db: AsyncSession, user: User, folder_id) -> bool:
     delete from is exactly what stops being manageable once there are more
     than a handful of people. Everything lives inside somebody's folder.
     """
-    if user.is_admin:
+    if user.is_superadmin:
         return True
     if folder_id is None:
         return False

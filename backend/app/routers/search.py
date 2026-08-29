@@ -26,7 +26,7 @@ async def reindex_all_files(
     current_user: User = Depends(get_current_approved_user)
 ):
     """Re-index all files and notes in the database into pgvector (Admin only)."""
-    if not current_user.is_admin:
+    if not current_user.is_superadmin:
         raise HTTPException(
             status_code=403,
             detail="전체 지식 베이스 재색인은 최고 관리자만 수행할 수 있습니다."

@@ -793,12 +793,12 @@ export default function App() {
   }, [favoriteFolderIds]);
 
   const refreshReportCount = useCallback(async () => {
-    if (!currentUser?.is_admin || !activeWorkspace?.is_shared) { setPendingReportCount(0); return; }
+    if (!currentUser?.is_superadmin || !activeWorkspace?.is_shared) { setPendingReportCount(0); return; }
     try {
       const res = await getPendingReportCount();
       setPendingReportCount(res.pending || 0);
     } catch (e) { /* best-effort */ }
-  }, [currentUser?.is_admin, activeWorkspace?.is_shared]);
+  }, [currentUser?.is_superadmin, activeWorkspace?.is_shared]);
 
   useEffect(() => {
     refreshReportCount();
@@ -1103,7 +1103,7 @@ export default function App() {
 
   // Load Workspaces for approved user
   const loadWorkspaces = useCallback(async () => {
-    if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
+    if (!currentUser || (!currentUser.is_approved && !currentUser.is_superadmin)) return;
     try {
       const wsList = await listWorkspaces();
       setWorkspaces(wsList);
@@ -1154,7 +1154,7 @@ export default function App() {
 
   // Fetch Folders and System Stats
   const refreshFoldersAndStats = useCallback(async () => {
-    if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
+    if (!currentUser || (!currentUser.is_approved && !currentUser.is_superadmin)) return;
     if (!isWorkspacesLoaded) return;
     if (!activeWorkspace?.id) {
       refreshFoldersRequestIdRef.current += 1;
@@ -1313,7 +1313,7 @@ export default function App() {
   }, [activeWorkspace?.id, activeView, activeFolderId, uploaderFilter?.id]);
 
   const refreshFiles = useCallback(async (silent = false) => {
-    if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
+    if (!currentUser || (!currentUser.is_approved && !currentUser.is_superadmin)) return;
     if (!isWorkspacesLoaded) return;
     if (!activeWorkspace?.id) {
       refreshFilesRequestIdRef.current += 1;
@@ -2008,7 +2008,7 @@ export default function App() {
   }
 
   // 3. Logged in but not approved and not admin -> Show Pending Approval
-  if (!currentUser.is_approved && !currentUser.is_admin) {
+  if (!currentUser.is_approved && !currentUser.is_superadmin) {
     return (
       <ThemeProvider theme={theme}>
         <PendingApprovalScreen

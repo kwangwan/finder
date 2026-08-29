@@ -29,7 +29,7 @@ class AccessService:
 
     async def is_workspace_member(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> bool:
         """Check if user is a member of the workspace."""
-        if user.is_admin:
+        if user.is_superadmin:
             return True
         ws = await db.get(Workspace, workspace_id)
         if ws is not None and ws.is_shared:
@@ -44,7 +44,7 @@ class AccessService:
 
     async def get_workspace_role(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> Optional[str]:
         """Get user's role in the workspace, or None if not a member."""
-        if user.is_admin:
+        if user.is_superadmin:
             return "admin"
         res = await db.execute(
             select(WorkspaceMember.role).where(
@@ -71,7 +71,7 @@ class AccessService:
         for a user with no storage of their own it is the only space they
         have, so ejecting them would take away their whole account.
         """
-        if user.is_admin:
+        if user.is_superadmin:
             return True
         if not workspace_id:
             return True
@@ -119,7 +119,7 @@ class AccessService:
         old workspace-level check.
         """
         await self.require_write(db, user, workspace_id)
-        if user.is_admin or not workspace_id:
+        if user.is_superadmin or not workspace_id:
             return
 
         ws = await db.get(Workspace, workspace_id)
@@ -142,7 +142,7 @@ class AccessService:
 
     async def is_workspace_admin_or_owner(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> bool:
         """Check if user is a workspace owner or admin (or superadmin)."""
-        if user.is_admin:
+        if user.is_superadmin:
             return True
         ws = await db.get(Workspace, workspace_id)
         if ws and ws.owner_id == user.id:
@@ -158,7 +158,7 @@ class AccessService:
 
     async def can_access_file(self, db: AsyncSession, user: User, file_id: uuid.UUID) -> bool:
         """Check if user can access the file via workspace membership."""
-        if user.is_admin:
+        if user.is_superadmin:
             return True
         file_item = await db.get(FileItem, file_id)
         if not file_item:
@@ -187,7 +187,7 @@ class AccessService:
 
     async def can_access_folder(self, db: AsyncSession, user: User, folder_id: uuid.UUID) -> bool:
         """Check if user can access the folder via workspace membership."""
-        if user.is_admin:
+        if user.is_superadmin:
             return True
         folder = await db.get(Folder, folder_id)
         if not folder:

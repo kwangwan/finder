@@ -27,7 +27,7 @@ class User(Base):
     # because a display name has to be able to be Korean, and an identity has
     # to be impossible to imitate — see username_service.
     username = Column(String(20), unique=True, index=True, nullable=True)
-    is_admin = Column(Boolean, default=False, nullable=False)
+    is_superadmin = Column(Boolean, default=False, nullable=False)
     # Not a person. Holds the shared workspace's storage quota so that pool is
     # separate from any real user's, and is hidden from the user list and from
     # every account action.
@@ -83,7 +83,7 @@ class User(Base):
             "google_id": self.google_id,
             "has_password": bool(self.hashed_password),
             "username": self.username,
-            "is_admin": self.is_admin,
+            "is_superadmin": self.is_superadmin,
             "is_system": self.is_system,
             "can_write_shared": self.can_write_shared,
             "is_approved": self.is_approved,

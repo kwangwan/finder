@@ -10,7 +10,7 @@ export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
     setIsChecking(true);
     try {
       const refreshedUser = await getMe();
-      if (refreshedUser && (refreshedUser.is_approved || refreshedUser.is_admin)) {
+      if (refreshedUser && (refreshedUser.is_approved || refreshedUser.is_superadmin)) {
         onApproved(refreshedUser);
       }
     } catch (err) {

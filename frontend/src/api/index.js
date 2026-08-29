@@ -328,7 +328,7 @@ export async function toggleAdminUser(userId, isAdmin) {
   const res = await fetch(`${API_BASE}/admin/users/${userId}/admin`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ is_admin: isAdmin }),
+    body: JSON.stringify({ is_superadmin: isAdmin }),
   });
   if (!res.ok) throw new Error('관리자 권한 변경 실패');
   return res.json();

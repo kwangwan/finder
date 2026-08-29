@@ -121,6 +121,15 @@ async def init_db():
             # A photo the person uploaded here, which wins over the one the
             # identity provider supplied.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS avatar_s3_key VARCHAR(1024);",
+            # `is_admin` sat next to a workspace's own "admin" role and read as
+            # the same thing. This one is service-wide, so it says so.
+            "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
+            # Carry the old values over once; the column is dropped afterwards
+            # so nothing can keep writing to a flag nobody reads.
+            "UPDATE kb_users SET is_superadmin = is_admin WHERE EXISTS ("
+            "  SELECT 1 FROM information_schema.columns"
+            "  WHERE table_name = 'kb_users' AND column_name = 'is_admin');",
+            "ALTER TABLE kb_users DROP COLUMN IF EXISTS is_admin;",
         ]
 
         # Every timestamp column was originally created as a naive

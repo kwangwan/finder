@@ -95,7 +95,7 @@ export default function WorkspaceSettingsModal({
 
   if (!isOpen) return null;
 
-  const isOwner = isCreateMode || workspace?.owner_id === currentUser?.id || currentUser?.is_admin;
+  const isOwner = isCreateMode || workspace?.owner_id === currentUser?.id || currentUser?.is_superadmin;
   const currentMember = members.find(m => m.user_id === currentUser?.id);
   const isAdminOrOwner = isOwner || currentMember?.role === 'admin';
 
@@ -493,7 +493,7 @@ export default function WorkspaceSettingsModal({
                       style={{ width: 96 }}
                       options={[
                         { value: 'member', label: '멤버' },
-                        ...((isOwner || currentUser?.is_admin) ? [{ value: 'admin', label: '관리자' }] : []),
+                        ...((isOwner || currentUser?.is_superadmin) ? [{ value: 'admin', label: '관리자' }] : []),
                       ]}
                     />
                     <button

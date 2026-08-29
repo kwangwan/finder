@@ -159,7 +159,11 @@ async def put_digest_settings(
     if not await _may_edit_workspace_defaults(db, current_user, workspace_id):
         raise HTTPException(
             status_code=403,
-            detail="기본값은 워크스페이스 소유자와 소유자가 지정한 관리자만 변경할 수 있습니다.",
+            detail=(
+                "공용 워크스페이스의 기본값은 최고 관리자만 변경할 수 있습니다."
+                if (await db.get(Workspace, workspace_id)).is_shared
+                else "기본값은 워크스페이스 소유자와 소유자가 지정한 관리자만 변경할 수 있습니다."
+            ),
         )
     incoming = {k: v for k, v in req.model_dump().items() if v is not None}
     return await board_digest_service.save_settings(db, workspace_id, incoming)
@@ -231,15 +235,18 @@ async def _may_edit_workspace_defaults(db: AsyncSession, user: User, workspace_i
 
     The person who owns the workspace and the administrators they appointed —
     it is a decision about how *this* space reads dates, so it belongs to
-    whoever runs it. The shared workspace is the exception: it is owned by a
-    system account nobody signs in as, so it falls to the administrators who
-    manage it.
+    whoever runs it.
+
+    The shared workspace works the same way with a different owner: it belongs
+    to a system account nobody can sign in as, and the people who run it are
+    the super-administrators — the first one and everyone they have since
+    appointed, which is exactly what `is_superadmin` records.
     """
     workspace = await db.get(Workspace, workspace_id)
     if workspace is None:
         return False
     if workspace.is_shared:
-        return bool(user.is_admin)
+        return bool(user.is_superadmin)
     if workspace.owner_id == user.id:
         return True
     role = (await db.execute(

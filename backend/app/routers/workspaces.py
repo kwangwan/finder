@@ -61,7 +61,7 @@ async def _get_workspace_with_member_check(
         raise HTTPException(status_code=404, detail="워크스페이스를 찾을 수 없습니다.")
 
     # System admin can access anything
-    if user.is_admin:
+    if user.is_superadmin:
         return workspace
 
     # Check membership
@@ -147,7 +147,7 @@ async def list_my_workspaces(
             workspaces.append(shared)
         # Everyone needs the one folder they may write in to exist before they
         # can do anything, and this is the first call every client makes.
-        if not current_user.is_admin:
+        if not current_user.is_superadmin:
             try:
                 from app.services.personal_folder_service import ensure_personal_folder
                 await ensure_personal_folder(db, current_user, shared.id)
@@ -161,8 +161,8 @@ async def list_my_workspaces(
         if ws.is_shared:
             # Everyone reads it; only administrators manage it, and write can
             # be withdrawn per user without removing them from it.
-            d["role"] = "admin" if current_user.is_admin else "member"
-            d["can_write"] = bool(current_user.is_admin or getattr(current_user, "can_write_shared", True))
+            d["role"] = "admin" if current_user.is_superadmin else "member"
+            d["can_write"] = bool(current_user.is_superadmin or getattr(current_user, "can_write_shared", True))
         else:
             d["can_write"] = True
         payload.append(d)
@@ -237,7 +237,7 @@ async def update_workspace(
 ):
     """Update workspace settings (owner/admin only)."""
     ws_probe = await db.get(Workspace, workspace_id)
-    if ws_probe is not None and ws_probe.is_shared and not current_user.is_admin:
+    if ws_probe is not None and ws_probe.is_shared and not current_user.is_superadmin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="공용 워크스페이스는 관리자만 설정을 변경할 수 있습니다."
@@ -377,7 +377,7 @@ async def invite_member(
         raise HTTPException(status_code=400, detail="이미 워크스페이스에 속해있는 사용자입니다.")
 
     role = req.role if req.role in ("admin", "member") else "member"
-    if role == "admin" and not current_user.is_admin and workspace.owner_id != current_user.id:
+    if role == "admin" and not current_user.is_superadmin and workspace.owner_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="워크스페이스 관리자 권한은 워크스페이스 소유자만 부여할 수 있습니다."
@@ -453,7 +453,7 @@ async def remove_member(
 
     # Owner can remove anyone; admin can remove regular members; users can leave
     if not is_self:
-        is_owner = current_user.is_admin or (workspace.owner_id == current_user.id)
+        is_owner = current_user.is_superadmin or (workspace.owner_id == current_user.id)
         if not is_owner:
             m_res = await db.execute(
                 select(WorkspaceMember).where(

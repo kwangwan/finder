@@ -143,7 +143,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
       return;
     }
 
-    const newAdminStatus = !user.is_admin;
+    const newAdminStatus = !user.is_superadmin;
     const confirmed = await showConfirm({
       title: newAdminStatus ? '최고 관리자 권한 부여' : '최고 관리자 권한 해제',
       message: newAdminStatus 
@@ -252,9 +252,9 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
     );
   });
 
-  const pendingCount = users.filter(u => !u.is_approved && !u.is_admin).length;
-  const approvedCount = users.filter(u => u.is_approved || u.is_admin).length;
-  const adminCount = users.filter(u => u.is_admin).length;
+  const pendingCount = users.filter(u => !u.is_approved && !u.is_superadmin).length;
+  const approvedCount = users.filter(u => u.is_approved || u.is_superadmin).length;
+  const adminCount = users.filter(u => u.is_superadmin).length;
 
   return (
     <div className="admin-dashboard-container">
@@ -576,7 +576,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                 ) : (
                   filteredUsers.map(user => {
                     const isSelf = user.id === currentUser.id;
-                    const isApproved = user.is_approved || user.is_admin;
+                    const isApproved = user.is_approved || user.is_superadmin;
                     const quotaBytes = user.storage_quota_bytes || gbToBytes(100);
                     const usedBytes = user.storage_used_bytes || 0;
                     const usagePercent = quotaBytes > 0 ? Math.min(100, (usedBytes / quotaBytes) * 100) : 0;
@@ -616,7 +616,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
 
                         {/* Role Badge */}
                         <td style={{ padding: '1rem 1rem' }}>
-                          {user.is_admin ? (
+                          {user.is_superadmin ? (
                             <span style={{
                               display: 'inline-flex',
                               alignItems: 'center',
@@ -765,7 +765,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                             for someone without personal storage the shared space
                             is their entire account. */}
                         <td style={{ padding: '1rem 1rem' }}>
-                          {user.is_admin ? (
+                          {user.is_superadmin ? (
                             <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>최고 관리자</span>
                           ) : (
                             <button
@@ -817,7 +817,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                         {/* Action Buttons */}
                         <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
-                            {!user.is_admin && (
+                            {!user.is_superadmin && (
                               <button
                                 className="btn-secondary"
                                 onClick={() => handleToggleApprove(user)}
@@ -852,7 +852,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 }}
                               >
                                 <ShieldCheck size={13} />
-                                <span>{user.is_admin ? '최고 관리자 해제' : '최고 관리자 지정'}</span>
+                                <span>{user.is_superadmin ? '최고 관리자 해제' : '최고 관리자 지정'}</span>
                               </button>
                             )}
 

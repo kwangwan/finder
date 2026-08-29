@@ -47,7 +47,7 @@ async def ensure_user_default_workspace(db: AsyncSession, user: User):
     )
     has_membership = ws_res.first() is not None
 
-    if not user.is_admin:
+    if not user.is_superadmin:
         # Membership in the shared workspace is implicit (see AccessService),
         # so nothing needs to be written here at all.
         return
@@ -277,7 +277,7 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         name=req.name or email.split("@")[0],
         hashed_password=hash_password(req.password),
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
-        is_admin=is_first_user,
+        is_superadmin=is_first_user,
         is_approved=True,
         is_active=True,
         storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
@@ -296,7 +296,7 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
-        "is_admin": user.is_admin,
+        "is_superadmin": user.is_superadmin,
         "is_approved": user.is_approved
     }
     access_token = create_access_token(token_payload)
@@ -331,7 +331,7 @@ async def login_with_password(req: PasswordLoginRequest, db: AsyncSession = Depe
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
-        "is_admin": user.is_admin,
+        "is_superadmin": user.is_superadmin,
         "is_approved": user.is_approved
     }
     access_token = create_access_token(token_payload)
@@ -371,7 +371,7 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             name=google_profile.get("name") or email.split("@")[0],
             picture=google_profile.get("picture"),
             google_id=google_profile.get("google_id"),
-            is_admin=is_first_user,
+            is_superadmin=is_first_user,
             is_approved=True,
             is_active=True,
             storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
@@ -401,7 +401,7 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
-        "is_admin": user.is_admin,
+        "is_superadmin": user.is_superadmin,
         "is_approved": user.is_approved
     }
     access_token = create_access_token(token_payload)
@@ -430,7 +430,7 @@ async def dev_login(req: DevLoginRequest, db: AsyncSession = Depends(get_db)):
             email=email,
             name=req.name or email.split("@")[0],
             picture=req.picture or f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
-            is_admin=False,
+            is_superadmin=False,
             is_approved=False,
             is_active=True,
             last_login_at=datetime.now(timezone.utc)
@@ -451,7 +451,7 @@ async def dev_login(req: DevLoginRequest, db: AsyncSession = Depends(get_db)):
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
-        "is_admin": user.is_admin,
+        "is_superadmin": user.is_superadmin,
         "is_approved": user.is_approved
     }
     access_token = create_access_token(token_payload)

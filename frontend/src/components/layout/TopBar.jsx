@@ -239,8 +239,8 @@ export default function TopBar({
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-                  <span className={`role-badge ${currentUser?.is_admin ? 'admin' : 'member'}`}>
-                    {currentUser?.is_admin ? '최고 관리자' : '정회원'}
+                  <span className={`role-badge ${currentUser?.is_superadmin ? 'admin' : 'member'}`}>
+                    {currentUser?.is_superadmin ? '최고 관리자' : '정회원'}
                   </span>
                 </div>
 
@@ -280,7 +280,7 @@ export default function TopBar({
                   <span>초대 및 멤버 관리</span>
                 </button>
 
-                {currentUser?.is_admin && (
+                {currentUser?.is_superadmin && (
                   <button 
                     className="dropdown-item" 
                     onClick={() => {

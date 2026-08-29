@@ -124,7 +124,7 @@ async def get_trash(
     # Only the shared workspace. A private or team workspace has a chosen set
     # of members who already see each other's work, and hiding a teammate's
     # deleted file would break recovering it.
-    if not current_user.is_admin:
+    if not current_user.is_superadmin:
         shared_ids = list(await access_service.get_shared_workspace_ids(db))
         if shared_ids:
             folder_conditions.append(or_(
@@ -143,7 +143,7 @@ async def get_trash(
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
         folder_conditions.append(Folder.workspace_id == workspace_id)
         file_conditions.append(FileItem.workspace_id == workspace_id)
-    elif not current_user.is_admin:
+    elif not current_user.is_superadmin:
         ws_ids = await access_service.get_user_workspace_ids(db, current_user.id)
         if ws_ids:
             folder_conditions.append(or_(
@@ -249,7 +249,7 @@ async def purge_file_item(
     if file_item.workspace_id:
         is_owner_or_admin = await access_service.is_workspace_admin_or_owner(db, current_user, file_item.workspace_id)
 
-    if not (is_creator or is_owner_or_admin or current_user.is_admin):
+    if not (is_creator or is_owner_or_admin or current_user.is_superadmin):
         raise HTTPException(
             status_code=403, 
             detail="휴지통의 파일을 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
@@ -276,7 +276,7 @@ async def purge_folder_item(
     if folder.workspace_id:
         is_owner_or_admin = await access_service.is_workspace_admin_or_owner(db, current_user, folder.workspace_id)
 
-    if not (is_creator or is_owner_or_admin or current_user.is_admin):
+    if not (is_creator or is_owner_or_admin or current_user.is_superadmin):
         raise HTTPException(
             status_code=403, 
             detail="휴지통의 폴더를 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
@@ -303,7 +303,7 @@ async def empty_trash(
             raise HTTPException(status_code=403, detail="휴지통 비우기 권한이 없습니다. (워크스페이스 소유자 및 관리자만 비울 수 있습니다)")
         folder_conditions.append(Folder.workspace_id == workspace_id)
         file_conditions.append(FileItem.workspace_id == workspace_id)
-    elif not current_user.is_admin:
+    elif not current_user.is_superadmin:
         raise HTTPException(status_code=403, detail="휴지통 비우기는 특정 워크스페이스의 소유자/관리자 또는 최고 관리자만 수행할 수 있습니다.")
 
     # 1. Purge files

@@ -56,12 +56,12 @@ async def update_user_admin_status(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if user.id == admin_user.id and not req.is_admin:
+    if user.id == admin_user.id and not req.is_superadmin:
         raise HTTPException(status_code=400, detail="Cannot revoke your own admin rights")
 
-    user.is_admin = req.is_admin
+    user.is_superadmin = req.is_superadmin
     # If made admin, also ensure is_approved is True
-    if req.is_admin:
+    if req.is_superadmin:
         user.is_approved = True
 
     await db.commit()

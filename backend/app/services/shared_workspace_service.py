@@ -50,7 +50,7 @@ async def ensure_shared_workspace(db: AsyncSession) -> Workspace:
             email=SYSTEM_ACCOUNT_EMAIL,
             name=SYSTEM_ACCOUNT_NAME,
             is_approved=False,   # can never sign in
-            is_admin=False,
+            is_superadmin=False,
             is_system=True,
             storage_quota_bytes=DEFAULT_SHARED_QUOTA_BYTES,
             storage_used_bytes=0,

@@ -815,7 +815,7 @@ async def list_folder_grants(
     personal = await get_owning_personal_folder(db, folder_id)
     if not personal:
         raise HTTPException(status_code=404, detail="개인 폴더를 찾을 수 없습니다.")
-    if personal.owner_user_id != current_user.id and not current_user.is_admin:
+    if personal.owner_user_id != current_user.id and not current_user.is_superadmin:
         raise HTTPException(status_code=403, detail="본인 폴더의 공유 설정만 볼 수 있습니다.")
     return {"folder_id": str(personal.id), "folder_name": personal.name, "grants": await list_grants(db, personal.id)}
 
@@ -840,7 +840,7 @@ async def add_folder_grant(
     personal = await get_owning_personal_folder(db, folder_id)
     if not personal:
         raise HTTPException(status_code=404, detail="개인 폴더를 찾을 수 없습니다.")
-    if personal.owner_user_id != current_user.id and not current_user.is_admin:
+    if personal.owner_user_id != current_user.id and not current_user.is_superadmin:
         raise HTTPException(status_code=403, detail="본인 폴더만 공유할 수 있습니다.")
 
     target = (await db.execute(
@@ -881,7 +881,7 @@ async def remove_folder_grant(
     personal = await get_owning_personal_folder(db, folder_id)
     if not personal:
         raise HTTPException(status_code=404, detail="개인 폴더를 찾을 수 없습니다.")
-    if personal.owner_user_id != current_user.id and not current_user.is_admin:
+    if personal.owner_user_id != current_user.id and not current_user.is_superadmin:
         raise HTTPException(status_code=403, detail="본인 폴더만 관리할 수 있습니다.")
 
     grant = (await db.execute(

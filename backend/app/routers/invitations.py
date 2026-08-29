@@ -38,7 +38,7 @@ async def list_invitations(
 
     if workspace_id:
         # Check permission for workspace
-        if not current_user.is_admin:
+        if not current_user.is_superadmin:
             m_res = await db.execute(
                 select(WorkspaceMember).where(
                     WorkspaceMember.workspace_id == workspace_id,
@@ -49,7 +49,7 @@ async def list_invitations(
             if not member or member.role not in ("owner", "admin"):
                 raise HTTPException(status_code=403, detail="워크스페이스 초대 목록을 볼 권한이 없습니다.")
         stmt = stmt.where(Invitation.workspace_id == workspace_id)
-    elif not current_user.is_admin:
+    elif not current_user.is_superadmin:
         # User only sees invitations they sent
         stmt = stmt.where(Invitation.invited_by == current_user.id)
 
@@ -80,7 +80,7 @@ async def create_invitation(
             raise HTTPException(status_code=404, detail="워크스페이스를 찾을 수 없습니다.")
         workspace_name = workspace.name
 
-        is_owner = current_user.is_admin or (workspace.owner_id == current_user.id)
+        is_owner = current_user.is_superadmin or (workspace.owner_id == current_user.id)
         if not is_owner:
             m_res = await db.execute(
                 select(WorkspaceMember).where(
@@ -97,7 +97,7 @@ async def create_invitation(
             raise HTTPException(status_code=403, detail="워크스페이스 관리자 권한은 워크스페이스 소유자만 부여할 수 있습니다.")
     else:
         # Service-wide invitation only allowed by Super Admin
-        if not current_user.is_admin:
+        if not current_user.is_superadmin:
             raise HTTPException(status_code=403, detail="서비스 전체 초대는 최고 관리자만 가능합니다.")
 
     # Check for active pending invitation
@@ -124,7 +124,7 @@ async def create_invitation(
         workspace_id=req.workspace_id,
         role=req.role if req.role in ("admin", "member") else "member",
         invited_by=current_user.id,
-        is_admin_invite=current_user.is_admin,
+        is_admin_invite=current_user.is_superadmin,
         expires_at=expires_at,
         status="pending"
     )
@@ -140,7 +140,7 @@ async def create_invitation(
             inviter_name=current_user.name or current_user.email.split("@")[0],
             workspace_name=workspace_name,
             role=invitation.role,
-            is_admin_invite=current_user.is_admin
+            is_admin_invite=current_user.is_superadmin
         )
     except Exception as e:
         print(f"[Email Warning] Could not send invite email: {e}")
@@ -167,7 +167,7 @@ async def cancel_invitation(
         raise HTTPException(status_code=404, detail="초대장을 찾을 수 없습니다.")
 
     # Permissions: inviter, workspace owner, or super admin
-    if not current_user.is_admin and inv.invited_by != current_user.id:
+    if not current_user.is_superadmin and inv.invited_by != current_user.id:
         if inv.workspace_id:
             ws = await db.get(Workspace, inv.workspace_id)
             if not ws or ws.owner_id != current_user.id:
@@ -235,7 +235,7 @@ async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Dep
             name=req.name or email.split("@")[0],
             hashed_password=hash_password(req.password),
             picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
-            is_admin=False,
+            is_superadmin=False,
             is_approved=inv.is_admin_invite,  # If admin invited -> auto approve!
             is_active=True,
             last_login_at=datetime.now(timezone.utc)
@@ -277,7 +277,7 @@ async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Dep
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
-        "is_admin": user.is_admin,
+        "is_superadmin": user.is_superadmin,
         "is_approved": user.is_approved
     }
     access_token = create_access_token(token_payload)

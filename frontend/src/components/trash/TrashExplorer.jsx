@@ -64,7 +64,7 @@ export default function TrashExplorer({
   const [previewItem, setPreviewItem] = useState(null);
   const [brokenImages, setBrokenImages] = useState({});
 
-  const isOwnerOrAdmin = currentUser?.is_admin || 
+  const isOwnerOrAdmin = currentUser?.is_superadmin || 
     activeWorkspace?.owner_id === currentUser?.id || 
     activeWorkspace?.role === 'owner' || 
     activeWorkspace?.role === 'admin';

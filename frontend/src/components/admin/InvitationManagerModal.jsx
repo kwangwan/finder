@@ -46,14 +46,14 @@ export default function InvitationManagerModal({
 
   // Workspaces user can invite to (Owner or Admin or Superadmin)
   const manageableWorkspaces = workspaces.filter(w => 
-    currentUser?.is_admin || 
+    currentUser?.is_superadmin || 
     w.owner_id === currentUser?.id || 
     w.role === 'owner' || 
     w.role === 'admin'
   );
 
   const selectedWorkspace = workspaces.find(w => w.id === workspaceId);
-  const isOwnerOfSelectedWs = currentUser?.is_admin || (selectedWorkspace && (selectedWorkspace.owner_id === currentUser?.id || selectedWorkspace.role === 'owner'));
+  const isOwnerOfSelectedWs = currentUser?.is_superadmin || (selectedWorkspace && (selectedWorkspace.owner_id === currentUser?.id || selectedWorkspace.role === 'owner'));
 
   // Ensure role is member if not owner
   useEffect(() => {
@@ -65,7 +65,7 @@ export default function InvitationManagerModal({
   const loadInvitations = async () => {
     setIsLoading(true);
     try {
-      const data = await listInvitations(currentUser?.is_admin ? null : activeWorkspaceId);
+      const data = await listInvitations(currentUser?.is_superadmin ? null : activeWorkspaceId);
       setInvitations(data);
     } catch (err) {
       console.error('Failed to load invitations:', err);
@@ -171,7 +171,7 @@ export default function InvitationManagerModal({
             </div>
             <div>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.3, wordBreak: 'keep-all' }}>
-                {currentUser?.is_admin ? '초대 및 멤버 관리' : '워크스페이스 멤버 초대'}
+                {currentUser?.is_superadmin ? '초대 및 멤버 관리' : '워크스페이스 멤버 초대'}
               </h2>
               <p style={{ 
                 fontSize: '0.8rem', 
@@ -215,7 +215,7 @@ export default function InvitationManagerModal({
         )}
 
         {/* Send Invitation Form Card */}
-        {manageableWorkspaces.length === 0 && !currentUser?.is_admin ? (
+        {manageableWorkspaces.length === 0 && !currentUser?.is_superadmin ? (
           <div style={{
             background: 'var(--bg-tertiary)',
             padding: '1.5rem',
@@ -289,9 +289,9 @@ export default function InvitationManagerModal({
                   value={workspaceId}
                   onChange={setWorkspaceId}
                   options={[
-                    ...(currentUser?.is_admin ? [{ value: '', label: '전체 서비스 (기본)' }] : []),
+                    ...(currentUser?.is_superadmin ? [{ value: '', label: '전체 서비스 (기본)' }] : []),
                     ...manageableWorkspaces.map(w => {
-                      const isOwner = currentUser?.is_admin || w.owner_id === currentUser?.id || w.role === 'owner';
+                      const isOwner = currentUser?.is_superadmin || w.owner_id === currentUser?.id || w.role === 'owner';
                       return { value: w.id, label: `${w.name} (${isOwner ? '소유자' : '관리자'})` };
                     }),
                   ]}
