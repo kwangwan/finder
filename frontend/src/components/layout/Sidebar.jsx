@@ -17,6 +17,7 @@ import {
   ChevronsLeft
 } from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
+import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder } from '../../utils/fileDragDrop';
 
 export default function Sidebar({
   workspaces = [],
@@ -35,11 +36,59 @@ export default function Sidebar({
   onNewFolder,
   onOpenUpload,
   onFolderContextMenu,
+  onDirectMoveItems,
   stats,
   isCollapsed,
   onToggleSidebar,
 }) {
   const [expandedFolders, setExpandedFolders] = useState({});
+  // The sidebar tree is a drop target for files/folders dragged from the
+  // explorer (or from the tree itself). Tracked by id so only the row under
+  // the pointer highlights.
+  const [dropTargetId, setDropTargetId] = useState(null);
+  // Hovering a collapsed folder for a moment expands it, so a drop can be
+  // aimed at something nested without dropping and re-dragging first —
+  // spring-loaded folders, the way desktop file managers behave.
+  const expandTimerRef = useRef(null);
+
+  const folderDropProps = (targetFolderId) => {
+    const key = targetFolderId ?? 'root';
+    return {
+      onDragOver: (e) => {
+        if (!isItemDrag(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dropTargetId !== key) setDropTargetId(key);
+      },
+      onDragEnter: () => {
+        if (!targetFolderId) return;
+        clearTimeout(expandTimerRef.current);
+        expandTimerRef.current = setTimeout(() => {
+          setExpandedFolders(prev => ({ ...prev, [targetFolderId]: true }));
+        }, 700);
+      },
+      onDragLeave: (e) => {
+        // Children bubble dragleave up; ignore those or the highlight
+        // flickers as the pointer crosses the row's own icon/label.
+        if (e.currentTarget.contains(e.relatedTarget)) return;
+        clearTimeout(expandTimerRef.current);
+        setDropTargetId(prev => (prev === key ? null : prev));
+      },
+      onDrop: (e) => {
+        clearTimeout(expandTimerRef.current);
+        setDropTargetId(null);
+        const items = getDraggedItems(e);
+        if (!items) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!canDropOnFolder(items, targetFolderId, folders)) return;
+        if (onDirectMoveItems) onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
+      },
+      'data-drop-active': dropTargetId === key ? 'true' : undefined,
+    };
+  };
+
+  useEffect(() => () => clearTimeout(expandTimerRef.current), []);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem('kb_sidebar_width');
     return saved ? Math.min(Math.max(parseInt(saved, 10), 200), 600) : 280;
@@ -131,14 +180,20 @@ export default function Sidebar({
 
     return (
       <div key={folder.id} className="tree-node">
-        <div 
+        <div
           className={`tree-row ${isSelected ? 'active' : ''}`}
+          draggable={true}
+          onDragStart={(e) => {
+            e.stopPropagation();
+            setItemDragData(e, { folderIds: [folder.id] });
+          }}
           onClick={() => onSelectFolder(folder.id)}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
             if (onFolderContextMenu) onFolderContextMenu(e, folder);
           }}
+          {...folderDropProps(folder.id)}
         >
           {hasChildren ? (
             <span onClick={(e) => toggleExpand(folder.id, e)} style={{ display: 'flex', alignItems: 'center' }}>
@@ -236,9 +291,12 @@ export default function Sidebar({
         <span>빠른 탐색</span>
       </div>
       <ul className="sidebar-menu" style={{ padding: '0.15rem 0.85rem' }}>
-        <li 
+        {/* Also the drop target for moving items back out to the workspace
+            root — there is no tree row representing the root itself. */}
+        <li
           className={`menu-item ${activeView === 'all' ? 'active' : ''}`}
           onClick={() => onSelectView('all')}
+          {...folderDropProps(null)}
         >
           <Layers size={16} />
           <span>전체 파일</span>

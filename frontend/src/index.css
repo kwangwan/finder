@@ -739,6 +739,44 @@ body {
   font-size: 0.9rem;
 }
 
+/* ==========================================================================
+   Drag & drop: moving files/folders into a folder
+
+   Every drop target (sub-folder card, sidebar tree row, breadcrumb segment,
+   상위 폴더 button, 전체 파일 root target) sets data-drop-active while the
+   pointer is over it during a valid drag, so one rule covers all of them and
+   the affordance is identical wherever the user aims.
+   ========================================================================== */
+[data-drop-active='true'] {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent) !important;
+}
+
+/* Up-one-level button. Sized to match .breadcrumb-item's 32px so the
+   breadcrumb row keeps a single baseline. */
+.breadcrumb-up-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  margin-right: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.breadcrumb-up-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
 .breadcrumb-item {
   color: var(--text-secondary);
   cursor: pointer;

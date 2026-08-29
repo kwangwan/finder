@@ -37,6 +37,7 @@ import {
   Loader2
 } from '../../utils/icons';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
+import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder } from '../../utils/fileDragDrop';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
@@ -84,6 +85,8 @@ export default function FolderExplorer({
   onBatchDownload,
   onBatchDelete,
   onDirectMoveFiles,
+  onDirectMoveItems,
+  allFolders = [],
   hasOpenWindows = false,
   hasNewFiles = false,
   onRefreshNewFiles,
@@ -135,6 +138,51 @@ export default function FolderExplorer({
       return next.size === prev.size ? prev : next;
     });
   }, [files]);
+
+  // folderPath is root-first and ends with the folder being viewed, so the
+  // entry before last is its parent; at depth 1 there is none and "up" means
+  // the workspace root (null).
+  const parentFolder = folderPath.length >= 2 ? folderPath[folderPath.length - 2] : null;
+  const parentFolderId = parentFolder?.id ?? null;
+  const parentFolderName = parentFolder?.name ?? null;
+
+  // Which drop target the pointer is currently over, so exactly one shows
+  // the highlight. Root is represented by the literal 'root' rather than
+  // null, which would be indistinguishable from "not over anything".
+  const [dropTargetId, setDropTargetId] = useState(null);
+
+  // Shared wiring for anything files/folders can be dropped onto. Returns
+  // the drag props so each target doesn't repeat the same four handlers,
+  // and so the "is this drop legal" rule is applied identically everywhere.
+  const folderDropProps = (targetFolderId) => {
+    const key = targetFolderId ?? 'root';
+    return {
+      onDragOver: (e) => {
+        if (!isItemDrag(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dropTargetId !== key) setDropTargetId(key);
+      },
+      onDragLeave: (e) => {
+        // Ignore bubbling from children, or the highlight flickers as the
+        // pointer crosses the target's own inner elements.
+        if (e.currentTarget.contains(e.relatedTarget)) return;
+        setDropTargetId(prev => (prev === key ? null : prev));
+      },
+      onDrop: (e) => {
+        setDropTargetId(null);
+        const items = getDraggedItems(e);
+        if (!items) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!canDropOnFolder(items, targetFolderId, allFolders)) return;
+        if (onDirectMoveItems) onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
+        else if (onDirectMoveFiles && items.fileIds.length) onDirectMoveFiles(items.fileIds, targetFolderId);
+        setSelectedFileIds([]);
+      },
+      'data-drop-active': dropTargetId === key ? 'true' : undefined,
+    };
+  };
 
   const [downloadProgress, setDownloadProgress] = useState(null); // { fileId, percent, status }
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
@@ -337,6 +385,22 @@ export default function FolderExplorer({
       {/* Explorer Header: Breadcrumb & Actions */}
       <div className="explorer-header">
         <div className="breadcrumb-nav">
+          {/* Up one level. Doubles as a drop target so items can be moved to
+              the parent by dragging onto it, the way a file manager's "up"
+              button behaves. Only rendered inside a folder — at the root
+              there is nowhere to go up to. */}
+          {currentFolder && (
+            <button
+              type="button"
+              className="breadcrumb-up-btn"
+              onClick={() => onSelectFolder(parentFolderId)}
+              title={parentFolderName ? `상위 폴더로 (${parentFolderName})` : '상위 폴더로 (홈)'}
+              {...folderDropProps(parentFolderId)}
+            >
+              <ArrowUp size={15} />
+            </button>
+          )}
+
           <span
             className={`breadcrumb-item ${(!currentFolder && activeView === 'all') ? 'active' : ''}`}
             onClick={() => {
@@ -345,6 +409,7 @@ export default function FolderExplorer({
             }}
             title="홈"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+            {...folderDropProps(null)}
           >
             <Home size={15} />
             <span>홈</span>
@@ -370,10 +435,11 @@ export default function FolderExplorer({
             folderPath.map(f => (
               <React.Fragment key={f.id}>
                 <ChevronRight size={13} className="breadcrumb-sep" />
-                <span 
+                <span
                   className={`breadcrumb-item ${f.id === currentFolder?.id ? 'active' : ''}`}
                   onClick={() => onSelectFolder(f.id)}
                   title={f.name}
+                  {...folderDropProps(f.id)}
                 >
                   {f.name}
                 </span>
@@ -418,10 +484,11 @@ export default function FolderExplorer({
               {folderPath.slice(folderPath.length - 2).map(f => (
                 <React.Fragment key={f.id}>
                   <ChevronRight size={13} className="breadcrumb-sep" />
-                  <span 
+                  <span
                     className={`breadcrumb-item ${f.id === currentFolder?.id ? 'active' : ''}`}
                     onClick={() => onSelectFolder(f.id)}
                     title={f.name}
+                    {...folderDropProps(f.id)}
                   >
                     {f.name}
                   </span>
@@ -603,26 +670,12 @@ export default function FolderExplorer({
                   e.stopPropagation();
                   if (onFolderContextMenu) onFolderContextMenu(e, sub);
                 }}
-                onDragOver={(e) => {
-                  if (e.dataTransfer.types.includes('application/json')) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                  }
+                draggable={true}
+                onDragStart={(e) => {
+                  e.stopPropagation();
+                  setItemDragData(e, { folderIds: [sub.id] });
                 }}
-                onDrop={(e) => {
-                  const dataStr = e.dataTransfer.getData('application/json');
-                  if (dataStr) {
-                    try {
-                      const parsed = JSON.parse(dataStr);
-                      if (parsed.type === 'kb_files' && parsed.fileIds && parsed.fileIds.length > 0) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onDirectMoveFiles && onDirectMoveFiles(parsed.fileIds, sub.id);
-                        setSelectedFileIds([]);
-                      }
-                    } catch (err) {}
-                  }
-                }}
+                {...folderDropProps(sub.id)}
               >
                 <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
                 <span title={sub.name} style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -783,8 +836,7 @@ export default function FolderExplorer({
                   draggable={true}
                   onDragStart={(e) => {
                     const ids = selectedFileIds.includes(file.id) ? selectedFileIds : [file.id];
-                    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'kb_files', fileIds: ids }));
-                    e.dataTransfer.effectAllowed = 'move';
+                    setItemDragData(e, { fileIds: ids });
                   }}
                   onClick={(e) => handleCardClick(file, e)}
                   onContextMenu={(e) => {

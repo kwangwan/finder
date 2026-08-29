@@ -300,17 +300,44 @@ async def update_folder(
 
     if req.name is not None:
         folder.name = req.name.strip()
-    if req.parent_id is not None:
-        if req.parent_id == folder_id:
-            raise HTTPException(status_code=400, detail="Folder cannot be parent of itself")
-        if not await access_service.can_access_folder(db, current_user, req.parent_id):
-            raise HTTPException(status_code=403, detail="상위 폴더에 접근할 권한이 없습니다.")
-        parent = await db.get(Folder, req.parent_id)
-        if not parent or parent.is_trashed:
-            raise HTTPException(status_code=404, detail="Parent folder not found or trashed")
-        if parent.workspace_id and folder.workspace_id and parent.workspace_id != folder.workspace_id:
-            raise HTTPException(status_code=400, detail="다른 워크스페이스의 폴더 하위로 이동할 수 없습니다.")
-        folder.parent_id = req.parent_id
+
+    # `parent_id: null` is a meaningful value here — it means "move to the
+    # workspace root" — and is indistinguishable from "field omitted" by
+    # value alone, so ask Pydantic which fields the caller actually sent.
+    # Without this, drag-and-dropping a folder onto 홈 could never move it
+    # back out to the root.
+    if "parent_id" in req.model_fields_set:
+        if req.parent_id is None:
+            folder.parent_id = None
+        else:
+            if req.parent_id == folder_id:
+                raise HTTPException(status_code=400, detail="Folder cannot be parent of itself")
+            if not await access_service.can_access_folder(db, current_user, req.parent_id):
+                raise HTTPException(status_code=403, detail="상위 폴더에 접근할 권한이 없습니다.")
+            parent = await db.get(Folder, req.parent_id)
+            if not parent or parent.is_trashed:
+                raise HTTPException(status_code=404, detail="Parent folder not found or trashed")
+            if parent.workspace_id and folder.workspace_id and parent.workspace_id != folder.workspace_id:
+                raise HTTPException(status_code=400, detail="다른 워크스페이스의 폴더 하위로 이동할 수 없습니다.")
+
+            # Reject moving a folder underneath its own descendant. That would
+            # detach the whole subtree from the root — it would still exist,
+            # but with a parent chain that loops, so it can never be reached
+            # by the tree walk and the folder list would silently lose it.
+            ancestor_id = parent.parent_id
+            seen = {folder_id, req.parent_id}
+            while ancestor_id is not None:
+                if ancestor_id == folder_id:
+                    raise HTTPException(status_code=400, detail="폴더를 자기 하위 폴더로 이동할 수 없습니다.")
+                if ancestor_id in seen:
+                    break  # pre-existing cycle; don't spin on it
+                seen.add(ancestor_id)
+                ancestor = await db.get(Folder, ancestor_id)
+                if not ancestor:
+                    break
+                ancestor_id = ancestor.parent_id
+
+            folder.parent_id = req.parent_id
     if req.icon is not None:
         folder.icon = req.icon
     if req.color is not None:

@@ -551,6 +551,45 @@ export default function App() {
     }
   };
 
+  // Drag-and-drop move for a mixed selection of files and folders, from any
+  // drop target (folder card, sidebar tree row, breadcrumb, 상위 폴더 button).
+  // Folders move one PUT each — there is no batch endpoint for them, and a
+  // drag realistically carries one or a handful, not thousands like a file
+  // multi-select can.
+  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null) => {
+    if (!activeWorkspace?.id) return;
+    if (!fileIds.length && !folderIds.length) return;
+
+    try {
+      let movedFiles = 0;
+      if (fileIds.length) {
+        const res = await batchMoveFiles(activeWorkspace.id, fileIds, targetFolderId);
+        movedFiles = res.moved_count ?? fileIds.length;
+      }
+      for (const folderId of folderIds) {
+        await updateFolder(folderId, { parent_id: targetFolderId });
+      }
+
+      await refreshFiles();
+      await refreshFoldersAndStats();
+
+      const parts = [];
+      if (movedFiles) parts.push(`파일 ${movedFiles}개`);
+      if (folderIds.length) parts.push(`폴더 ${folderIds.length}개`);
+      showToast(`${parts.join(', ')}를 이동했습니다.`, { type: 'success' });
+    } catch (err) {
+      await showAlert({
+        title: '이동 실패',
+        message: '이동 중 오류가 발생했습니다: ' + err.message,
+        type: 'error',
+      });
+      // The folder loop can fail partway through, so resync rather than
+      // leaving the tree showing a move that only partly happened.
+      await refreshFiles();
+      await refreshFoldersAndStats();
+    }
+  };
+
   const handleBatchTrashFiles = async (fileIds, onConfirmed) => {
     if (!fileIds || fileIds.length === 0) return false;
     const confirmed = await showConfirm({
@@ -1389,6 +1428,7 @@ export default function App() {
         }}
         onOpenUpload={() => setIsUploadOpen(true)}
         onFolderContextMenu={handleFolderContextMenu}
+        onDirectMoveItems={handleDirectMoveItems}
         stats={stats}
         isCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed(true)}
@@ -1457,6 +1497,8 @@ export default function App() {
             onBatchDownload={handleBatchDownloadFiles}
             onBatchDelete={handleBatchTrashFiles}
             onDirectMoveFiles={handleDirectMoveFiles}
+            onDirectMoveItems={handleDirectMoveItems}
+            allFolders={folders}
             hasOpenWindows={windowManager.windows.length > 0}
             hasNewFiles={hasNewFilesInView}
             onRefreshNewFiles={() => {
