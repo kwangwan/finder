@@ -195,11 +195,14 @@ export default function FolderExplorer({
   const [isBreadcrumbOpen, setIsBreadcrumbOpen] = useState(false);
   const breadcrumbRef = useRef(null);
 
-  // Clear selection when folder changes
+  // Clear the selection whenever the set of visible items changes underneath
+  // it. Paging or re-sorting otherwise leaves items selected that are no
+  // longer on screen, so the count in the action bar covers things the user
+  // cannot see — and 잘라내기 or 삭제 would then act on them.
   useEffect(() => {
     setSelectedFileIds([]);
     setSelectedFolderIds([]);
-  }, [currentFolder?.id, activeView]);
+  }, [currentFolder?.id, activeView, currentPage, pageSize, sortBy, sortOrder]);
 
   // Close breadcrumb dropdown on outside click
   useEffect(() => {
@@ -750,6 +753,16 @@ export default function FolderExplorer({
           ref={gridAreaRef}
           className="explorer-grid-area"
           onMouseDown={handleGridMouseDown}
+          // The background menu had a handler passed in from App but was never
+          // attached to anything, so right-clicking empty space did nothing at
+          // all. Bound here rather than on the explorer root so it covers the
+          // listing area without firing on the header and toolbar; the cards
+          // stop propagation and raise their own menus.
+          onContextMenu={(e) => {
+            if (e.target.closest('[data-select-id]')) return;
+            e.preventDefault();
+            if (onBackgroundContextMenu) onBackgroundContextMenu(e);
+          }}
         >
           {/* 1. Subfolders Section (Only in all/folder view) */}
           {activeView !== 'notes' && activeView !== 'favorites' && sortedSubfolders.length > 0 && (
@@ -1234,7 +1247,8 @@ export default function FolderExplorer({
             onClick={async () => {
               if (!onBatchDelete) return;
               const idsToDelete = [...selectedFileIds];
-              const proceeded = await onBatchDelete(idsToDelete, () => new Promise((resolve) => {
+              const folderIdsToDelete = [...selectedFolderIds];
+              const proceeded = await onBatchDelete(idsToDelete, folderIdsToDelete, () => new Promise((resolve) => {
                 setRemovingIds(new Set(idsToDelete));
                 setTimeout(() => {
                   setHiddenIds(prev => new Set([...prev, ...idsToDelete]));
@@ -1242,7 +1256,7 @@ export default function FolderExplorer({
                 }, 220);
               }));
               if (proceeded !== false) {
-                setSelectedFileIds([]);
+                clearSelection();
               }
               setRemovingIds(new Set());
             }}

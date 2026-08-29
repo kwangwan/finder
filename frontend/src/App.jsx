@@ -665,11 +665,20 @@ export default function App() {
     }
   };
 
-  const handleBatchTrashFiles = async (fileIds, onConfirmed) => {
-    if (!fileIds || fileIds.length === 0) return false;
+  // Handles a mixed selection: folders became selectable alongside files, and
+  // deleting only the files out of such a selection would quietly leave the
+  // folders behind — worse than not offering it at all.
+  const handleBatchTrashItems = async (fileIds = [], folderIds = [], onConfirmed) => {
+    if (!fileIds.length && !folderIds.length) return false;
+
+    const what = [];
+    if (folderIds.length) what.push(`폴더 ${folderIds.length}개`);
+    if (fileIds.length) what.push(`파일 ${fileIds.length}개`);
     const confirmed = await showConfirm({
-      title: '파일 일괄 삭제',
-      message: `선택한 ${fileIds.length}개 파일을 휴지통으로 이동하시겠습니까?`,
+      title: folderIds.length ? '선택 항목 일괄 삭제' : '파일 일괄 삭제',
+      message: folderIds.length
+        ? `선택한 ${what.join(', ')}를 휴지통으로 이동하시겠습니까?\n폴더 안의 파일·하위 폴더도 함께 이동되며, 30일 후 자동 영구 삭제됩니다.`
+        : `선택한 ${fileIds.length}개 파일을 휴지통으로 이동하시겠습니까?`,
       confirmText: '삭제',
       danger: true,
     });
@@ -681,16 +690,33 @@ export default function App() {
       await onConfirmed();
     }
 
+    let failed = 0;
     for (const fid of fileIds) {
       try {
         await moveToTrashFile(fid);
       } catch (e) {
+        failed += 1;
+        console.error('Trash error:', e);
+      }
+    }
+    // After the files, so a folder that held some of them is emptied first and
+    // the trash entries stay individually restorable.
+    for (const fid of folderIds) {
+      try {
+        await moveToTrashFolder(fid);
+      } catch (e) {
+        failed += 1;
         console.error('Trash error:', e);
       }
     }
     await refreshFiles();
     await refreshFoldersAndStats();
-    updateToast(toastId, { message: `${fileIds.length}개 파일을 휴지통으로 이동했습니다.`, type: 'success' });
+    updateToast(toastId, {
+      message: failed
+        ? `${what.join(', ')} 중 ${failed}개를 옮기지 못했습니다.`
+        : `${what.join(', ')}를 휴지통으로 이동했습니다.`,
+      type: failed ? 'error' : 'success',
+    });
     return true;
   };
 
@@ -1604,7 +1630,7 @@ export default function App() {
             onDownloadFile={startDownloadFile}
             onOpenMoveModal={handleOpenMoveModal}
             onBatchDownload={handleBatchDownloadFiles}
-            onBatchDelete={handleBatchTrashFiles}
+            onBatchDelete={handleBatchTrashItems}
             onDirectMoveFiles={handleDirectMoveFiles}
             onDirectMoveItems={handleDirectMoveItems}
             allFolders={folders}
