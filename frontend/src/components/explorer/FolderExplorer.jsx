@@ -117,6 +117,9 @@ export default function FolderExplorer({
   // The selection as it stood when a marquee drag began, so a ctrl-drag adds
   // to it instead of to the partial result of the drag currently in progress.
   const marqueeBaseRef = useRef({ files: [], folders: [] });
+  // Where a shift-click measures its range from — the last item picked out
+  // individually, as in Explorer.
+  const anchorRef = useRef(null);
   const [infoFile, setInfoFile] = useState(null);
   const [removingIds, setRemovingIds] = useState(new Set());
   // Cards fading out are hidden from the grid as soon as the fade finishes,
@@ -202,6 +205,7 @@ export default function FolderExplorer({
   useEffect(() => {
     setSelectedFileIds([]);
     setSelectedFolderIds([]);
+    anchorRef.current = null;
   }, [currentFolder?.id, activeView, currentPage, pageSize, sortBy, sortOrder]);
 
   // Close breadcrumb dropdown on outside click
@@ -217,6 +221,7 @@ export default function FolderExplorer({
 
   const toggleFileSelection = (fileId, e) => {
     if (e) e.stopPropagation();
+    anchorRef.current = { kind: 'file', id: fileId };
     setSelectedFileIds(prev =>
       prev.includes(fileId) ? prev.filter(id => id !== fileId) : [...prev, fileId]
     );
@@ -224,6 +229,7 @@ export default function FolderExplorer({
 
   const toggleFolderSelection = (folderId, e) => {
     if (e) e.stopPropagation();
+    anchorRef.current = { kind: 'folder', id: folderId };
     setSelectedFolderIds(prev =>
       prev.includes(folderId) ? prev.filter(id => id !== folderId) : [...prev, folderId]
     );
@@ -232,6 +238,7 @@ export default function FolderExplorer({
   const clearSelection = useCallback(() => {
     setSelectedFileIds([]);
     setSelectedFolderIds([]);
+    anchorRef.current = null;
   }, []);
 
   const visibleFileIds = files.filter(f => !hiddenIds.has(f.id)).map(f => f.id);
@@ -388,7 +395,12 @@ export default function FolderExplorer({
   };
 
   const handleCardClick = (file, e) => {
-    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+    if (e.shiftKey) {
+      e.stopPropagation();
+      selectRangeTo('file', file.id, e.ctrlKey || e.metaKey);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
       toggleFileSelection(file.id, e);
       return;
     }
@@ -411,6 +423,38 @@ export default function FolderExplorer({
     }
     return 0;
   });
+
+  // Everything selectable, in the order it appears on screen: the folder grid
+  // renders above the file grid, so a range can span both.
+  const orderedItems = [
+    ...sortedSubfolders.map(f => ({ kind: 'folder', id: f.id })),
+    ...visibleFileIds.map(id => ({ kind: 'file', id })),
+  ];
+
+  const selectRangeTo = (kind, id, additive) => {
+    const idx = orderedItems.findIndex(i => i.kind === kind && i.id === id);
+    const anchor = anchorRef.current;
+    const anchorIdx = anchor ? orderedItems.findIndex(i => i.kind === anchor.kind && i.id === anchor.id) : -1;
+
+    // No usable anchor — nothing picked yet this view, or the anchor is on
+    // another page. Behave like a plain pick and become the new anchor rather
+    // than selecting an arbitrary range.
+    if (idx === -1 || anchorIdx === -1) {
+      anchorRef.current = { kind, id };
+      setSelectedFileIds(prev => (kind === 'file' ? (additive ? [...new Set([...prev, id])] : [id]) : (additive ? prev : [])));
+      setSelectedFolderIds(prev => (kind === 'folder' ? (additive ? [...new Set([...prev, id])] : [id]) : (additive ? prev : [])));
+      return;
+    }
+
+    const [from, to] = anchorIdx <= idx ? [anchorIdx, idx] : [idx, anchorIdx];
+    const range = orderedItems.slice(from, to + 1);
+    const rangeFiles = range.filter(i => i.kind === 'file').map(i => i.id);
+    const rangeFolders = range.filter(i => i.kind === 'folder').map(i => i.id);
+    setSelectedFileIds(prev => (additive ? [...new Set([...prev, ...rangeFiles])] : rangeFiles));
+    setSelectedFolderIds(prev => (additive ? [...new Set([...prev, ...rangeFolders])] : rangeFolders));
+    // The anchor deliberately stays put, so repeated shift-clicks widen and
+    // narrow the same range instead of walking it along.
+  };
 
   const isEverythingSelected = selectedCount > 0
     && selectedFileIds.length === visibleFileIds.length
@@ -781,7 +825,12 @@ export default function FolderExplorer({
                   // Modifier-click selects, plain click opens — the same split
                   // the file cards already use, so a folder can join a mixed
                   // selection without losing single-click navigation.
-                  if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                  if (e.shiftKey) {
+                    e.stopPropagation();
+                    selectRangeTo('folder', sub.id, e.ctrlKey || e.metaKey);
+                    return;
+                  }
+                  if (e.ctrlKey || e.metaKey) {
                     toggleFolderSelection(sub.id, e);
                     return;
                   }

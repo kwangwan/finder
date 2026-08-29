@@ -299,7 +299,28 @@ export default function App() {
   const [newFolderParentId, setNewFolderParentId] = useState(null);
   const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, items: [] });
-  const [clipboard, setClipboard] = useState(null);
+  // Kept in sessionStorage so a reload doesn't silently drop a pending
+  // 잘라내기 — the cut items would still be sitting there looking normal with
+  // nothing left to paste. Per-tab rather than shared: two tabs holding
+  // different cut selections must not overwrite each other.
+  const [clipboard, setClipboard] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('kb_explorer_clipboard');
+      const v = raw ? JSON.parse(raw) : null;
+      // Anything not matching the expected shape is ignored rather than
+      // trusted — a half-written or older-format entry would otherwise reach
+      // the paste handlers as undefined arrays.
+      if (v && (v.mode === 'cut' || v.mode === 'copy') && Array.isArray(v.fileIds) && Array.isArray(v.folderIds)) return v;
+    } catch (e) {}
+    return null;
+  });
+
+  useEffect(() => {
+    try {
+      if (clipboard) sessionStorage.setItem('kb_explorer_clipboard', JSON.stringify(clipboard));
+      else sessionStorage.removeItem('kb_explorer_clipboard');
+    } catch (e) {}
+  }, [clipboard]);
   const [renameModal, setRenameModal] = useState({ isOpen: false, item: null });
 
   // OS-Style Multi-Window Manager
@@ -567,7 +588,7 @@ export default function App() {
   // Folders move one PUT each — there is no batch endpoint for them, and a
   // drag realistically carries one or a handful, not thousands like a file
   // multi-select can.
-  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null) => {
+  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null, { announce = true } = {}) => {
     if (!activeWorkspace?.id) return;
     if (!fileIds.length && !folderIds.length) return;
 
@@ -587,7 +608,8 @@ export default function App() {
       const parts = [];
       if (movedFiles) parts.push(`파일 ${movedFiles}개`);
       if (folderIds.length) parts.push(`폴더 ${folderIds.length}개`);
-      showToast(`${parts.join(', ')}를 이동했습니다.`, { type: 'success' });
+      if (announce) showToast(`${parts.join(', ')}를 이동했습니다.`, { type: 'success' });
+      return { movedFiles, movedFolders: folderIds.length };
     } catch (err) {
       await showAlert({
         title: '이동 실패',
@@ -631,13 +653,30 @@ export default function App() {
     }
 
     const { mode, fileIds, folderIds } = clipboard;
+    // Pasting a folder copies its whole subtree, so this can run for a while
+    // with nothing on screen to say so. The toast stays up for the duration
+    // and is replaced by the result, matching how batch delete already
+    // reports itself.
+    const count = fileIds.length + folderIds.length;
+    const toastId = showToast(
+      mode === 'cut' ? `${count}개 항목을 이동하는 중...` : `${count}개 항목을 붙여넣는 중...`,
+      { type: 'loading', duration: 0 }
+    );
+
     try {
       if (mode === 'cut') {
         // A move is exactly what drag-and-drop already does, down to the
         // folder cycle guard the server applies, so paste reuses it rather
         // than growing a second path that could drift from it.
-        await handleDirectMoveItems(fileIds, folderIds, targetFolderId);
+        const moved = await handleDirectMoveItems(fileIds, folderIds, targetFolderId, { announce: false });
         setClipboard(null);  // cut is consumed by its paste, as in Explorer
+        const moveParts = [];
+        if (moved?.movedFiles) moveParts.push(`파일 ${moved.movedFiles}개`);
+        if (moved?.movedFolders) moveParts.push(`폴더 ${moved.movedFolders}개`);
+        updateToast(toastId, {
+          message: moveParts.length ? `${moveParts.join(', ')}를 이동했습니다.` : '이동할 항목이 없습니다.',
+          type: moveParts.length ? 'success' : 'info',
+        });
         return;
       }
 
@@ -655,12 +694,14 @@ export default function App() {
       // rather than letting the count quietly not add up.
       if (res.skipped_cycles) notes.push(`폴더 ${res.skipped_cycles}개는 자기 자신 안으로 붙여넣을 수 없어 제외`);
       const suffix = notes.length ? ` (${notes.join(', ')})` : '';
-      showToast(parts.length ? `${parts.join(', ')}를 붙여넣었습니다.${suffix}` : `붙여넣을 항목이 없습니다.${suffix}`, {
+      updateToast(toastId, {
+        message: parts.length ? `${parts.join(', ')}를 붙여넣었습니다.${suffix}` : `붙여넣을 항목이 없습니다.${suffix}`,
         type: parts.length ? 'success' : 'info',
       });
       // Copy stays on the clipboard so it can be pasted into several places,
       // which is how Explorer behaves and is the only reason to keep it.
     } catch (err) {
+      dismissToast(toastId);
       await showAlert({ title: '붙여넣기 실패', message: err.message, type: 'error' });
     }
   };
@@ -1249,11 +1290,14 @@ export default function App() {
   // Cut/copy/paste entries shared by the file, folder and background menus, so
   // the three stay in step and a selection is always acted on as a unit.
   const clipboardMenuItems = (fileIds, folderIds, pasteTargetId) => {
+    // The handlers accept either modifier; the hint shows the one the user's
+    // own keyboard actually has, so it isn't wrong on half the machines.
+    const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
     const items = [];
     if (fileIds.length || folderIds.length) {
       items.push(
-        { label: '잘라내기', icon: Scissors, onClick: () => handleClipboardCut(fileIds, folderIds) },
-        { label: '복사', icon: Copy, onClick: () => handleClipboardCopy(fileIds, folderIds) },
+        { label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds) },
+        { label: '복사', icon: Copy, shortcut: `${mod}C`, onClick: () => handleClipboardCopy(fileIds, folderIds) },
       );
     }
     if (clipboardHasItems) {
@@ -1261,6 +1305,7 @@ export default function App() {
       items.push({
         label: `붙여넣기 (${count}개)`,
         icon: ClipboardPaste,
+        shortcut: `${mod}V`,
         onClick: () => handleClipboardPaste(pasteTargetId),
       });
     }
