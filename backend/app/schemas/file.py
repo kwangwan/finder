@@ -39,10 +39,17 @@ class BatchMoveRequest(BaseModel):
     folder_id: Optional[uuid.UUID] = None
 
 class BatchCopyRequest(BaseModel):
-    workspace_id: uuid.UUID
+    workspace_id: uuid.UUID                              # destination workspace
     file_ids: List[uuid.UUID] = Field(default_factory=list)
     folder_ids: List[uuid.UUID] = Field(default_factory=list)
-    folder_id: Optional[uuid.UUID] = None  # destination; None means workspace root
+    folder_id: Optional[uuid.UUID] = None                # destination; None means workspace root
+    # Set when the items come from another workspace. Workspaces are separate
+    # storage domains — crossing one is a copy, the way moving between drives
+    # is — so the source has to be named explicitly rather than assumed.
+    source_workspace_id: Optional[uuid.UUID] = None
+    # Cross-workspace "move": copy into the destination, then send the
+    # originals to the trash rather than deleting them outright.
+    trash_source: bool = False
 
 class FileRenameRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

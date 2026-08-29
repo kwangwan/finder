@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useWindowChrome } from '../../hooks/useWindowChrome';
 import { SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react';
 import { filterSuggestionItems } from '@blocknote/core';
 import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
@@ -69,16 +70,16 @@ export default function PreviewWindow({
   const panStartRef = useRef({ x: 0, y: 0 });
   const [bgMode, setBgMode] = useState('checkerboard'); // 'checkerboard' | 'light' | 'dark'
 
-  // Dragging & Resizing state
   const windowRef = useRef(null);
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: position.x, posY: position.y });
-  const isResizingRef = useRef(false);
-  const resizeStartRef = useRef({ mouseX: 0, mouseY: 0, width: size.width, height: size.height });
-  // Toggled only at drag/resize start & end (not on every mousemove) so the
-  // maximize/restore transition below can be gated off during a live
-  // drag/resize without re-rendering per mousemove.
-  const [isInteracting, setIsInteracting] = useState(false);
+
+  // Dragging and eight-way resizing live in a shared hook, so this window and
+  // the folder window cannot drift apart on clamping or touch handling.
+  // isInteracting is toggled only at drag/resize start & end (not per
+  // mousemove) so the maximize/restore transition can be gated off during a
+  // live drag without re-rendering on every move.
+  const { isInteracting, handleDragStart, handleResizeStart } = useWindowChrome({
+    id, position, size, isMaximized, onFocus, onPositionChange, onSizeChange,
+  });
 
   // Minimize plays a shrink-toward-dock animation before the window actually
   // unmounts, since the parent flips isMinimized to true immediately.
@@ -223,62 +224,6 @@ export default function PreviewWindow({
   // ==========================================
   // Mouse & Touch Dragging (Window Movement)
   // ==========================================
-  const handleDragStart = (e) => {
-    if (isMaximized) return;
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Fixed on mobile
-    if (e.target.closest('.window-action-btn') || e.target.closest('.window-os-controls') || e.target.closest('.window-header-actions')) return;
-    // The title input already has its own mousedown handler (handleTitleMouseDown)
-    // that decides between dragging and editing — if it let this bubble up here
-    // (i.e. the input was already focused, mid-edit), don't also start a drag.
-    if (e.target.closest('.window-title-input') && document.activeElement === e.target) return;
-
-    onFocus(id);
-    isDraggingRef.current = true;
-    setIsInteracting(true);
-    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
-    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
-
-    dragStartRef.current = {
-      mouseX: clientX,
-      mouseY: clientY,
-      posX: position.x,
-      posY: position.y
-    };
-
-    window.addEventListener('mousemove', handleDragMove);
-    window.addEventListener('mouseup', handleDragEnd);
-    window.addEventListener('touchmove', handleDragMove, { passive: false });
-    window.addEventListener('touchend', handleDragEnd);
-  };
-
-  const handleDragMove = useCallback((e) => {
-    if (!isDraggingRef.current) return;
-    if (e.cancelable) e.preventDefault();
-
-    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
-    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
-
-    const deltaX = clientX - dragStartRef.current.mouseX;
-    const deltaY = clientY - dragStartRef.current.mouseY;
-
-    const screenW = window.innerWidth;
-    const screenH = window.innerHeight;
-
-    const newX = Math.max(0, Math.min(screenW - 120, dragStartRef.current.posX + deltaX));
-    const newY = Math.max(48, Math.min(screenH - 80, dragStartRef.current.posY + deltaY));
-
-    onPositionChange(id, { x: newX, y: newY });
-  }, [id, onPositionChange]);
-
-  const handleDragEnd = useCallback(() => {
-    isDraggingRef.current = false;
-    setIsInteracting(false);
-    window.removeEventListener('mousemove', handleDragMove);
-    window.removeEventListener('mouseup', handleDragEnd);
-    window.removeEventListener('touchmove', handleDragMove);
-    window.removeEventListener('touchend', handleDragEnd);
-  }, [handleDragMove]);
-
   // The editable title input spans most of the header's width, leaving too
   // little bare header area to grab for dragging. Mirror how a real OS
   // title-bar rename field behaves: mousedown on the (not-yet-focused) input
@@ -303,105 +248,6 @@ export default function PreviewWindow({
     };
     window.addEventListener('mouseup', onUp);
   };
-
-  // ==========================================
-  // Mouse & Touch Resizing (all 4 edges + all 4 corners)
-  // ==========================================
-  const RESIZE_MIN_WIDTH = 320;
-  const RESIZE_MIN_HEIGHT = 240;
-  const resizeDirRef = useRef('se');
-
-  const handleResizeStart = (dir) => (e) => {
-    if (isMaximized) return;
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Disabled on mobile
-    e.stopPropagation();
-    onFocus(id);
-    isResizingRef.current = true;
-    resizeDirRef.current = dir;
-    setIsInteracting(true);
-
-    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
-    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
-
-    resizeStartRef.current = {
-      mouseX: clientX,
-      mouseY: clientY,
-      width: size.width,
-      height: size.height,
-      posX: position.x,
-      posY: position.y
-    };
-
-    window.addEventListener('mousemove', handleResizeMove);
-    window.addEventListener('mouseup', handleResizeEnd);
-    window.addEventListener('touchmove', handleResizeMove, { passive: false });
-    window.addEventListener('touchend', handleResizeEnd);
-  };
-
-  const handleResizeMove = useCallback((e) => {
-    if (!isResizingRef.current) return;
-    if (e.cancelable) e.preventDefault();
-
-    const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
-    const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
-
-    const deltaX = clientX - resizeStartRef.current.mouseX;
-    const deltaY = clientY - resizeStartRef.current.mouseY;
-    const dir = resizeDirRef.current;
-    const start = resizeStartRef.current;
-
-    let newW = start.width;
-    let newH = start.height;
-    let newX = start.posX;
-    let newY = start.posY;
-
-    if (dir.includes('e')) {
-      const maxW = window.innerWidth - start.posX - 10;
-      newW = Math.max(RESIZE_MIN_WIDTH, Math.min(maxW, start.width + deltaX));
-    }
-    if (dir.includes('s')) {
-      const maxH = window.innerHeight - start.posY - 10;
-      newH = Math.max(RESIZE_MIN_HEIGHT, Math.min(maxH, start.height + deltaY));
-    }
-    if (dir.includes('w')) {
-      // Right edge stays fixed — only the left edge (position.x) and width move.
-      const rightEdge = start.posX + start.width;
-      let proposedX = Math.max(0, start.posX + deltaX);
-      let proposedW = rightEdge - proposedX;
-      if (proposedW < RESIZE_MIN_WIDTH) {
-        proposedW = RESIZE_MIN_WIDTH;
-        proposedX = rightEdge - RESIZE_MIN_WIDTH;
-      }
-      newX = proposedX;
-      newW = proposedW;
-    }
-    if (dir.includes('n')) {
-      // Bottom edge stays fixed — only the top edge (position.y) and height move.
-      const bottomEdge = start.posY + start.height;
-      let proposedY = Math.max(48, start.posY + deltaY);
-      let proposedH = bottomEdge - proposedY;
-      if (proposedH < RESIZE_MIN_HEIGHT) {
-        proposedH = RESIZE_MIN_HEIGHT;
-        proposedY = bottomEdge - RESIZE_MIN_HEIGHT;
-      }
-      newY = proposedY;
-      newH = proposedH;
-    }
-
-    onSizeChange(id, { width: newW, height: newH });
-    if (dir.includes('w') || dir.includes('n')) {
-      onPositionChange(id, { x: newX, y: newY });
-    }
-  }, [id, onSizeChange, onPositionChange]);
-
-  const handleResizeEnd = useCallback(() => {
-    isResizingRef.current = false;
-    setIsInteracting(false);
-    window.removeEventListener('mousemove', handleResizeMove);
-    window.removeEventListener('mouseup', handleResizeEnd);
-    window.removeEventListener('touchmove', handleResizeMove);
-    window.removeEventListener('touchend', handleResizeEnd);
-  }, [handleResizeMove]);
 
   // Image pan & zoom handlers
   const handleImageMouseDown = (e) => {

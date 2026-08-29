@@ -10,9 +10,13 @@
 const MIME = 'application/json';
 const PAYLOAD_TYPE = 'kb_items';
 
-export function setItemDragData(e, { fileIds = [], folderIds = [], label, count } = {}) {
-  e.dataTransfer.setData(MIME, JSON.stringify({ type: PAYLOAD_TYPE, fileIds, folderIds }));
-  e.dataTransfer.effectAllowed = 'move';
+export function setItemDragData(e, { fileIds = [], folderIds = [], label, count, workspaceId = null } = {}) {
+  // workspaceId travels with the payload because a drop target can belong to a
+  // different workspace than the drag started in (a folder window can show
+  // any workspace). The target compares the two to decide whether the drop is
+  // a move within one workspace or a copy across two.
+  e.dataTransfer.setData(MIME, JSON.stringify({ type: PAYLOAD_TYPE, fileIds, folderIds, workspaceId }));
+  e.dataTransfer.effectAllowed = 'copyMove';
   if (label) setDragLabel(e, label, count ?? (fileIds.length + folderIds.length));
 }
 
@@ -68,8 +72,9 @@ export function isItemDrag(e) {
 }
 
 /**
- * Decode a drop event. Returns { fileIds, folderIds } or null when the drop
- * isn't ours (an OS file drag for upload, plain text, another app).
+ * Decode a drop event. Returns { fileIds, folderIds, workspaceId } or null when
+ * the drop isn't ours (an OS file drag for upload, plain text, another app).
+ * workspaceId is null for payloads written before it was carried.
  */
 export function getDraggedItems(e) {
   const raw = e.dataTransfer?.getData(MIME);
@@ -80,7 +85,7 @@ export function getDraggedItems(e) {
     const fileIds = Array.isArray(parsed.fileIds) ? parsed.fileIds : [];
     const folderIds = Array.isArray(parsed.folderIds) ? parsed.folderIds : [];
     if (fileIds.length === 0 && folderIds.length === 0) return null;
-    return { fileIds, folderIds };
+    return { fileIds, folderIds, workspaceId: parsed.workspaceId ?? null };
   } catch {
     return null;
   }
@@ -112,10 +117,27 @@ export function collectFolderSubtreeIds(folders, folderId, acc = new Set()) {
  * Whether dropping the dragged items onto `targetFolderId` (null = root) is
  * a legal, non-pointless move.
  */
-export function canDropOnFolder({ folderIds = [] }, targetFolderId, folders) {
+export function canDropOnFolder({ folderIds = [], workspaceId = null } = {}, targetFolderId, folders, targetWorkspaceId = undefined) {
+  // Crossing workspaces copies rather than moves, so the containment rules
+  // below cannot apply: the source tree is in a different workspace entirely
+  // and `folders` describes only one of them.
+  if (targetWorkspaceId !== undefined && workspaceId && workspaceId !== targetWorkspaceId) return true;
   for (const draggedId of folderIds) {
     if (draggedId === targetFolderId) return false; // onto itself
     if (collectFolderSubtreeIds(folders, draggedId).has(targetFolderId)) return false; // into own subtree
   }
   return true;
+}
+
+/**
+ * What a drop should do: a move inside one workspace, a copy across two.
+ * Mirrors dragging between folders on one drive versus between two drives —
+ * the second cannot be a rename, so it has to duplicate.
+ */
+export function dropIntent(items, targetWorkspaceId) {
+  const source = items?.workspaceId ?? null;
+  if (source && targetWorkspaceId && source !== targetWorkspaceId) {
+    return { mode: 'copy', sourceWorkspaceId: source };
+  }
+  return { mode: 'move', sourceWorkspaceId: source };
 }

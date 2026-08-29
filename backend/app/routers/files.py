@@ -1,6 +1,6 @@
 import uuid
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
@@ -10,14 +10,18 @@ from sqlalchemy import select, or_, and_, desc, asc, func
 import urllib.parse
 from fastapi.responses import StreamingResponse
 from app.core.database import get_db
-from app.models import DocumentChunk, FileItem, FileVersion, Folder, User, WorkspaceMember
+from app.models import CopyJob, DocumentChunk, FileItem, FileVersion, Folder, User, WorkspaceMember
 from app.core.security import get_current_approved_user
 from app.schemas.file import (
     NoteCreate, NoteUpdate, FileMetadataCreate, FileMoveRequest,
     FileRenameRequest, FileResponse, FileDetailResponse, PagedFileResponse,
     BatchDownloadRequest, BatchMoveRequest, BatchCopyRequest, FileVersionResponse, FileVersionDetailResponse
 )
-from app.routers.folders import _collect_folder_files_recursive
+from app.routers.folders import _collect_folder_files_recursive, _set_folder_trash_recursive
+from app.services.copy_service import (
+    copy_service, collect_source_bytes, _descendant_folder_ids,
+    JOB_RETENTION_HOURS, MAX_PENDING_JOBS_PER_USER,
+)
 from app.services.s3_service import s3_service, build_storage_key
 from app.services.document_service import document_service
 from app.services.access_service import access_service
@@ -271,6 +275,75 @@ async def get_files_watermark(
     )
     max_updated, count = res.one()
     return {"watermark": max_updated.isoformat() if max_updated else None, "count": count}
+
+
+# Declared before the /{file_id} routes below. FastAPI matches in definition
+# order, so a literal path registered after a parameterised one on the same
+# prefix is never reached — /copy-jobs would be parsed as a file id and 422.
+def _job_to_dict(job) -> dict:
+    return {
+        "id": str(job.id),
+        "status": job.status,
+        "summary": job.summary,
+        "is_move": bool(job.trash_source),
+        "target_folder_id": str(job.target_folder_id) if job.target_folder_id else None,
+        "target_workspace_id": str(job.target_workspace_id) if job.target_workspace_id else None,
+        "total_files": job.total_files,
+        "total_bytes": job.total_bytes,
+        "copied_files": job.copied_files,
+        "copied_folders": job.copied_folders,
+        "copied_bytes": job.copied_bytes,
+        "skipped": job.skipped,
+        "skipped_cycles": job.skipped_cycles,
+        "trashed_files": job.trashed_files,
+        "trashed_folders": job.trashed_folders,
+        "error_message": job.error_message,
+        "created_at": job.created_at,
+        "finished_at": job.finished_at,
+    }
+
+
+@router.get("/copy-jobs")
+async def list_copy_jobs(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    This user's copy queue: everything still running, plus what finished
+    recently. The recent-finished part is what lets someone who closed the tab
+    mid-copy come back and see how it went, rather than only that it is no
+    longer running.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=JOB_RETENTION_HOURS)
+    jobs = (await db.execute(
+        select(CopyJob).where(
+            CopyJob.user_id == current_user.id,
+            or_(CopyJob.status.in_(("pending", "running")), CopyJob.created_at >= cutoff),
+        ).order_by(CopyJob.created_at.desc()).limit(20)
+    )).scalars().all()
+    return {
+        "jobs": [_job_to_dict(j) for j in jobs],
+        "active": sum(1 for j in jobs if j.status in ("pending", "running")),
+    }
+
+
+@router.delete("/copy-jobs/{job_id}")
+async def dismiss_copy_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Clear a finished job from the user's list. Running jobs are left alone —
+    the worker owns those, and deleting the row out from under it would strand
+    a half-done copy with nothing recording it."""
+    job = await db.get(CopyJob, job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+    if job.status in ("pending", "running"):
+        raise HTTPException(status_code=409, detail="진행 중인 작업은 지울 수 없습니다.")
+    await db.delete(job)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/{file_id}", response_model=FileDetailResponse)
@@ -918,194 +991,6 @@ async def batch_move_files(
     return {"moved_count": moved_count, "folder_id": req.folder_id}
 
 
-# Guards a folder copy against a pre-existing parent cycle in the tree, which
-# would otherwise recurse until the process dies. Far above any real nesting.
-MAX_COPY_DEPTH = 40
-
-
-async def _unique_copy_name(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    folder_id: Optional[uuid.UUID],
-    name: str,
-    is_folder: bool,
-) -> str:
-    """
-    Give a pasted item a name that does not collide in its destination.
-
-    Files may legitimately share a name in this app, but a copy landing beside
-    its own original with an identical name is indistinguishable from it, so
-    pasting into the source folder would look like nothing happened. Folders
-    additionally must not collide at all. Only renames on an actual collision,
-    so pasting into a different folder keeps the original name.
-    """
-    model = Folder if is_folder else FileItem
-    parent_col = Folder.parent_id if is_folder else FileItem.folder_id
-
-    existing = set((await db.execute(
-        select(model.name).where(
-            model.workspace_id == workspace_id,
-            parent_col == folder_id if folder_id else parent_col.is_(None),
-            model.is_trashed == False,  # noqa: E712
-        )
-    )).scalars().all())
-
-    if name not in existing:
-        return name
-
-    stem, dot, ext = name.rpartition(".")
-    if not dot or is_folder:
-        stem, ext = name, ""
-    suffix = f".{ext}" if ext else ""
-
-    for n in range(2, 1000):
-        label = "복사본" if n == 2 else f"복사본 {n - 1}"
-        candidate = f"{stem} - {label}{suffix}"
-        if candidate not in existing:
-            return candidate
-    return f"{stem} - 복사본 {uuid.uuid4().hex[:6]}{suffix}"
-
-
-async def _copy_one_file(
-    db: AsyncSession,
-    src: FileItem,
-    target_folder_id: Optional[uuid.UUID],
-    workspace_id: uuid.UUID,
-    user: User,
-    rename: bool,
-) -> Optional[FileItem]:
-    """
-    Duplicate one file into target_folder_id. Returns the new row, or None if
-    the stored object could not be copied — in which case no row is created,
-    since a FileItem pointing at a missing key is worse than a skipped file.
-    """
-    new_id = uuid.uuid4()
-    new_key = None
-
-    if src.s3_key:
-        new_key = build_storage_key("uploads", new_id, src.name)
-        ok = await run_in_threadpool(s3_service.copy_object, src.s3_key, new_key)
-        if not ok:
-            return None
-
-    new_thumb_key = None
-    if src.thumbnail_s3_key:
-        new_thumb_key = build_storage_key("thumbnails", new_id, "thumb.jpg")
-        # A thumbnail is regenerable, so failing to copy it is not worth
-        # failing the whole paste over — the copy just falls back to an icon.
-        if not await run_in_threadpool(s3_service.copy_object, src.thumbnail_s3_key, new_thumb_key):
-            new_thumb_key = None
-
-    name = await _unique_copy_name(db, workspace_id, target_folder_id, src.name, is_folder=False) if rename else src.name
-
-    copy = FileItem(
-        id=new_id,
-        name=name,
-        folder_id=target_folder_id,
-        workspace_id=workspace_id,
-        created_by=user.id,
-        last_edited_by=user.id,
-        file_type=src.file_type,
-        mime_type=src.mime_type,
-        size_bytes=src.size_bytes,
-        s3_key=new_key,
-        thumbnail_s3_key=new_thumb_key,
-        content=src.content,
-        is_markdown=src.is_markdown,
-        tags=list(src.tags or []),
-        # Deliberately not carried over: is_favorite (a copy is not the item
-        # the user starred) and the trash flags (a copy is always live).
-        taken_at=src.taken_at,
-        gps_latitude=src.gps_latitude,
-        gps_longitude=src.gps_longitude,
-        camera_make=src.camera_make,
-        camera_model=src.camera_model,
-        media_width=src.media_width,
-        media_height=src.media_height,
-        media_scanned_at=src.media_scanned_at,
-    )
-    db.add(copy)
-    await db.flush()
-
-    # Clone the embeddings rather than leaving the copy unindexed. The content
-    # is byte-identical, so the vectors are too — recomputing them would cost
-    # an embedding call per chunk to arrive at the same numbers, and leaving
-    # them off would make the copy silently unfindable by search.
-    if src.is_embedded:
-        chunks = (await db.execute(
-            select(DocumentChunk).where(DocumentChunk.file_id == src.id)
-        )).scalars().all()
-        for ch in chunks:
-            db.add(DocumentChunk(
-                file_id=copy.id,
-                chunk_index=ch.chunk_index,
-                content=ch.content,
-                embedding=ch.embedding,
-            ))
-        copy.is_embedded = True
-        copy.embedded_chunks_count = len(chunks)
-
-    return copy
-
-
-async def _copy_folder_recursive(
-    db: AsyncSession,
-    src: Folder,
-    target_parent_id: Optional[uuid.UUID],
-    workspace_id: uuid.UUID,
-    user: User,
-    rename: bool,
-    depth: int,
-    counters: dict,
-) -> None:
-    if depth > MAX_COPY_DEPTH:
-        return
-
-    name = await _unique_copy_name(db, workspace_id, target_parent_id, src.name, is_folder=True) if rename else src.name
-    new_folder = Folder(
-        id=uuid.uuid4(),
-        name=name,
-        parent_id=target_parent_id,
-        workspace_id=workspace_id,
-        created_by=user.id,
-        icon=src.icon,
-        color=src.color,
-    )
-    db.add(new_folder)
-    await db.flush()
-    counters["folders"] += 1
-
-    child_files = (await db.execute(
-        select(FileItem).where(FileItem.folder_id == src.id, FileItem.is_trashed == False)  # noqa: E712
-    )).scalars().all()
-    for f in child_files:
-        # Names inside a freshly created folder cannot collide with anything.
-        if await _copy_one_file(db, f, new_folder.id, workspace_id, user, rename=False):
-            counters["files"] += 1
-            counters["bytes"] += f.size_bytes or 0
-        else:
-            counters["skipped"] += 1
-
-    child_folders = (await db.execute(
-        select(Folder).where(Folder.parent_id == src.id, Folder.is_trashed == False)  # noqa: E712
-    )).scalars().all()
-    for sub in child_folders:
-        await _copy_folder_recursive(db, sub, new_folder.id, workspace_id, user, False, depth + 1, counters)
-
-
-async def _descendant_folder_ids(db: AsyncSession, folder_id: uuid.UUID) -> set:
-    """Every folder at or below folder_id, used to reject pasting a folder into itself."""
-    seen = {folder_id}
-    frontier = [folder_id]
-    while frontier:
-        rows = (await db.execute(
-            select(Folder.id).where(Folder.parent_id.in_(frontier), Folder.is_trashed == False)  # noqa: E712
-        )).scalars().all()
-        frontier = [r for r in rows if r not in seen]
-        seen.update(frontier)
-    return seen
-
-
 @router.post("/batch-copy")
 async def batch_copy_items(
     req: BatchCopyRequest,
@@ -1113,25 +998,44 @@ async def batch_copy_items(
     current_user: User = Depends(get_current_approved_user)
 ):
     """
-    Duplicate files and folders (recursively) into a target folder — the paste
-    half of copy/paste. Unlike a move this consumes storage, so the whole
-    operation is quota-checked up front and refused as a unit rather than
-    filling the workspace partway and failing mid-tree.
+    Queue a copy (or a cross-workspace move) of already-stored items.
+
+    The work itself is not done here. Copying duplicates every object in the
+    selected subtree, which for a large folder takes far longer than a request
+    should be held open for, and tying it to a request means closing the tab
+    abandons it half-done. This validates the request, reserves nothing, and
+    hands it to the background worker; the caller gets a job id to follow.
+
+    Everything that can be decided up front still is — permissions, the
+    destination, the cycle rule and the quota — so an impossible copy is
+    refused immediately rather than failing later out of sight.
     """
+    source_workspace_id = req.source_workspace_id or req.workspace_id
+
+    # Both ends are checked: reading from one workspace and writing into
+    # another are separate permissions, and holding one is not holding the other.
     if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
-        raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
+        raise HTTPException(status_code=403, detail="대상 워크스페이스에 접근할 권한이 없습니다.")
+    if source_workspace_id != req.workspace_id and not await access_service.is_workspace_member(db, current_user, source_workspace_id):
+        raise HTTPException(status_code=403, detail="원본 워크스페이스에 접근할 권한이 없습니다.")
 
     if req.folder_id:
         target = await db.get(Folder, req.folder_id)
         if not target or target.workspace_id != req.workspace_id or target.is_trashed:
             raise HTTPException(status_code=404, detail="대상 폴더를 찾을 수 없거나 붙여넣을 수 없습니다.")
 
+    if await copy_service.pending_job_count(db, current_user.id) >= MAX_PENDING_JOBS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail=f"이미 진행 중인 복사 작업이 {MAX_PENDING_JOBS_PER_USER}개입니다. 완료된 뒤에 다시 시도해 주세요."
+        )
+
     src_files = []
     if req.file_ids:
         rows = (await db.execute(
             select(FileItem).where(
                 FileItem.id.in_(req.file_ids),
-                FileItem.workspace_id == req.workspace_id,
+                FileItem.workspace_id == source_workspace_id,
                 FileItem.is_trashed == False,  # noqa: E712
             )
         )).scalars().all()
@@ -1143,58 +1047,53 @@ async def batch_copy_items(
     cycles = 0
     for fid in req.folder_ids:
         folder = await db.get(Folder, fid)
-        if not folder or folder.is_trashed or folder.workspace_id != req.workspace_id:
+        if not folder or folder.is_trashed or folder.workspace_id != source_workspace_id:
             continue
         if not await access_service.can_access_folder(db, current_user, fid):
             continue
         # Copying a folder into its own subtree would recurse into the copies
         # it is creating and never terminate. Skip just that folder rather than
         # refusing the request: "select all, copy, paste into one of these
-        # folders" is an ordinary thing to do, and failing the other items over
-        # it would throw away work the user can perfectly well have.
+        # folders" is an ordinary thing to do.
         if req.folder_id and req.folder_id in await _descendant_folder_ids(db, fid):
             cycles += 1
             continue
         src_folders.append(folder)
 
     if not src_files and not src_folders:
-        # Nothing survived. If the only reason is the cycle rule, say so —
-        # otherwise this returns a silent zero and looks like a no-op.
         if cycles:
             raise HTTPException(status_code=400, detail="폴더를 자기 자신 또는 하위 폴더로 복사할 수 없습니다.")
-        return {"copied_files": 0, "copied_folders": 0, "skipped": 0, "skipped_cycles": 0, "folder_id": req.folder_id}
+        return {"job_id": None, "status": "empty", "total_files": 0, "skipped_cycles": 0}
 
-    total_bytes = sum(f.size_bytes or 0 for f in src_files)
-    for folder in src_folders:
-        for f, _ in await _collect_folder_files_recursive(db, folder.id):
-            total_bytes += f.size_bytes or 0
-    # Raises 413 with the remaining-space message if this would not fit.
+    total_files, total_bytes = await collect_source_bytes(db, src_files, src_folders)
+    # Checked before queueing, so a copy that cannot fit is refused while the
+    # user is still looking at it rather than failing silently in the worker.
     await quota_service.check_quota(db, req.workspace_id, current_user, total_bytes)
 
-    counters = {"files": 0, "folders": 0, "skipped": 0, "bytes": 0}
-    for f in src_files:
-        if await _copy_one_file(db, f, req.folder_id, req.workspace_id, current_user, rename=True):
-            counters["files"] += 1
-            counters["bytes"] += f.size_bytes or 0
-        else:
-            counters["skipped"] += 1
-    for folder in src_folders:
-        await _copy_folder_recursive(db, folder, req.folder_id, req.workspace_id, current_user, True, 0, counters)
+    names = [f.name for f in src_files] + [f.name for f in src_folders]
+    summary = names[0] if len(names) == 1 else f"{names[0]} 외 {len(names) - 1}개"
 
-    await db.commit()
-
-    # Charged after the commit and counted from the files actually written, not
-    # from the up-front estimate: a file whose stored object could not be copied
-    # is skipped rather than rolled back, and billing the estimate would leak
-    # quota that nothing on disk corresponds to.
-    await quota_service.record_storage_added(db, req.workspace_id, current_user, counters["bytes"])
+    job = await copy_service.enqueue(
+        db, current_user,
+        source_workspace_id=source_workspace_id,
+        target_workspace_id=req.workspace_id,
+        target_folder_id=req.folder_id,
+        file_ids=[f.id for f in src_files],
+        folder_ids=[f.id for f in src_folders],
+        trash_source=req.trash_source,
+        total_files=total_files,
+        total_bytes=total_bytes,
+        skipped_cycles=cycles,
+        summary=summary[:512],
+    )
 
     return {
-        "copied_files": counters["files"],
-        "copied_folders": counters["folders"],
-        "skipped": counters["skipped"],
+        "job_id": str(job.id),
+        "status": job.status,
+        "total_files": total_files,
+        "total_bytes": total_bytes,
         "skipped_cycles": cycles,
-        "folder_id": req.folder_id,
+        "summary": job.summary,
     }
 
 

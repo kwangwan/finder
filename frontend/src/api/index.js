@@ -1046,7 +1046,13 @@ export async function batchMoveFiles(workspaceId, fileIds, targetFolderId = null
 /** Duplicate files and folders (recursively) into a target folder — the paste
  *  half of copy/paste. Unlike a move this consumes storage, so the server can
  *  refuse the whole operation with 413 when it would not fit in the quota. */
-export async function batchCopyItems(workspaceId, fileIds = [], folderIds = [], targetFolderId = null) {
+export async function batchCopyItems(
+  workspaceId,
+  fileIds = [],
+  folderIds = [],
+  targetFolderId = null,
+  { sourceWorkspaceId = null, trashSource = false } = {}
+) {
   const res = await fetchWithRetry(`${API_BASE}/files/batch-copy`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -1055,12 +1061,31 @@ export async function batchCopyItems(workspaceId, fileIds = [], folderIds = [], 
       file_ids: fileIds,
       folder_ids: folderIds,
       folder_id: targetFolderId || null,
+      source_workspace_id: sourceWorkspaceId,
+      trash_source: trashSource,
     }),
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => null);
     throw new Error(detail?.detail || '붙여넣기 실패');
   }
+  return res.json();
+}
+
+/** The user's copy queue: jobs still running plus recently finished ones, so a
+ *  browser that was closed mid-copy can come back and see the outcome. */
+export async function listCopyJobs() {
+  const res = await fetch(`${API_BASE}/files/copy-jobs`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('복사 작업 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function dismissCopyJob(jobId) {
+  const res = await fetch(`${API_BASE}/files/copy-jobs/${jobId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('작업을 지우지 못했습니다.');
   return res.json();
 }
 

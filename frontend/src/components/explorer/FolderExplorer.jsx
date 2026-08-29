@@ -38,7 +38,7 @@ import {
   Copy
 } from '../../utils/icons';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
-import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder } from '../../utils/fileDragDrop';
+import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent } from '../../utils/fileDragDrop';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
@@ -88,6 +88,9 @@ export default function FolderExplorer({
   onBatchDelete,
   onDirectMoveFiles,
   onDirectMoveItems,
+  onTransferItems,
+  onOpenFolderWindow,
+  workspaceId = null,
   allFolders = [],
   hasOpenWindows = false,
   hasNewFiles = false,
@@ -184,9 +187,22 @@ export default function FolderExplorer({
         if (!items) return;
         e.preventDefault();
         e.stopPropagation();
-        if (!canDropOnFolder(items, targetFolderId, allFolders)) return;
-        if (onDirectMoveItems) onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
-        else if (onDirectMoveFiles && items.fileIds.length) onDirectMoveFiles(items.fileIds, targetFolderId);
+        if (!canDropOnFolder(items, targetFolderId, allFolders, workspaceId)) return;
+        const intent = dropIntent(items, workspaceId);
+        if (onTransferItems) {
+          onTransferItems({
+            fileIds: items.fileIds,
+            folderIds: items.folderIds,
+            sourceWorkspaceId: intent.sourceWorkspaceId || workspaceId,
+            targetWorkspaceId: workspaceId,
+            targetFolderId,
+            mode: intent.mode,
+          });
+        } else if (onDirectMoveItems) {
+          onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
+        } else if (onDirectMoveFiles && items.fileIds.length) {
+          onDirectMoveFiles(items.fileIds, targetFolderId);
+        }
         setSelectedFileIds([]);
         setSelectedFolderIds([]);
       },
@@ -485,12 +501,12 @@ export default function FolderExplorer({
       }
       if (mod && key === 'x' && selectedCount) {
         e.preventDefault();
-        onClipboardCut?.(selectedFileIds, selectedFolderIds);
+        onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId);
         return;
       }
       if (mod && key === 'c' && selectedCount) {
         e.preventDefault();
-        onClipboardCopy?.(selectedFileIds, selectedFolderIds);
+        onClipboardCopy?.(selectedFileIds, selectedFolderIds, workspaceId);
         return;
       }
       if (mod && key === 'v') {
@@ -839,7 +855,7 @@ export default function FolderExplorer({
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (onFolderContextMenu) onFolderContextMenu(e, sub, effectiveSelection(sub, 'folder'));
+                  if (onFolderContextMenu) onFolderContextMenu(e, sub, { selection: effectiveSelection(sub, 'folder'), workspaceId });
                 }}
                 draggable={true}
                 onDragStart={(e) => {
@@ -851,6 +867,7 @@ export default function FolderExplorer({
                     folderIds: sel.folderIds,
                     label: sub.name,
                     count,
+                    workspaceId,
                   });
                 }}
                 {...folderDropProps(sub.id)}
@@ -1022,13 +1039,14 @@ export default function FolderExplorer({
                       folderIds: sel.folderIds,
                       label: file.name,
                       count: sel.fileIds.length + sel.folderIds.length,
+                      workspaceId,
                     });
                   }}
                   onClick={(e) => handleCardClick(file, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (onFileContextMenu) onFileContextMenu(e, file, effectiveSelection(file, 'file'));
+                    if (onFileContextMenu) onFileContextMenu(e, file, { selection: effectiveSelection(file, 'file'), workspaceId });
                   }}
                   style={{
                     outline: isSelected ? '2px solid var(--accent-primary)' : undefined,
@@ -1247,7 +1265,7 @@ export default function FolderExplorer({
             type="button"
             className="btn-secondary"
             title="잘라내기 (Ctrl+X)"
-            onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds)}
+            onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId)}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
             <Scissors size={15} />
@@ -1258,7 +1276,7 @@ export default function FolderExplorer({
             type="button"
             className="btn-secondary"
             title="복사 (Ctrl+C)"
-            onClick={() => onClipboardCopy?.(selectedFileIds, selectedFolderIds)}
+            onClick={() => onClipboardCopy?.(selectedFileIds, selectedFolderIds, workspaceId)}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
             <Copy size={15} />

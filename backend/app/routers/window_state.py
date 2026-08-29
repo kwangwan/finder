@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, AsyncSessionLocal
 from app.core.security import get_current_approved_user
-from app.models import User, UserWindowState, FileItem
+from app.models import User, UserWindowState, FileItem, Folder
 from app.services.access_service import access_service
 
 router = APIRouter(prefix="/api/window-state", tags=["Window State"])
@@ -53,7 +53,16 @@ def _publish(user_id: uuid.UUID) -> None:
 
 
 class WindowEntry(BaseModel):
-    file_id: uuid.UUID
+    # "file" for a preview window, "folder" for a folder browser window.
+    # Defaults to "file" so rows written before folder windows existed still
+    # deserialize without a migration — the column is plain JSON.
+    kind: str = "file"
+    file_id: Optional[uuid.UUID] = None
+    folder_id: Optional[uuid.UUID] = None
+    # Only folder windows carry this: a folder window can show a workspace
+    # other than the one the app is currently switched to, so it cannot be
+    # inferred at restore time.
+    workspace_id: Optional[uuid.UUID] = None
     is_minimized: bool = False
 
 
@@ -87,33 +96,49 @@ async def get_window_state(
     if not row or not row.windows:
         return WindowStateResponse(windows=[], updated_at=row.updated_at if row else None)
 
-    entries = [e for e in row.windows if isinstance(e, dict) and e.get("file_id")]
+    entries = [e for e in row.windows if isinstance(e, dict) and (e.get("file_id") or e.get("folder_id"))]
     if not entries:
         return WindowStateResponse(windows=[], updated_at=row.updated_at)
 
-    ids = []
-    for e in entries:
+    def _uuid(v):
         try:
-            ids.append(uuid.UUID(str(e["file_id"])))
+            return uuid.UUID(str(v))
         except (ValueError, TypeError):
-            continue
+            return None
 
-    found = (await db.execute(
-        select(FileItem.id).where(FileItem.id.in_(ids), FileItem.is_trashed == False)  # noqa: E712
-    )).scalars().all()
-    alive = set(found)
+    file_ids = [i for i in (_uuid(e.get("file_id")) for e in entries if e.get("file_id")) if i]
+    folder_ids = [i for i in (_uuid(e.get("folder_id")) for e in entries if e.get("folder_id")) if i]
+
+    alive_files = set((await db.execute(
+        select(FileItem.id).where(FileItem.id.in_(file_ids), FileItem.is_trashed == False)  # noqa: E712
+    )).scalars().all()) if file_ids else set()
+    alive_folders = {
+        f.id: f for f in (await db.execute(
+            select(Folder).where(Folder.id.in_(folder_ids), Folder.is_trashed == False)  # noqa: E712
+        )).scalars().all()
+    } if folder_ids else {}
 
     visible = []
     for e in entries:
-        try:
-            fid = uuid.UUID(str(e["file_id"]))
-        except (ValueError, TypeError):
+        minimized = bool(e.get("is_minimized"))
+        if e.get("folder_id"):
+            fid = _uuid(e.get("folder_id"))
+            folder = alive_folders.get(fid) if fid else None
+            if not folder:
+                continue
+            if not await access_service.can_access_folder(db, current_user, fid):
+                continue
+            visible.append(WindowEntry(
+                kind="folder", folder_id=fid, workspace_id=folder.workspace_id, is_minimized=minimized
+            ))
             continue
-        if fid not in alive:
+
+        fid = _uuid(e.get("file_id"))
+        if not fid or fid not in alive_files:
             continue
         if not await access_service.can_access_file(db, current_user, fid):
             continue
-        visible.append(WindowEntry(file_id=fid, is_minimized=bool(e.get("is_minimized"))))
+        visible.append(WindowEntry(kind="file", file_id=fid, is_minimized=minimized))
 
     return WindowStateResponse(windows=visible, updated_at=row.updated_at)
 
@@ -230,10 +255,21 @@ async def put_window_state(
     current_user: User = Depends(get_current_approved_user),
 ):
     """Replace the user's open-window list (last write wins)."""
-    entries = [
-        {"file_id": str(w.file_id), "is_minimized": bool(w.is_minimized)}
-        for w in req.windows[:MAX_WINDOWS]
-    ]
+    entries = []
+    for w in req.windows[:MAX_WINDOWS]:
+        if w.kind == "folder" and w.folder_id:
+            entries.append({
+                "kind": "folder",
+                "folder_id": str(w.folder_id),
+                "workspace_id": str(w.workspace_id) if w.workspace_id else None,
+                "is_minimized": bool(w.is_minimized),
+            })
+        elif w.file_id:
+            entries.append({
+                "kind": "file",
+                "file_id": str(w.file_id),
+                "is_minimized": bool(w.is_minimized),
+            })
 
     row = (await db.execute(
         select(UserWindowState).where(UserWindowState.user_id == current_user.id)
@@ -252,6 +288,15 @@ async def put_window_state(
     await db.refresh(row)
     _publish(current_user.id)
     return WindowStateResponse(
-        windows=[WindowEntry(file_id=uuid.UUID(e["file_id"]), is_minimized=e["is_minimized"]) for e in row.windows],
+        windows=[
+            WindowEntry(
+                kind=e.get("kind", "file"),
+                file_id=uuid.UUID(e["file_id"]) if e.get("file_id") else None,
+                folder_id=uuid.UUID(e["folder_id"]) if e.get("folder_id") else None,
+                workspace_id=uuid.UUID(e["workspace_id"]) if e.get("workspace_id") else None,
+                is_minimized=e["is_minimized"],
+            )
+            for e in row.windows
+        ],
         updated_at=row.updated_at,
     )

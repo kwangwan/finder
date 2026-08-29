@@ -162,6 +162,7 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
       const { position, size } = getInitialPositionAndSize(prev.length, file);
       const newWin = {
         id: file.id,
+        kind: 'file',
         file,
         isMinimized: false,
         isMaximized: false,
@@ -175,6 +176,58 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
       return [...prev, newWin];
     });
   }, [getInitialPositionAndSize]);
+
+  // Folder windows are identified locally by a generated id rather than by the
+  // folder they show, because navigating one changes the folder while the
+  // window itself stays the same object the taskbar and z-order refer to.
+  const folderWindowUid = useRef(0);
+
+  const openFolderWindow = useCallback((folder, workspaceId) => {
+    const targetFolderId = folder?.id || null;
+    setWindows((prev) => {
+      nextZIndexRef.current += 1;
+      const topZ = nextZIndexRef.current;
+
+      // One window per folder: opening the same folder again raises the window
+      // already showing it instead of stacking a duplicate.
+      const existingIdx = prev.findIndex(
+        (w) => w.kind === 'folder' && (w.folderId || null) === targetFolderId && w.workspaceId === workspaceId
+      );
+      if (existingIdx !== -1) {
+        return prev.map((w, idx) => (idx === existingIdx ? { ...w, isMinimized: false, zIndex: topZ } : w));
+      }
+
+      folderWindowUid.current += 1;
+      const { position, size } = getInitialPositionAndSize(prev.length, null);
+      return [...prev, {
+        id: `folder-${folderWindowUid.current}-${targetFolderId || 'root'}`,
+        kind: 'folder',
+        folderId: targetFolderId,
+        workspaceId: workspaceId || null,
+        folderName: folder?.name || '홈',
+        isMinimized: false,
+        isMaximized: false,
+        prevPosition: position,
+        prevSize: size,
+        position,
+        size,
+        zIndex: topZ,
+      }];
+    });
+  }, [getInitialPositionAndSize]);
+
+  const navigateFolderWindow = useCallback((windowId, targetFolderId, folderName) => {
+    setWindows((prev) => prev.map((w) => {
+      if (w.id !== windowId || w.kind !== 'folder') return w;
+      const next = { ...w, folderId: targetFolderId || null };
+      if (folderName !== undefined) next.folderName = folderName;
+      // Nothing changed — returning the same object keeps this out of the
+      // sync signature, so the title resolving on load can't look like a
+      // window change and trigger a needless save.
+      if (next.folderId === w.folderId && next.folderName === w.folderName) return w;
+      return next;
+    }));
+  }, []);
 
   const closeWindow = useCallback((fileId) => {
     setWindows((prev) => prev.filter((w) => w.id !== fileId));
@@ -300,13 +353,24 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
   // whether each is minimized. Geometry is excluded on purpose — it belongs
   // to the screen the window was arranged on, so replaying one browser's
   // coordinates in another would strand windows off-viewport.
-  const signatureOf = useCallback(
-    (list) => list.map((w) => `${w.id}:${w.isMinimized ? 1 : 0}`).join('|'),
+  // What the server actually stores, so a local list and a restored one
+  // compare equal. Folder windows get a fresh local id on every restore, so
+  // their identity here has to be the folder they show, not that id — using
+  // the id would make every restore look like a change and loop.
+  const syncKeyOf = useCallback(
+    (w) => (w.kind === 'folder' ? `folder:${w.folderId || 'root'}@${w.workspaceId || ''}` : `file:${w.id}`),
     []
   );
 
+  const signatureOf = useCallback(
+    (list) => list.map((w) => `${syncKeyOf(w)}:${w.isMinimized ? 1 : 0}`).join('|'),
+    [syncKeyOf]
+  );
+
   const applyRemote = useCallback(async (entries) => {
-    const signature = entries.map((e) => `${e.file_id}:${e.is_minimized ? 1 : 0}`).join('|');
+    const signature = entries
+      .map((e) => `${e.kind === 'folder' ? `folder:${e.folder_id || 'root'}@${e.workspace_id || ''}` : `file:${e.file_id}`}:${e.is_minimized ? 1 : 0}`)
+      .join('|');
     if (signature === lastSyncedRef.current) return; // our own write echoed back
     lastSyncedRef.current = signature;
 
@@ -318,17 +382,43 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     // The stored state holds ids only, so the file records have to be
     // fetched before anything can be rendered. Failures are dropped rather
     // than retried: an id that no longer resolves is a file that has since
-    // been deleted, and it simply leaves the taskbar.
-    const settled = await Promise.allSettled(entries.map((e) => getFileDetail(e.file_id)));
+    // been deleted, and it simply leaves the taskbar. Folder entries need no
+    // fetch — the window loads its own listing, and the server already
+    // dropped any folder the user can no longer reach.
+    const settled = await Promise.allSettled(
+      entries.map((e) => (e.kind === 'folder' ? Promise.resolve(null) : getFileDetail(e.file_id)))
+    );
     const restored = [];
     settled.forEach((result, idx) => {
+      const entry = entries[idx];
+      if (entry.kind === 'folder') {
+        const { position, size } = getInitialPositionAndSize(restored.length, null);
+        nextZIndexRef.current += 1;
+        folderWindowUid.current += 1;
+        restored.push({
+          id: `folder-${folderWindowUid.current}-${entry.folder_id || 'root'}`,
+          kind: 'folder',
+          folderId: entry.folder_id || null,
+          workspaceId: entry.workspace_id || null,
+          folderName: '',
+          isMinimized: !!entry.is_minimized,
+          isMaximized: false,
+          prevPosition: position,
+          prevSize: size,
+          position,
+          size,
+          zIndex: nextZIndexRef.current,
+        });
+        return;
+      }
       if (result.status !== 'fulfilled' || !result.value) return;
       const { position, size } = getInitialPositionAndSize(restored.length, result.value);
       nextZIndexRef.current += 1;
       restored.push({
         id: result.value.id,
+        kind: 'file',
         file: result.value,
-        isMinimized: !!entries[idx].is_minimized,
+        isMinimized: !!entry.is_minimized,
         isMaximized: false,
         prevPosition: position,
         prevSize: size,
@@ -371,7 +461,9 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
-      const payload = windows.map((w) => ({ file_id: w.id, is_minimized: !!w.isMinimized }));
+      const payload = windows.map((w) => (w.kind === 'folder'
+        ? { kind: 'folder', folder_id: w.folderId, workspace_id: w.workspaceId, is_minimized: !!w.isMinimized }
+        : { kind: 'file', file_id: w.id, is_minimized: !!w.isMinimized }));
       // Record the signature before the request resolves, so the poll below
       // recognises this state as ours even if the response is slow.
       lastSyncedRef.current = signature;
@@ -482,6 +574,8 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     focusWindow,
     updateWindowPosition,
     updateWindowSize,
-    updateWindowFile
+    updateWindowFile,
+    openFolderWindow,
+    navigateFolderWindow
   };
 }

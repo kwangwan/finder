@@ -17,7 +17,7 @@ import {
   ChevronsLeft
 } from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
-import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder } from '../../utils/fileDragDrop';
+import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent } from '../../utils/fileDragDrop';
 
 export default function Sidebar({
   workspaces = [],
@@ -37,6 +37,7 @@ export default function Sidebar({
   onOpenUpload,
   onFolderContextMenu,
   onDirectMoveItems,
+  onTransferItems,
   stats,
   isCollapsed,
   onToggleSidebar,
@@ -81,8 +82,23 @@ export default function Sidebar({
         if (!items) return;
         e.preventDefault();
         e.stopPropagation();
-        if (!canDropOnFolder(items, targetFolderId, folders)) return;
-        if (onDirectMoveItems) onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
+        const wsId = activeWorkspace?.id || null;
+        if (!canDropOnFolder(items, targetFolderId, folders, wsId)) return;
+        // The sidebar always shows the active workspace, so a drop here from a
+        // folder window on another workspace is a cross-workspace transfer.
+        const intent = dropIntent(items, wsId);
+        if (onTransferItems) {
+          onTransferItems({
+            fileIds: items.fileIds,
+            folderIds: items.folderIds,
+            sourceWorkspaceId: intent.sourceWorkspaceId || wsId,
+            targetWorkspaceId: wsId,
+            targetFolderId,
+            mode: intent.mode,
+          });
+        } else if (onDirectMoveItems) {
+          onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
+        }
       },
       'data-drop-active': dropTargetId === key ? 'true' : undefined,
     };
@@ -185,7 +201,7 @@ export default function Sidebar({
           draggable={true}
           onDragStart={(e) => {
             e.stopPropagation();
-            setItemDragData(e, { folderIds: [folder.id], label: folder.name });
+            setItemDragData(e, { folderIds: [folder.id], label: folder.name, workspaceId: activeWorkspace?.id || null });
           }}
           onClick={() => onSelectFolder(folder.id)}
           onContextMenu={(e) => {

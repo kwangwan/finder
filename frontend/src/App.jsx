@@ -17,6 +17,7 @@ import ContextMenu from './components/common/ContextMenu';
 import RenameModal from './components/modals/RenameModal';
 import MoveFilesModal from './components/modals/MoveFilesModal';
 import TransferManager from './components/transfer/TransferManager';
+import CopyJobsBanner from './components/transfer/CopyJobsBanner';
 import WindowManager from './components/window/WindowManager';
 import { useWindowManager } from './hooks/useWindowManager';
 import UploadProgressBanner from './components/upload/UploadProgressBanner';
@@ -36,6 +37,7 @@ import {
   Eye,
   FileArchive,
   FolderInput,
+  ExternalLink,
   Scissors,
   Copy,
   ClipboardPaste
@@ -623,36 +625,113 @@ export default function App() {
     }
   };
 
+  // Bumped whenever something changes on disk, so every open folder window
+  // reloads its listing. A window showing a folder someone else's drop just
+  // changed would otherwise keep displaying the old contents.
+  const [windowRefreshToken, setWindowRefreshToken] = useState(0);
+  const bumpWindowRefresh = useCallback(() => setWindowRefreshToken((n) => n + 1), []);
+
+  /**
+   * The one path every move/copy goes through, wherever it was started —
+   * a drag onto a folder, a paste, a folder window, the sidebar.
+   *
+   * Within one workspace a move is a rename: the row changes parent and
+   * nothing is duplicated. Across workspaces it cannot be, any more than
+   * dragging between two drives can — the item is copied into the
+   * destination, and a move additionally sends the originals to the source
+   * workspace's trash. They go to the trash rather than being deleted so a
+   * mistaken transfer is recoverable; the cost is that the source workspace
+   * keeps counting those bytes until its trash is emptied, exactly as a
+   * recycle bin does.
+   */
+  const handleTransferItems = async ({
+    fileIds = [],
+    folderIds = [],
+    sourceWorkspaceId = null,
+    targetWorkspaceId = null,
+    targetFolderId = null,
+    mode = 'move',
+  }) => {
+    if (!fileIds.length && !folderIds.length) return;
+    const sameWorkspace = !sourceWorkspaceId || !targetWorkspaceId || sourceWorkspaceId === targetWorkspaceId;
+
+    if (sameWorkspace && mode === 'move') {
+      await handleDirectMoveItems(fileIds, folderIds, targetFolderId);
+      bumpWindowRefresh();
+      return;
+    }
+
+    try {
+      const res = await batchCopyItems(targetWorkspaceId, fileIds, folderIds, targetFolderId, {
+        sourceWorkspaceId,
+        trashSource: mode === 'move',
+      });
+
+      if (!res.job_id) {
+        showToast('옮길 항목이 없습니다.', { type: 'info' });
+        return;
+      }
+      // The server does the copying, so this only reports that the work was
+      // accepted; the background banner follows it from here and refreshes
+      // the views when it lands — including if the browser was closed and
+      // reopened in between.
+      const notes = res.skipped_cycles ? ` (폴더 ${res.skipped_cycles}개는 자기 자신 안으로 넣을 수 없어 제외)` : '';
+      showToast(
+        `${mode === 'move' ? '이동' : '복사'} 작업을 예약했습니다. 파일 ${res.total_files}개를 백그라운드에서 처리합니다.${notes}`,
+        { type: 'info' }
+      );
+    } catch (err) {
+      await showAlert({
+        title: mode === 'move' ? '이동 실패' : '복사 실패',
+        message: err.message,
+        type: 'error',
+      });
+    }
+  };
+
   // Explorer clipboard for cut/copy/paste, modelled on Windows Explorer: it
   // holds ids rather than content, survives navigating between folders (that
   // is the whole point — you cut here and paste there), and is scoped to one
   // workspace because neither move nor copy crosses a workspace boundary.
   const clipboardHasItems = !!clipboard && (clipboard.fileIds.length > 0 || clipboard.folderIds.length > 0);
 
-  const handleClipboardCut = (fileIds = [], folderIds = []) => {
+  const handleClipboardCut = (fileIds = [], folderIds = [], workspaceId = undefined) => {
     if (!fileIds.length && !folderIds.length) return;
-    setClipboard({ mode: 'cut', workspaceId: activeWorkspace?.id || null, fileIds, folderIds });
+    setClipboard({ mode: 'cut', workspaceId: workspaceId ?? activeWorkspace?.id ?? null, fileIds, folderIds });
     showToast(`${fileIds.length + folderIds.length}개 항목을 잘라냈습니다. 붙여넣을 위치에서 Ctrl+V를 누르세요.`, { type: 'info' });
   };
 
-  const handleClipboardCopy = (fileIds = [], folderIds = []) => {
+  const handleClipboardCopy = (fileIds = [], folderIds = [], workspaceId = undefined) => {
     if (!fileIds.length && !folderIds.length) return;
-    setClipboard({ mode: 'copy', workspaceId: activeWorkspace?.id || null, fileIds, folderIds });
+    setClipboard({ mode: 'copy', workspaceId: workspaceId ?? activeWorkspace?.id ?? null, fileIds, folderIds });
     showToast(`${fileIds.length + folderIds.length}개 항목을 복사했습니다. 붙여넣을 위치에서 Ctrl+V를 누르세요.`, { type: 'info' });
   };
 
-  const handleClipboardPaste = async (targetFolderId = activeFolderId) => {
+  const handleClipboardPaste = async (targetFolderId = activeFolderId, targetWorkspaceId = undefined, onDone = null) => {
     if (!clipboardHasItems) return;
-    if (clipboard.workspaceId !== (activeWorkspace?.id || null)) {
-      await showAlert({
-        title: '붙여넣을 수 없음',
-        message: '다른 워크스페이스에서 잘라내거나 복사한 항목은 붙여넣을 수 없습니다.',
-        type: 'warning',
+    const destWorkspaceId = targetWorkspaceId ?? activeWorkspace?.id ?? null;
+    const { mode, fileIds, folderIds } = clipboard;
+    const crossWorkspace = !!destWorkspaceId && clipboard.workspaceId !== destWorkspaceId;
+
+    // Crossing workspaces is a transfer between separate storage domains, so
+    // it can only ever duplicate — even a 잘라내기, which then sends the
+    // originals to the source's trash rather than deleting them, so a mistaken
+    // move stays recoverable. Same-workspace paste keeps its cheap rename-only
+    // move below.
+    if (crossWorkspace) {
+      await handleTransferItems({
+        fileIds,
+        folderIds,
+        sourceWorkspaceId: clipboard.workspaceId,
+        targetWorkspaceId: destWorkspaceId,
+        targetFolderId,
+        mode: mode === 'cut' ? 'move' : 'copy',
       });
+      if (mode === 'cut') setClipboard(null);
+      onDone?.();
       return;
     }
 
-    const { mode, fileIds, folderIds } = clipboard;
     // Pasting a folder copies its whole subtree, so this can run for a while
     // with nothing on screen to say so. The toast stays up for the duration
     // and is replaced by the result, matching how batch delete already
@@ -670,6 +749,8 @@ export default function App() {
         // than growing a second path that could drift from it.
         const moved = await handleDirectMoveItems(fileIds, folderIds, targetFolderId, { announce: false });
         setClipboard(null);  // cut is consumed by its paste, as in Explorer
+        bumpWindowRefresh();
+        onDone?.();
         const moveParts = [];
         if (moved?.movedFiles) moveParts.push(`파일 ${moved.movedFiles}개`);
         if (moved?.movedFolders) moveParts.push(`폴더 ${moved.movedFolders}개`);
@@ -681,22 +762,20 @@ export default function App() {
       }
 
       const res = await batchCopyItems(activeWorkspace.id, fileIds, folderIds, targetFolderId);
-      await refreshFiles();
-      await refreshFoldersAndStats();
+      onDone?.();
 
-      const parts = [];
-      if (res.copied_files) parts.push(`파일 ${res.copied_files}개`);
-      if (res.copied_folders) parts.push(`폴더 ${res.copied_folders}개`);
-      const notes = [];
-      if (res.skipped) notes.push(`${res.skipped}개는 원본을 읽을 수 없어 제외`);
-      // A folder cannot be pasted into itself, and a select-all can easily
-      // include the folder being pasted into — say which items were left out
-      // rather than letting the count quietly not add up.
-      if (res.skipped_cycles) notes.push(`폴더 ${res.skipped_cycles}개는 자기 자신 안으로 붙여넣을 수 없어 제외`);
-      const suffix = notes.length ? ` (${notes.join(', ')})` : '';
+      if (!res.job_id) {
+        updateToast(toastId, { message: '붙여넣을 항목이 없습니다.', type: 'info' });
+        return;
+      }
+      // Queued on the server: the copy keeps going if this tab is closed, and
+      // the background banner reports progress and completion.
+      const notes = res.skipped_cycles
+        ? ` (폴더 ${res.skipped_cycles}개는 자기 자신 안으로 붙여넣을 수 없어 제외)`
+        : '';
       updateToast(toastId, {
-        message: parts.length ? `${parts.join(', ')}를 붙여넣었습니다.${suffix}` : `붙여넣을 항목이 없습니다.${suffix}`,
-        type: parts.length ? 'success' : 'info',
+        message: `붙여넣기를 예약했습니다. 파일 ${res.total_files}개를 백그라운드에서 처리합니다.${notes}`,
+        type: 'info',
       });
       // Copy stays on the clipboard so it can be pasted into several places,
       // which is how Explorer behaves and is the only reason to keep it.
@@ -1289,32 +1368,41 @@ export default function App() {
 
   // Cut/copy/paste entries shared by the file, folder and background menus, so
   // the three stay in step and a selection is always acted on as a unit.
-  const clipboardMenuItems = (fileIds, folderIds, pasteTargetId) => {
+  const clipboardMenuItems = (fileIds, folderIds, pasteTargetId, ctx = null) => {
+    const sourceWorkspaceId = ctx?.workspaceId ?? activeWorkspace?.id ?? null;
+    const pasteWorkspaceId = ctx?.workspaceId ?? activeWorkspace?.id ?? null;
     // The handlers accept either modifier; the hint shows the one the user's
     // own keyboard actually has, so it isn't wrong on half the machines.
     const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
     const items = [];
     if (fileIds.length || folderIds.length) {
       items.push(
-        { label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds) },
-        { label: '복사', icon: Copy, shortcut: `${mod}C`, onClick: () => handleClipboardCopy(fileIds, folderIds) },
+        { label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds, sourceWorkspaceId) },
+        { label: '복사', icon: Copy, shortcut: `${mod}C`, onClick: () => handleClipboardCopy(fileIds, folderIds, sourceWorkspaceId) },
       );
     }
     if (clipboardHasItems) {
       const count = clipboard.fileIds.length + clipboard.folderIds.length;
+      const crossWorkspace = !!pasteWorkspaceId && clipboard.workspaceId !== pasteWorkspaceId;
       items.push({
-        label: `붙여넣기 (${count}개)`,
+        // Says which it will be, because across workspaces even a 잘라내기
+        // duplicates and leaves the originals in the source's trash.
+        label: crossWorkspace
+          ? `${clipboard.mode === 'cut' ? '여기로 이동' : '여기에 복사'} (${count}개)`
+          : `붙여넣기 (${count}개)`,
         icon: ClipboardPaste,
         shortcut: `${mod}V`,
-        onClick: () => handleClipboardPaste(pasteTargetId),
+        onClick: () => handleClipboardPaste(pasteTargetId, pasteWorkspaceId, ctx?.onDone),
       });
     }
     return items;
   };
 
-  const handleFolderContextMenu = (e, folder, selection = null) => {
+  const handleFolderContextMenu = (e, folder, ctx = null) => {
+    const selection = ctx?.selection ?? null;
     const fileIds = selection?.fileIds ?? [];
     const folderIds = selection?.folderIds?.length ? selection.folderIds : [folder.id];
+    const folderWorkspaceId = ctx?.workspaceId ?? folder.workspace_id ?? activeWorkspace?.id ?? null;
     setContextMenu({
       isOpen: true,
       x: e.clientX,
@@ -1324,6 +1412,11 @@ export default function App() {
           label: '폴더 열기',
           icon: FolderIcon,
           onClick: () => handleSelectFolder(folder.id),
+        },
+        {
+          label: '새 창에서 열기',
+          icon: ExternalLink,
+          onClick: () => windowManager.openFolderWindow(folder, folderWorkspaceId),
         },
         {
           label: '하위 폴더 생성',
@@ -1363,7 +1456,7 @@ export default function App() {
           onClick: () => startDownloadFolder(folder),
         },
         { divider: true },
-        ...clipboardMenuItems(fileIds, folderIds, folder.id),
+        ...clipboardMenuItems(fileIds, folderIds, folder.id, { ...ctx, workspaceId: folderWorkspaceId }),
         { divider: true },
         {
           label: '이름 및 색상 변경',
@@ -1380,7 +1473,8 @@ export default function App() {
     });
   };
 
-  const handleFileContextMenu = (e, file, selection = null) => {
+  const handleFileContextMenu = (e, file, ctx = null) => {
+    const selection = ctx?.selection ?? null;
     const fileIds = selection?.fileIds?.length ? selection.fileIds : [file.id];
     const folderIds = selection?.folderIds ?? [];
     const isMedia = file.file_type === 'image' || file.file_type === 'video' || file.file_type === 'pdf';
@@ -1416,7 +1510,7 @@ export default function App() {
           onClick: () => handleOpenMoveModal(fileIds),
         },
         { divider: true },
-        ...clipboardMenuItems(fileIds, folderIds, activeFolderId),
+        ...clipboardMenuItems(fileIds, folderIds, ctx?.folderId ?? activeFolderId, ctx),
         { divider: true },
         {
           label: '이름 변경',
@@ -1433,7 +1527,7 @@ export default function App() {
     });
   };
 
-  const handleBackgroundContextMenu = (e) => {
+  const handleBackgroundContextMenu = (e, ctx = null) => {
     setContextMenu({
       isOpen: true,
       x: e.clientX,
@@ -1457,7 +1551,7 @@ export default function App() {
           icon: UploadCloud,
           onClick: () => setIsUploadOpen(true),
         },
-        ...(clipboardHasItems ? [{ divider: true }, ...clipboardMenuItems([], [], activeFolderId)] : []),
+        ...(clipboardHasItems ? [{ divider: true }, ...clipboardMenuItems([], [], ctx?.folderId ?? activeFolderId, ctx)] : []),
         { divider: true },
         {
           label: '새로고침',
@@ -1605,6 +1699,7 @@ export default function App() {
         onOpenUpload={() => setIsUploadOpen(true)}
         onFolderContextMenu={handleFolderContextMenu}
         onDirectMoveItems={handleDirectMoveItems}
+        onTransferItems={handleTransferItems}
         stats={stats}
         isCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed(true)}
@@ -1678,6 +1773,9 @@ export default function App() {
             onBatchDelete={handleBatchTrashItems}
             onDirectMoveFiles={handleDirectMoveFiles}
             onDirectMoveItems={handleDirectMoveItems}
+            onTransferItems={handleTransferItems}
+            onOpenFolderWindow={(folder) => windowManager.openFolderWindow(folder, activeWorkspace?.id)}
+            workspaceId={activeWorkspace?.id || null}
             allFolders={folders}
             hasOpenWindows={windowManager.windows.length > 0}
             hasNewFiles={hasNewFilesInView}
@@ -1788,6 +1886,16 @@ export default function App() {
       />
 
       {/* OS-Style Multi-Window Preview Manager & Dock */}
+      {/* Background copy queue — visible whenever the server is working, and
+          able to pick up jobs this browser session did not start. */}
+      <CopyJobsBanner
+        onJobsFinished={() => {
+          refreshFiles();
+          refreshFoldersAndStats();
+          bumpWindowRefresh();
+        }}
+      />
+
       <WindowManager
         windowManager={windowManager}
         workspaces={workspaces}
@@ -1795,6 +1903,15 @@ export default function App() {
         onDeleteFile={handleDeleteFile}
         activeWorkspaceId={activeWorkspace?.id}
         currentUser={currentUser}
+        onFileContextMenu={handleFileContextMenu}
+        onFolderContextMenu={handleFolderContextMenu}
+        onBackgroundContextMenu={handleBackgroundContextMenu}
+        clipboard={clipboard}
+        onClipboardCut={handleClipboardCut}
+        onClipboardCopy={handleClipboardCopy}
+        onClipboardPaste={handleClipboardPaste}
+        onTransferItems={handleTransferItems}
+        externalRefreshToken={windowRefreshToken}
       />
 
       {/* Invitation Manager Modal (7-day invites & AWS SES) */}

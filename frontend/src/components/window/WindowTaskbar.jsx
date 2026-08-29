@@ -12,7 +12,8 @@ import {
   Table, 
   Check,
   Maximize2,
-  Grid
+  Grid,
+  Folder as FolderIcon
 } from '../../utils/icons';
 import { getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 
@@ -61,7 +62,7 @@ export default function WindowTaskbar({
     const nameById = new Map((workspaces || []).map(w => [w.id, w.name]));
     const groups = new Map();
     for (const win of windows) {
-      const wsId = win.file?.workspace_id || null;
+      const wsId = win.kind === 'folder' ? (win.workspaceId || null) : (win.file?.workspace_id || null);
       if (!groups.has(wsId)) {
         groups.set(wsId, {
           id: wsId,
@@ -87,6 +88,14 @@ export default function WindowTaskbar({
     const type = (file.file_type || '').toLowerCase();
     return type === 'image' || type === 'video';
   };
+
+  // Folder windows carry no file record, so everything the dock renders goes
+  // through these rather than reaching into win.file directly.
+  const isFolderWin = (win) => win.kind === 'folder';
+  const winName = (win) => (isFolderWin(win) ? (win.folderName || '홈') : win.file?.name || '');
+  const winIcon = (win) => (isFolderWin(win)
+    ? <FolderIcon size={13} color="var(--accent-primary)" />
+    : getFileIcon(win.file));
 
   const formatFileSize = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -130,10 +139,10 @@ export default function WindowTaskbar({
                   key={win.id}
                   className={`dock-tab-item ${isActive ? 'is-active' : ''} ${win.isMinimized ? 'is-minimized' : ''}`}
                   onClick={() => onToggleMinimize(win.id)}
-                  title={`${win.file.name} (${win.isMinimized ? '최소화됨 - 클릭하여 복원' : '클릭하여 최소화'})`}
+                  title={`${winName(win)} (${win.isMinimized ? '최소화됨 - 클릭하여 복원' : '클릭하여 최소화'})`}
                 >
-                  <span className="dock-tab-icon">{getFileIcon(win.file)}</span>
-                  <span className="dock-tab-title">{win.file.name}</span>
+                  <span className="dock-tab-icon">{winIcon(win)}</span>
+                  <span className="dock-tab-title">{winName(win)}</span>
                   <button
                     type="button"
                     className="dock-tab-close"
@@ -234,8 +243,8 @@ export default function WindowTaskbar({
                     {/* Card Header */}
                     <div className="tab-card-header">
                       <div className="tab-card-title-box">
-                        <span className="tab-card-icon">{getFileIcon(win.file)}</span>
-                        <span className="tab-card-name">{win.file.name}</span>
+                        <span className="tab-card-icon">{winIcon(win)}</span>
+                        <span className="tab-card-name">{winName(win)}</span>
                       </div>
                       <button
                         type="button"
@@ -255,7 +264,12 @@ export default function WindowTaskbar({
 
                     {/* Card Preview Thumbnail / Snippet Body */}
                     <div className="tab-card-preview">
-                      {hasThumbnail(win.file) && !thumbFailed.has(win.file.id) ? (
+                      {isFolderWin(win) ? (
+                        <div className="tab-card-empty-preview">
+                          <FolderIcon size={22} color="var(--accent-primary)" />
+                          <span>{winName(win)}</span>
+                        </div>
+                      ) : hasThumbnail(win.file) && !thumbFailed.has(win.file.id) ? (
                         <img
                           className="tab-card-thumb"
                           src={win.file.thumbnail_url || getThumbnailUrl(win.file.id)}
@@ -299,7 +313,7 @@ export default function WindowTaskbar({
 
                     {/* Card Footer */}
                     <div className="tab-card-footer">
-                      <span>{formatFileSize(win.file.size_bytes)}</span>
+                      <span>{isFolderWin(win) ? '폴더' : formatFileSize(win.file.size_bytes)}</span>
                       <span className="tab-status-tag">
                         {win.isMinimized ? '최소화됨' : isActive ? '현재 보는 중' : '열림'}
                       </span>
