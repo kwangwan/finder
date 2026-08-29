@@ -98,7 +98,24 @@ export default function PreviewWindow({
     prevIsMinimizedRef.current = isMinimized;
   }, [isMinimized]);
 
-  // Load detailed content if text/markdown/code document without content
+  // Load detailed content if text/markdown/code document without content.
+  //
+  // Deliberately keyed on file?.id, NOT the whole `file` object — a
+  // markdown note's `file` gets a fresh object reference on every autosave
+  // (onUpdateWindowFile, so favorite/rename/etc. can update in place without
+  // a global "active file"). If this effect re-ran on every such update, an
+  // early autosave of a still-short note (e.g. a just-started bullet list,
+  // content like "* " — under the 5-char threshold) would flip
+  // isLoadingContent back to true mid-edit. That both (a) swaps the whole
+  // window body over to the generic "내용을 불러오는 중" spinner, unmounting
+  // the live BlockNoteView, and (b) — via `enabled: isMarkdown &&
+  // !isLoadingContent` in the PreviewWindow -> useNoteEditor wiring — tears
+  // down and recreates the Yjs doc/provider, whose fresh bootstrap then
+  // re-parses whatever (possibly stale-by-then) markdown the refetch
+  // returned and replaces the live blocks with it, discarding/corrupting
+  // anything typed since. Only ever fetch full content once per window,
+  // when it's first opened — after that, the collaborative Yjs doc (once
+  // bootstrapped) is the only source of truth for a note's live content.
   useEffect(() => {
     if (!file) return;
 
@@ -119,7 +136,8 @@ export default function PreviewWindow({
     } else {
       setFileDetail(file);
     }
-  }, [file]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file?.id]);
 
   // File type detection
   const fileNameLower = file.name?.toLowerCase() || '';

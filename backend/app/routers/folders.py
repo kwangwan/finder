@@ -99,12 +99,22 @@ async def list_folders(
     sort_by_str = sort_by if isinstance(sort_by, str) else "name"
     sort_order_str = sort_order if isinstance(sort_order, str) else "asc"
     col = sort_column_map.get(sort_by_str, Folder.name)
-    order_expr = col.asc() if sort_order_str.lower() == "asc" else col.desc()
+    is_asc = sort_order_str.lower() == "asc"
+    order_expr = col.asc() if is_asc else col.desc()
+
+    # Same non-unique-sort + OFFSET pagination hazard as list_files (see the
+    # long note there): without a unique final tiebreaker, tied rows have no
+    # defined order and each page slices that undefined order on its own, so
+    # a folder can repeat across pages while another never appears.
+    tiebreakers = []
+    if col is not Folder.name:
+        tiebreakers.append(Folder.name.asc() if is_asc else Folder.name.desc())
+    tiebreakers.append(Folder.id.asc() if is_asc else Folder.id.desc())
 
     stmt = select(
         Folder,
         file_count_expr
-    ).outerjoin(FileItem, FileItem.folder_id == Folder.id).group_by(Folder.id).order_by(order_expr)
+    ).outerjoin(FileItem, FileItem.folder_id == Folder.id).group_by(Folder.id).order_by(order_expr, *tiebreakers)
     
     conditions = [Folder.is_trashed == False]
 
