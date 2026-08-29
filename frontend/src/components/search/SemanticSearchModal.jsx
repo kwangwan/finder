@@ -321,6 +321,28 @@ export default function SemanticSearchModal({
     }
   };
 
+  // Keep the keyboard-selected row visible. Arrow keys only moved the
+  // highlight before, so once the selection passed the bottom of the list
+  // the user was steering something they could no longer see.
+  //
+  // Scrolls the results container directly rather than via
+  // scrollIntoView(), which walks up and can also move ancestors — the page
+  // behind this modal scrolls too. Measured with getBoundingClientRect
+  // instead of offsetTop because the container is not a positioned ancestor,
+  // so offsetTop would be relative to something further up the tree.
+  useEffect(() => {
+    const root = resultsScrollRef.current;
+    const el = root?.querySelector(`[data-result-index="${selectedIndex}"]`);
+    if (!root || !el) return;
+    const item = el.getBoundingClientRect();
+    const view = root.getBoundingClientRect();
+    if (item.top < view.top) {
+      root.scrollTop += item.top - view.top;
+    } else if (item.bottom > view.bottom) {
+      root.scrollTop += item.bottom - view.bottom;
+    }
+  }, [selectedIndex, results.length]);
+
   // ...and again at the window level, because the handler above only fires
   // while the search input holds focus. Clicking a filter dropdown, the
   // results list, or anywhere else in the modal moved focus off the input
@@ -525,6 +547,7 @@ export default function SemanticSearchModal({
             return (
               <div
                 key={item.file_id}
+                data-result-index={idx}
                 onClick={() => {
                   onSelectResult(item);
                   onClose();
