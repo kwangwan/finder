@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Folder as FolderIcon, 
   FolderPlus, 
@@ -33,7 +33,9 @@ import {
   Filter,
   RefreshCw,
   Info,
-  Loader2
+  Loader2,
+  Scissors,
+  Copy
 } from '../../utils/icons';
 import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder } from '../../utils/fileDragDrop';
@@ -41,6 +43,7 @@ import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
 import Select from '../common/Select';
 import FileInfoModal from '../modals/FileInfoModal';
+import { useMarqueeSelection } from '../../hooks/useMarqueeSelection';
 
 function getPageNumbers(currentPage, totalPages) {
   if (!totalPages || totalPages <= 1) return [1];
@@ -99,10 +102,21 @@ export default function FolderExplorer({
   onPageSizeChange,
   paginationMeta = null,
   uploadManager = null,
+  clipboard = null,
+  onClipboardCut,
+  onClipboardCopy,
+  onClipboardPaste,
 }) {
   const { showAlert } = useDialog();
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState([]);
+  // Folders are selectable alongside files so cut/copy/move act on a mixed
+  // selection, the way a file manager is expected to.
+  const [selectedFolderIds, setSelectedFolderIds] = useState([]);
+  const gridAreaRef = useRef(null);
+  // The selection as it stood when a marquee drag began, so a ctrl-drag adds
+  // to it instead of to the partial result of the drag currently in progress.
+  const marqueeBaseRef = useRef({ files: [], folders: [] });
   const [infoFile, setInfoFile] = useState(null);
   const [removingIds, setRemovingIds] = useState(new Set());
   // Cards fading out are hidden from the grid as soon as the fade finishes,
@@ -171,6 +185,7 @@ export default function FolderExplorer({
         if (onDirectMoveItems) onDirectMoveItems(items.fileIds, items.folderIds, targetFolderId);
         else if (onDirectMoveFiles && items.fileIds.length) onDirectMoveFiles(items.fileIds, targetFolderId);
         setSelectedFileIds([]);
+        setSelectedFolderIds([]);
       },
       'data-drop-active': dropTargetId === key ? 'true' : undefined,
     };
@@ -183,6 +198,7 @@ export default function FolderExplorer({
   // Clear selection when folder changes
   useEffect(() => {
     setSelectedFileIds([]);
+    setSelectedFolderIds([]);
   }, [currentFolder?.id, activeView]);
 
   // Close breadcrumb dropdown on outside click
@@ -201,6 +217,57 @@ export default function FolderExplorer({
     setSelectedFileIds(prev =>
       prev.includes(fileId) ? prev.filter(id => id !== fileId) : [...prev, fileId]
     );
+  };
+
+  const toggleFolderSelection = (folderId, e) => {
+    if (e) e.stopPropagation();
+    setSelectedFolderIds(prev =>
+      prev.includes(folderId) ? prev.filter(id => id !== folderId) : [...prev, folderId]
+    );
+  };
+
+  const clearSelection = useCallback(() => {
+    setSelectedFileIds([]);
+    setSelectedFolderIds([]);
+  }, []);
+
+  const visibleFileIds = files.filter(f => !hiddenIds.has(f.id)).map(f => f.id);
+  const selectedCount = selectedFileIds.length + selectedFolderIds.length;
+
+  // What an action triggered from `item` should apply to: the whole selection
+  // when the item is part of it, otherwise just that item — the rule every
+  // file manager uses for right-click and drag.
+  const effectiveSelection = (item, kind) => {
+    const inSelection = kind === 'folder'
+      ? selectedFolderIds.includes(item.id)
+      : selectedFileIds.includes(item.id);
+    if (inSelection) return { fileIds: selectedFileIds, folderIds: selectedFolderIds };
+    return kind === 'folder' ? { fileIds: [], folderIds: [item.id] } : { fileIds: [item.id], folderIds: [] };
+  };
+
+  const { onMouseDown: startMarquee, marqueeRect } = useMarqueeSelection({
+    containerRef: gridAreaRef,
+    onClearSelection: clearSelection,
+    onChange: useCallback((fileIds, folderIds, additive) => {
+      if (additive) {
+        setSelectedFileIds(Array.from(new Set([...marqueeBaseRef.current.files, ...fileIds])));
+        setSelectedFolderIds(Array.from(new Set([...marqueeBaseRef.current.folders, ...folderIds])));
+      } else {
+        setSelectedFileIds(fileIds);
+        setSelectedFolderIds(folderIds);
+      }
+    }, []),
+  });
+
+  // Items on the clipboard from a 잘라내기 are shown faded, so it stays visible
+  // where the pending move came from until it is pasted.
+  const isCut = (kind, id) => clipboard?.mode === 'cut' && (
+    kind === 'folder' ? clipboard.folderIds.includes(id) : clipboard.fileIds.includes(id)
+  );
+
+  const handleGridMouseDown = (e) => {
+    marqueeBaseRef.current = { files: selectedFileIds, folders: selectedFolderIds };
+    startMarquee(e);
   };
 
   const isImageOrVideo = (file) => {
@@ -341,6 +408,57 @@ export default function FolderExplorer({
     }
     return 0;
   });
+
+  const isEverythingSelected = selectedCount > 0
+    && selectedFileIds.length === visibleFileIds.length
+    && selectedFolderIds.length === sortedSubfolders.length;
+
+  // Explorer keyboard shortcuts. Bound to the document so they work without
+  // the grid having focus, and ignored while typing so Ctrl+A in the search
+  // box still selects text rather than every file behind it.
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      const el = document.activeElement;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      // A modal or preview window owns the keyboard only while focus is
+      // actually inside it. Checking merely whether one exists would disable
+      // these shortcuts for as long as any window is open — and windows here
+      // persist in the taskbar across navigation, so that would be most of
+      // the time.
+      if (el?.closest?.('.os-preview-window, .modal-overlay')) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      if (mod && key === 'a') {
+        e.preventDefault();
+        setSelectedFileIds(visibleFileIds);
+        setSelectedFolderIds(sortedSubfolders.map(f => f.id));
+        return;
+      }
+      if (mod && key === 'x' && selectedCount) {
+        e.preventDefault();
+        onClipboardCut?.(selectedFileIds, selectedFolderIds);
+        return;
+      }
+      if (mod && key === 'c' && selectedCount) {
+        e.preventDefault();
+        onClipboardCopy?.(selectedFileIds, selectedFolderIds);
+        return;
+      }
+      if (mod && key === 'v') {
+        e.preventDefault();
+        onClipboardPaste?.();
+        return;
+      }
+      if (e.key === 'Escape' && selectedCount) {
+        clearSelection();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [selectedFileIds, selectedFolderIds, selectedCount, visibleFileIds, sortedSubfolders,
+      onClipboardCut, onClipboardCopy, onClipboardPaste, clearSelection]);
 
   // paginationMeta comes from the backend's PagedFileResponse — total_count,
   // not total_items. Falling back to files.length (this page's loaded count)
@@ -628,7 +746,11 @@ export default function FolderExplorer({
           </div>
         </div>
       ) : (
-        <>
+        <div
+          ref={gridAreaRef}
+          className="explorer-grid-area"
+          onMouseDown={handleGridMouseDown}
+        >
           {/* 1. Subfolders Section (Only in all/folder view) */}
           {activeView !== 'notes' && activeView !== 'favorites' && sortedSubfolders.length > 0 && (
             <div style={{ marginBottom: '2rem' }}>
@@ -639,17 +761,35 @@ export default function FolderExplorer({
             {sortedSubfolders.map(sub => (
               <div 
                 key={sub.id} 
-                className="folder-card"
-                onClick={() => onSelectFolder(sub.id)}
+                className={`folder-card ${selectedFolderIds.includes(sub.id) ? 'selected' : ''} ${isCut('folder', sub.id) ? 'is-cut' : ''}`}
+                data-select-id={sub.id}
+                data-select-kind="folder"
+                onClick={(e) => {
+                  // Modifier-click selects, plain click opens — the same split
+                  // the file cards already use, so a folder can join a mixed
+                  // selection without losing single-click navigation.
+                  if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                    toggleFolderSelection(sub.id, e);
+                    return;
+                  }
+                  onSelectFolder(sub.id);
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (onFolderContextMenu) onFolderContextMenu(e, sub);
+                  if (onFolderContextMenu) onFolderContextMenu(e, sub, effectiveSelection(sub, 'folder'));
                 }}
                 draggable={true}
                 onDragStart={(e) => {
                   e.stopPropagation();
-                  setItemDragData(e, { folderIds: [sub.id], label: sub.name });
+                  const sel = effectiveSelection(sub, 'folder');
+                  const count = sel.fileIds.length + sel.folderIds.length;
+                  setItemDragData(e, {
+                    fileIds: sel.fileIds,
+                    folderIds: sel.folderIds,
+                    label: sub.name,
+                    count,
+                  });
                 }}
                 {...folderDropProps(sub.id)}
               >
@@ -808,17 +948,24 @@ export default function FolderExplorer({
               return (
                 <div
                   key={file.id}
-                  className={`file-card ${isSelected ? 'selected' : ''} ${removingIds.has(file.id) ? 'is-removing' : ''}`}
+                  className={`file-card ${isSelected ? 'selected' : ''} ${removingIds.has(file.id) ? 'is-removing' : ''} ${isCut('file', file.id) ? 'is-cut' : ''}`}
+                  data-select-id={file.id}
+                  data-select-kind="file"
                   draggable={true}
                   onDragStart={(e) => {
-                    const ids = selectedFileIds.includes(file.id) ? selectedFileIds : [file.id];
-                    setItemDragData(e, { fileIds: ids, label: file.name, count: ids.length });
+                    const sel = effectiveSelection(file, 'file');
+                    setItemDragData(e, {
+                      fileIds: sel.fileIds,
+                      folderIds: sel.folderIds,
+                      label: file.name,
+                      count: sel.fileIds.length + sel.folderIds.length,
+                    });
                   }}
                   onClick={(e) => handleCardClick(file, e)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (onFileContextMenu) onFileContextMenu(e, file);
+                    if (onFileContextMenu) onFileContextMenu(e, file, effectiveSelection(file, 'file'));
                   }}
                   style={{
                     outline: isSelected ? '2px solid var(--accent-primary)' : undefined,
@@ -981,7 +1128,7 @@ export default function FolderExplorer({
       </div>
 
       {/* Floating Batch Action Bar */}
-      {selectedFileIds.length > 0 && (
+      {selectedCount > 0 && (
         <div className={`batch-floating-bar ${hasOpenWindows ? 'has-open-windows' : ''}`} style={{
           position: 'fixed',
           bottom: hasOpenWindows ? '6.5rem' : '2rem',
@@ -1003,7 +1150,13 @@ export default function FolderExplorer({
         }}>
           <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
             <CheckSquare size={16} color="var(--accent-primary)" />
-            <span>{selectedFileIds.length}개 선택됨</span>
+            <span>
+              {selectedFolderIds.length > 0 && selectedFileIds.length > 0
+                ? `폴더 ${selectedFolderIds.length}개, 파일 ${selectedFileIds.length}개 선택됨`
+                : selectedFolderIds.length > 0
+                  ? `폴더 ${selectedFolderIds.length}개 선택됨`
+                  : `${selectedFileIds.length}개 선택됨`}
+            </span>
           </div>
 
           <div className="hide-mobile" style={{ height: '18px', width: '1px', background: 'var(--border-subtle)' }} />
@@ -1011,24 +1164,48 @@ export default function FolderExplorer({
           <button
             type="button"
             className="btn-secondary"
-            title={selectedFileIds.length === files.length ? '선택 해제' : '전체 선택'}
+            title={isEverythingSelected ? '선택 해제' : '전체 선택'}
             onClick={() => {
-              if (selectedFileIds.length === files.length) {
-                setSelectedFileIds([]);
+              if (isEverythingSelected) {
+                clearSelection();
               } else {
-                setSelectedFileIds(files.map(f => f.id));
+                setSelectedFileIds(visibleFileIds);
+                setSelectedFolderIds(sortedSubfolders.map(f => f.id));
               }
             }}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
-            {selectedFileIds.length === files.length ? <Square size={14} /> : <CheckSquare size={14} />}
-            <span className="hide-mobile">{selectedFileIds.length === files.length ? '선택 해제' : '전체 선택'}</span>
+            {isEverythingSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+            <span className="hide-mobile">{isEverythingSelected ? '선택 해제' : '전체 선택'}</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            title="잘라내기 (Ctrl+X)"
+            onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds)}
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+          >
+            <Scissors size={15} />
+            <span className="hide-mobile">잘라내기</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            title="복사 (Ctrl+C)"
+            onClick={() => onClipboardCopy?.(selectedFileIds, selectedFolderIds)}
+            style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
+          >
+            <Copy size={15} />
+            <span className="hide-mobile">복사</span>
           </button>
 
           <button
             type="button"
             className="btn-primary"
             title="폴더로 이동"
+            disabled={selectedFileIds.length === 0}
             onClick={() => onOpenMoveModal && onOpenMoveModal(selectedFileIds)}
             style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
@@ -1040,6 +1217,7 @@ export default function FolderExplorer({
             type="button"
             className="btn-secondary"
             title="ZIP 다운로드"
+            disabled={selectedFileIds.length === 0}
             onClick={() => onBatchDownload && onBatchDownload(selectedFileIds)}
             style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}
           >
@@ -1075,14 +1253,29 @@ export default function FolderExplorer({
           <button
             type="button"
             className="btn-icon batch-bar-close"
-            onClick={() => setSelectedFileIds([])}
+            onClick={clearSelection}
             title="선택 닫기"
           >
             <X size={14} strokeWidth={2.5} />
           </button>
         </div>
       )}
-      </>
+
+          {/* Rubber-band selection overlay. Fixed-positioned because the band is
+              tracked in viewport coordinates, which is what keeps it aligned
+              with the cards while the list auto-scrolls under it. */}
+          {marqueeRect && (
+            <div
+              className="selection-marquee"
+              style={{
+                left: marqueeRect.left,
+                top: marqueeRect.top,
+                width: marqueeRect.right - marqueeRect.left,
+                height: marqueeRect.bottom - marqueeRect.top,
+              }}
+            />
+          )}
+      </div>
       )}
 
       {/* 3. Pagination Controls */}

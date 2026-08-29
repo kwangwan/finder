@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path, PurePosixPath
 import boto3
 from botocore.client import Config
@@ -369,6 +370,42 @@ class S3Service:
             except Exception as e:
                 print(f"[S3 Error] upload_file to S3 failed: {e}")
         return False
+
+    def copy_object(self, src_key: str, dst_key: str) -> bool:
+        """
+        Duplicate a stored object under a new key.
+
+        Mirrors delete_object's dual-backend handling: the same object may live
+        in S3, on local disk, or both, depending on which path stored it. The
+        copy is done server-side by MinIO rather than by streaming the bytes
+        through this process, so copying a large file costs no memory here.
+
+        Returns whether either backend produced a copy — a caller creating a
+        FileItem row for the copy must not do so if this is False, or the row
+        would point at a key holding nothing.
+        """
+        copied = False
+
+        if self.client:
+            try:
+                self.client.copy_object(
+                    Bucket=self.bucket_name,
+                    CopySource={"Bucket": self.bucket_name, "Key": src_key},
+                    Key=dst_key,
+                )
+                copied = True
+            except Exception as e:
+                print(f"[S3 Error] copy_object {src_key} -> {dst_key}: {e}")
+
+        try:
+            src_path = self._get_local_path(src_key)
+            if src_path.exists():
+                shutil.copy2(src_path, self._get_local_path(dst_key))
+                copied = True
+        except Exception as e:
+            print(f"[Local Storage Warning] Could not copy local file: {e}")
+
+        return copied
 
     def delete_object(self, s3_key: str):
         """Delete object from MinIO and local storage."""

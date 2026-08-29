@@ -38,6 +38,12 @@ class BatchMoveRequest(BaseModel):
     file_ids: List[uuid.UUID]
     folder_id: Optional[uuid.UUID] = None
 
+class BatchCopyRequest(BaseModel):
+    workspace_id: uuid.UUID
+    file_ids: List[uuid.UUID] = Field(default_factory=list)
+    folder_ids: List[uuid.UUID] = Field(default_factory=list)
+    folder_id: Optional[uuid.UUID] = None  # destination; None means workspace root
+
 class FileRenameRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
 

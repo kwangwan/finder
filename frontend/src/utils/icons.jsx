@@ -30,7 +30,9 @@ import {
   Clock as LuClock,
   Code as LuCode,
   Columns as LuColumns,
+  ClipboardPaste as LuClipboardPaste,
   Copy as LuCopy,
+  Scissors as LuScissors,
   CornerDownLeft as LuCornerDownLeft,
   Crown as LuCrown,
   Database as LuDatabase,
@@ -140,7 +142,9 @@ import {
   Code as PxCode,
   Collapse as PxCollapse,
   ColorsSwatch as PxColorsSwatch,
+  Clipboard as PxClipboard,
   Copy as PxCopy,
+  Scissors as PxScissors,
   CornerDownLeft as PxCornerDownLeft,
   Crown as PxCrown,
   Database as PxDatabase,
@@ -255,7 +259,9 @@ export const ChevronsRight = makeIcon(LuChevronsRight, PxSquareChevronRight);
 export const Clock = makeIcon(LuClock, PxClock);
 export const Code = makeIcon(LuCode, PxCode);
 export const Columns = makeIcon(LuColumns, null);
+export const ClipboardPaste = makeIcon(LuClipboardPaste, PxClipboard);
 export const Copy = makeIcon(LuCopy, PxCopy);
+export const Scissors = makeIcon(LuScissors, PxScissors);
 export const CornerDownLeft = makeIcon(LuCornerDownLeft, PxCornerDownLeft);
 export const Crown = makeIcon(LuCrown, PxCrown);
 export const Database = makeIcon(LuDatabase, PxDatabase);

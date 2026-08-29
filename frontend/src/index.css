@@ -4115,3 +4115,36 @@ select option {
     box-sizing: border-box !important;
   }
 }
+
+/* ==========================================================================
+   Explorer selection: rubber band, selected folders, cut items
+   ========================================================================== */
+
+/* The band is tracked in viewport coordinates so it stays aligned with the
+   cards while the list auto-scrolls under it — hence fixed, not absolute. */
+/* Leaves empty space below the cards to start a band from, so selecting by
+   drag doesn't require finding a gap between them. */
+.explorer-grid-area {
+  min-height: 260px;
+}
+
+.selection-marquee {
+  position: fixed;
+  z-index: 8000;
+  pointer-events: none;
+  border: 1px solid var(--accent-primary);
+  background: rgba(59, 130, 246, 0.14);
+  border-radius: 2px;
+}
+
+.folder-card.selected {
+  outline: 2px solid var(--accent-primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+/* Cut items stay in place until the paste actually happens, faded to show the
+   move is pending rather than done — the same cue Explorer gives. */
+.file-card.is-cut,
+.folder-card.is-cut {
+  opacity: 0.45;
+}

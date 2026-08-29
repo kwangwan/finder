@@ -35,7 +35,10 @@ import {
   Download,
   Eye,
   FileArchive,
-  FolderInput
+  FolderInput,
+  Scissors,
+  Copy,
+  ClipboardPaste
 } from './utils/icons';
 import { 
   getMe,
@@ -63,7 +66,8 @@ import {
   downloadFileChunked,
   downloadFolderAsZip,
   batchDownloadFiles,
-  batchMoveFiles
+  batchMoveFiles,
+  batchCopyItems
 } from './api';
 import { useDialog } from './context/DialogContext';
 import { useToast } from './context/ToastContext';
@@ -295,6 +299,7 @@ export default function App() {
   const [newFolderParentId, setNewFolderParentId] = useState(null);
   const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, items: [] });
+  const [clipboard, setClipboard] = useState(null);
   const [renameModal, setRenameModal] = useState({ isOpen: false, item: null });
 
   // OS-Style Multi-Window Manager
@@ -593,6 +598,64 @@ export default function App() {
       // leaving the tree showing a move that only partly happened.
       await refreshFiles();
       await refreshFoldersAndStats();
+    }
+  };
+
+  // Explorer clipboard for cut/copy/paste, modelled on Windows Explorer: it
+  // holds ids rather than content, survives navigating between folders (that
+  // is the whole point — you cut here and paste there), and is scoped to one
+  // workspace because neither move nor copy crosses a workspace boundary.
+  const clipboardHasItems = !!clipboard && (clipboard.fileIds.length > 0 || clipboard.folderIds.length > 0);
+
+  const handleClipboardCut = (fileIds = [], folderIds = []) => {
+    if (!fileIds.length && !folderIds.length) return;
+    setClipboard({ mode: 'cut', workspaceId: activeWorkspace?.id || null, fileIds, folderIds });
+    showToast(`${fileIds.length + folderIds.length}개 항목을 잘라냈습니다. 붙여넣을 위치에서 Ctrl+V를 누르세요.`, { type: 'info' });
+  };
+
+  const handleClipboardCopy = (fileIds = [], folderIds = []) => {
+    if (!fileIds.length && !folderIds.length) return;
+    setClipboard({ mode: 'copy', workspaceId: activeWorkspace?.id || null, fileIds, folderIds });
+    showToast(`${fileIds.length + folderIds.length}개 항목을 복사했습니다. 붙여넣을 위치에서 Ctrl+V를 누르세요.`, { type: 'info' });
+  };
+
+  const handleClipboardPaste = async (targetFolderId = activeFolderId) => {
+    if (!clipboardHasItems) return;
+    if (clipboard.workspaceId !== (activeWorkspace?.id || null)) {
+      await showAlert({
+        title: '붙여넣을 수 없음',
+        message: '다른 워크스페이스에서 잘라내거나 복사한 항목은 붙여넣을 수 없습니다.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    const { mode, fileIds, folderIds } = clipboard;
+    try {
+      if (mode === 'cut') {
+        // A move is exactly what drag-and-drop already does, down to the
+        // folder cycle guard the server applies, so paste reuses it rather
+        // than growing a second path that could drift from it.
+        await handleDirectMoveItems(fileIds, folderIds, targetFolderId);
+        setClipboard(null);  // cut is consumed by its paste, as in Explorer
+        return;
+      }
+
+      const res = await batchCopyItems(activeWorkspace.id, fileIds, folderIds, targetFolderId);
+      await refreshFiles();
+      await refreshFoldersAndStats();
+
+      const parts = [];
+      if (res.copied_files) parts.push(`파일 ${res.copied_files}개`);
+      if (res.copied_folders) parts.push(`폴더 ${res.copied_folders}개`);
+      const skipped = res.skipped ? ` (${res.skipped}개는 원본을 읽을 수 없어 제외)` : '';
+      showToast(parts.length ? `${parts.join(', ')}를 붙여넣었습니다.${skipped}` : '붙여넣을 항목이 없습니다.', {
+        type: parts.length ? 'success' : 'info',
+      });
+      // Copy stays on the clipboard so it can be pasted into several places,
+      // which is how Explorer behaves and is the only reason to keep it.
+    } catch (err) {
+      await showAlert({ title: '붙여넣기 실패', message: err.message, type: 'error' });
     }
   };
 
@@ -1151,7 +1214,30 @@ export default function App() {
     windowManager.updateWindowFile(id, { name: newName });
   };
 
-  const handleFolderContextMenu = (e, folder) => {
+  // Cut/copy/paste entries shared by the file, folder and background menus, so
+  // the three stay in step and a selection is always acted on as a unit.
+  const clipboardMenuItems = (fileIds, folderIds, pasteTargetId) => {
+    const items = [];
+    if (fileIds.length || folderIds.length) {
+      items.push(
+        { label: '잘라내기', icon: Scissors, onClick: () => handleClipboardCut(fileIds, folderIds) },
+        { label: '복사', icon: Copy, onClick: () => handleClipboardCopy(fileIds, folderIds) },
+      );
+    }
+    if (clipboardHasItems) {
+      const count = clipboard.fileIds.length + clipboard.folderIds.length;
+      items.push({
+        label: `붙여넣기 (${count}개)`,
+        icon: ClipboardPaste,
+        onClick: () => handleClipboardPaste(pasteTargetId),
+      });
+    }
+    return items;
+  };
+
+  const handleFolderContextMenu = (e, folder, selection = null) => {
+    const fileIds = selection?.fileIds ?? [];
+    const folderIds = selection?.folderIds?.length ? selection.folderIds : [folder.id];
     setContextMenu({
       isOpen: true,
       x: e.clientX,
@@ -1200,6 +1286,8 @@ export default function App() {
           onClick: () => startDownloadFolder(folder),
         },
         { divider: true },
+        ...clipboardMenuItems(fileIds, folderIds, folder.id),
+        { divider: true },
         {
           label: '이름 및 색상 변경',
           icon: Edit3,
@@ -1215,7 +1303,9 @@ export default function App() {
     });
   };
 
-  const handleFileContextMenu = (e, file) => {
+  const handleFileContextMenu = (e, file, selection = null) => {
+    const fileIds = selection?.fileIds?.length ? selection.fileIds : [file.id];
+    const folderIds = selection?.folderIds ?? [];
     const isMedia = file.file_type === 'image' || file.file_type === 'video' || file.file_type === 'pdf';
     setContextMenu({
       isOpen: true,
@@ -1246,8 +1336,10 @@ export default function App() {
         {
           label: '다른 폴더로 이동',
           icon: FolderInput,
-          onClick: () => handleOpenMoveModal([file.id]),
+          onClick: () => handleOpenMoveModal(fileIds),
         },
+        { divider: true },
+        ...clipboardMenuItems(fileIds, folderIds, activeFolderId),
         { divider: true },
         {
           label: '이름 변경',
@@ -1288,6 +1380,7 @@ export default function App() {
           icon: UploadCloud,
           onClick: () => setIsUploadOpen(true),
         },
+        ...(clipboardHasItems ? [{ divider: true }, ...clipboardMenuItems([], [], activeFolderId)] : []),
         { divider: true },
         {
           label: '새로고침',
@@ -1497,6 +1590,10 @@ export default function App() {
             onFolderContextMenu={handleFolderContextMenu}
             onFileContextMenu={handleFileContextMenu}
             onBackgroundContextMenu={handleBackgroundContextMenu}
+            clipboard={clipboard}
+            onClipboardCut={handleClipboardCut}
+            onClipboardCopy={handleClipboardCopy}
+            onClipboardPaste={handleClipboardPaste}
             onDownloadFolder={startDownloadFolder}
             onDownloadFile={startDownloadFile}
             onOpenMoveModal={handleOpenMoveModal}

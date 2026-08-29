@@ -1043,6 +1043,27 @@ export async function batchMoveFiles(workspaceId, fileIds, targetFolderId = null
   return res.json();
 }
 
+/** Duplicate files and folders (recursively) into a target folder — the paste
+ *  half of copy/paste. Unlike a move this consumes storage, so the server can
+ *  refuse the whole operation with 413 when it would not fit in the quota. */
+export async function batchCopyItems(workspaceId, fileIds = [], folderIds = [], targetFolderId = null) {
+  const res = await fetchWithRetry(`${API_BASE}/files/batch-copy`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      file_ids: fileIds,
+      folder_ids: folderIds,
+      folder_id: targetFolderId || null,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail || '붙여넣기 실패');
+  }
+  return res.json();
+}
+
 /**
  * Semantic & Hybrid Search API (with Advanced Filtering)
  */
