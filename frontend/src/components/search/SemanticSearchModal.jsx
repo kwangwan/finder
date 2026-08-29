@@ -108,18 +108,34 @@ export default function SemanticSearchModal({
   // results.length, which can lag it when de-duplication drops rows.
   const nextOffsetRef = useRef(0);
 
-  // Focus on open & reset
+  // Reopening keeps the previous query, filters and results — closing the
+  // modal to look at something and coming back used to wipe everything and
+  // force the search to be retyped. The text is selected on focus instead,
+  // so typing still replaces it in one go while ↵/Esc leave it intact.
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-      setSelectedIndex(0);
-    } else {
-      setQuery('');
-      setResults([]);
-      setTotalResults(0);
-      setHasMore(false);
-    }
+    if (!isOpen) return;
+    setSelectedIndex(0);
+    const t = setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 50);
+    return () => clearTimeout(t);
   }, [isOpen]);
+
+  // Switching workspace is the one thing that must clear it: the query was
+  // run against the previous workspace's files, so both the results and the
+  // folder-scope filter are meaningless here (that folder id doesn't even
+  // exist in the new workspace). Closing the page clears it by itself, since
+  // none of this is persisted.
+  useEffect(() => {
+    setQuery('');
+    setResults([]);
+    setTotalResults(0);
+    setHasMore(false);
+    setFolderId('');
+    activeSearchRef.current = null;
+    nextOffsetRef.current = 0;
+  }, [activeWorkspaceId]);
 
   const getDateRange = (preset) => {
     if (preset === '7d') {
