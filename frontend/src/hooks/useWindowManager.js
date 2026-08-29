@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { getWindowState, saveWindowState, getFileDetail } from '../api';
 
 const RESIZE_MIN_X = 0;
 const RESIZE_MIN_Y = 48; // keeps the header below the topbar, matching handleDragMove's clamp
@@ -37,13 +38,32 @@ function fitWindowToViewport(win, screenWidth, screenHeight, isMobile) {
   if (x === win.position.x && y === win.position.y && width === win.size.width && height === win.size.height) {
     return win;
   }
+
   return { ...win, position: { x, y }, size: { width, height } };
 }
 
-export function useWindowManager() {
+// How often to check whether another browser changed the taskbar. Only runs
+// while the tab is visible, mirroring the file-list watermark poll — a
+// background tab has nothing to redraw and no reason to keep asking.
+const SYNC_POLL_MS = 10000;
+// Writes are debounced: dragging a window or clicking through several files
+// would otherwise fire a PUT per change.
+const SYNC_SAVE_DEBOUNCE_MS = 800;
+
+export function useWindowManager({ enabled = false, currentUserId = null } = {}) {
   const [windows, setWindows] = useState([]);
   const nextZIndexRef = useRef(100);
   const resizeFrameRef = useRef(null);
+
+  // Sync bookkeeping. `hasLoadedRef` gates saving until the initial restore
+  // has happened — without it the empty starting state would be written back
+  // over the stored one before it was ever read, wiping the taskbar on every
+  // page load. `lastSyncedRef` is the signature we last agreed with the
+  // server on, so a poll can tell a genuine remote change from an echo of
+  // our own write.
+  const hasLoadedRef = useRef(false);
+  const lastSyncedRef = useRef('');
+  const saveTimerRef = useRef(null);
 
   useEffect(() => {
     const handleViewportResize = () => {
@@ -259,6 +279,117 @@ export function useWindowManager() {
       prev.map((w) => (w.id === fileId ? { ...w, file: { ...w.file, ...patch } } : w))
     );
   }, []);
+
+  // ---------------------------------------------------------------------
+  // Cross-browser taskbar sync
+  // ---------------------------------------------------------------------
+
+  // Signature of what is worth syncing: which files are open, in order, and
+  // whether each is minimized. Geometry is excluded on purpose — it belongs
+  // to the screen the window was arranged on, so replaying one browser's
+  // coordinates in another would strand windows off-viewport.
+  const signatureOf = useCallback(
+    (list) => list.map((w) => `${w.id}:${w.isMinimized ? 1 : 0}`).join('|'),
+    []
+  );
+
+  const applyRemote = useCallback(async (entries) => {
+    const signature = entries.map((e) => `${e.file_id}:${e.is_minimized ? 1 : 0}`).join('|');
+    if (signature === lastSyncedRef.current) return; // our own write echoed back
+    lastSyncedRef.current = signature;
+
+    if (entries.length === 0) {
+      setWindows([]);
+      return;
+    }
+
+    // The stored state holds ids only, so the file records have to be
+    // fetched before anything can be rendered. Failures are dropped rather
+    // than retried: an id that no longer resolves is a file that has since
+    // been deleted, and it simply leaves the taskbar.
+    const settled = await Promise.allSettled(entries.map((e) => getFileDetail(e.file_id)));
+    const restored = [];
+    settled.forEach((result, idx) => {
+      if (result.status !== 'fulfilled' || !result.value) return;
+      const { position, size } = getInitialPositionAndSize(restored.length, result.value);
+      nextZIndexRef.current += 1;
+      restored.push({
+        id: result.value.id,
+        file: result.value,
+        isMinimized: !!entries[idx].is_minimized,
+        isMaximized: false,
+        prevPosition: position,
+        prevSize: size,
+        position,
+        size,
+        zIndex: nextZIndexRef.current,
+      });
+    });
+    setWindows(restored);
+  }, [getInitialPositionAndSize]);
+
+  // Restore once the user is known, and re-restore when the user changes so
+  // a second account never inherits the previous one's taskbar.
+  useEffect(() => {
+    if (!enabled || !currentUserId) return;
+    let cancelled = false;
+    hasLoadedRef.current = false;
+    lastSyncedRef.current = '';
+    (async () => {
+      try {
+        const state = await getWindowState();
+        if (!cancelled) await applyRemote(state.windows || []);
+      } catch (e) {
+        console.warn('[WindowSync] restore failed:', e);
+      } finally {
+        if (!cancelled) hasLoadedRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [enabled, currentUserId, applyRemote]);
+
+  // Persist local changes, debounced.
+  useEffect(() => {
+    if (!enabled || !currentUserId || !hasLoadedRef.current) return;
+    const signature = signatureOf(windows);
+    if (signature === lastSyncedRef.current) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      const payload = windows.map((w) => ({ file_id: w.id, is_minimized: !!w.isMinimized }));
+      // Record the signature before the request resolves, so the poll below
+      // recognises this state as ours even if the response is slow.
+      lastSyncedRef.current = signature;
+      saveWindowState(payload).catch((e) => console.warn('[WindowSync] save failed:', e));
+    }, SYNC_SAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [enabled, currentUserId, windows, signatureOf]);
+
+  // Pick up changes made in another browser.
+  useEffect(() => {
+    if (!enabled || !currentUserId) return;
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return;
+      // Don't overwrite anything still on its way to the server.
+      if (saveTimerRef.current) return;
+      try {
+        const state = await getWindowState();
+        await applyRemote(state.windows || []);
+      } catch (e) { /* best-effort */ }
+    };
+    const id = setInterval(poll, SYNC_POLL_MS);
+    // Coming back to a tab is exactly when it is most likely to be stale.
+    const onVisible = () => { if (document.visibilityState === 'visible') poll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [enabled, currentUserId, applyRemote]);
 
   return {
     windows,

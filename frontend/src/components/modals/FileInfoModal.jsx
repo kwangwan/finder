@@ -122,20 +122,26 @@ export default function FileInfoModal({ file, onClose }) {
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>{r.label}</span>
               <span style={{ fontSize: '0.86rem', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
                 {r.value}
-                {r.href && (
-                  <>
-                    {' '}
-                    <a
-                      href={r.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', whiteSpace: 'nowrap' }}
-                    >
-                      {r.hrefLabel}
-                    </a>
-                  </>
-                )}
               </span>
+              {r.href && (
+                // Its own line rather than trailing the value: coordinates are
+                // long enough that the two together wrap awkwardly, and the
+                // link reads as an action rather than part of the value.
+                <a
+                  href={r.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: '0.78rem',
+                    color: 'var(--accent-primary)',
+                    whiteSpace: 'nowrap',
+                    marginTop: '0.15rem',
+                    alignSelf: 'flex-start',
+                  }}
+                >
+                  {r.hrefLabel}
+                </a>
+              )}
             </div>
           ))}
         </div>

@@ -298,7 +298,13 @@ export default function App() {
   const [renameModal, setRenameModal] = useState({ isOpen: false, item: null });
 
   // OS-Style Multi-Window Manager
-  const windowManager = useWindowManager();
+  // Taskbar state is persisted per user, so it survives a reload and
+  // follows them to another browser. Gated on a known user: before login
+  // there is nothing to restore and no one to save for.
+  const windowManager = useWindowManager({
+    enabled: !!currentUser?.id,
+    currentUserId: currentUser?.id || null,
+  });
 
   const refreshDebounceTimerRef = useRef(null);
 

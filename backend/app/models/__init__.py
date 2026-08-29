@@ -6,6 +6,7 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.invitation import Invitation
 from app.models.deletion_queue import DeletionQueueItem
+from app.models.window_state import UserWindowState
 
 __all__ = [
     "Folder",
@@ -17,4 +18,5 @@ __all__ = [
     "WorkspaceMember",
     "Invitation",
     "DeletionQueueItem",
+    "UserWindowState",
 ]

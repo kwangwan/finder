@@ -1298,3 +1298,24 @@ export async function uploadNoteImage(file, workspaceId = null, folderId = null)
 }
 
 
+
+/**
+ * Taskbar (open preview windows) state, stored per user so it survives a
+ * reload and follows the user to another browser. Only which files are open
+ * and whether each is minimized — geometry stays local to each screen.
+ */
+export async function getWindowState() {
+  const res = await fetch(`${API_BASE}/window-state`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load window state');
+  return res.json();
+}
+
+export async function saveWindowState(windows) {
+  const res = await fetch(`${API_BASE}/window-state`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ windows }),
+  });
+  if (!res.ok) throw new Error('Failed to save window state');
+  return res.json();
+}
