@@ -4746,3 +4746,138 @@ select option {
     display: none;
   }
 }
+
+/* ==========================================================================
+   Shared-root folder browser
+   ========================================================================== */
+
+.folder-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.folder-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* Searching happens on the server, so this box is the only way to reach a
+   folder that is not on the current page. */
+.folder-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.3rem 0.6rem;
+  min-width: 200px;
+  max-width: 320px;
+  flex: 1 1 200px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.folder-search-box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.folder-search-box button {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.folder-search-box button:hover { color: var(--text-primary); }
+
+.folder-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.folder-pager button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
+}
+
+.folder-pager-status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: center;
+}
+
+.folder-empty-hint {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ==========================================================================
+   Form inputs
+   ========================================================================== */
+
+/* .input-field was used across the admin dashboard but never defined, so those
+   boxes fell back to the browser's own chrome — white, rounded, system font.
+   Against the matrix theme (green on black, pixel type, every corner squared
+   off globally) they read as belonging to a different application. Built from
+   the same tokens as everything else, so each theme restyles them for free. */
+.input-field {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.input-field::placeholder { color: var(--text-muted); }
+
+.input-field:focus {
+  border-color: var(--accent-primary);
+  background: var(--bg-secondary);
+}
+
+.input-field:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Number inputs in the policy panel are narrow; the browser's spinner eats
+   most of that width and is not needed when the value is typed. */
+.input-field[type="number"]::-webkit-outer-spin-button,
+.input-field[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.input-field[type="number"] { -moz-appearance: textfield; appearance: textfield; }

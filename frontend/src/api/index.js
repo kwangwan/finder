@@ -292,7 +292,10 @@ export async function updateSharedPolicy(patch) {
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error('정책을 저장하지 못했습니다.');
+  if (!res.ok) {
+    const d = await res.json().catch(() => null);
+    throw new Error(d?.detail || `정책을 저장하지 못했습니다. (HTTP ${res.status})`);
+  }
   return res.json();
 }
 
@@ -1237,7 +1240,13 @@ export async function setSharedWorkspaceQuota(bytes) {
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ storage_quota_bytes: bytes }),
   });
-  if (!res.ok) throw new Error('공용 워크스페이스 용량을 변경하지 못했습니다.');
+  if (!res.ok) {
+    // Surface what the server actually said. A flat "failed" cannot be told
+    // apart from the server being briefly unavailable, which is exactly the
+    // case someone should just retry.
+    const d = await res.json().catch(() => null);
+    throw new Error(d?.detail || `공용 워크스페이스 용량을 변경하지 못했습니다. (HTTP ${res.status})`);
+  }
   return res.json();
 }
 

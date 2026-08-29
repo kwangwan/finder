@@ -34,12 +34,13 @@ import {
   RefreshCw,
   Info,
   Loader2,
+  Search,
   Scissors,
   Copy,
   GripVertical,
   Users
 } from '../../utils/icons';
-import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
+import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken, listRootFolders } from '../../api';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
@@ -370,6 +371,41 @@ export default function FolderExplorer({
   // person and nothing else. Offering upload or "new document" there would be
   // inviting an action the server refuses.
   const isSharedRoot = isSharedWorkspace && !currentFolder?.id;
+
+  // The shared root holds one folder per person, so it is fetched a page at a
+  // time and searched on the server. Handing the whole list to the client and
+  // filtering it here would mean downloading every account's folder to show
+  // twenty of them.
+  const ROOT_PAGE_SIZE = 24;
+  const [rootQuery, setRootQuery] = useState('');
+  const [rootSearch, setRootSearch] = useState('');
+  const [rootPage, setRootPage] = useState(1);
+  const [rootData, setRootData] = useState({ items: [], total_count: 0, total_pages: 1 });
+  const [isRootLoading, setIsRootLoading] = useState(false);
+
+  // Typing is debounced so a search does not fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => { setRootSearch(rootQuery.trim()); setRootPage(1); }, 300);
+    return () => clearTimeout(t);
+  }, [rootQuery]);
+
+  useEffect(() => {
+    if (!isSharedRoot || !workspaceId) return;
+    let cancelled = false;
+    setIsRootLoading(true);
+    listRootFolders({ workspace_id: workspaceId, search: rootSearch, page: rootPage, page_size: ROOT_PAGE_SIZE })
+      .then((res) => {
+        if (cancelled) return;
+        setRootData({
+          items: res.items || [],
+          total_count: res.total_count ?? (res.items || []).length,
+          total_pages: res.total_pages || 1,
+        });
+      })
+      .catch(() => { if (!cancelled) setRootData({ items: [], total_count: 0, total_pages: 1 }); })
+      .finally(() => { if (!cancelled) setIsRootLoading(false); });
+    return () => { cancelled = true; };
+  }, [isSharedRoot, workspaceId, rootSearch, rootPage, hasNewFiles]);
   const canWriteHere = canWrite && !isSharedRoot;
 
   // What an action triggered from `item` should apply to: the whole selection
@@ -990,13 +1026,34 @@ export default function FolderExplorer({
           }}
         >
           {/* 1. Subfolders Section (Only in all/folder view) */}
-          {activeView !== 'notes' && activeView !== 'favorites' && sortedSubfolders.length > 0 && (
+          {activeView !== 'notes' && activeView !== 'favorites' && (isSharedRoot || sortedSubfolders.length > 0) && (
             <div style={{ marginBottom: '2rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                폴더 ({sortedSubfolders.length})
+              <div className="folder-section-head">
+                <span className="folder-section-title">
+                  폴더 ({isSharedRoot ? rootData.total_count : sortedSubfolders.length})
+                </span>
+
+                {isSharedRoot && (
+                  <div className="folder-search-box">
+                    <Search size={14} />
+                    <input
+                      type="text"
+                      value={rootQuery}
+                      onChange={(e) => setRootQuery(e.target.value)}
+                      placeholder="이용자 폴더 검색..."
+                      aria-label="폴더 검색"
+                    />
+                    {rootQuery && (
+                      <button type="button" onClick={() => setRootQuery('')} title="검색어 지우기">
+                        <X size={13} />
+                      </button>
+                    )}
+                    {isRootLoading && <Loader2 size={13} className="spin" />}
+                  </div>
+                )}
               </div>
           <div className="grid-folders">
-            {sortedSubfolders.map(sub => (
+            {(isSharedRoot ? rootData.items : sortedSubfolders).map(sub => (
               <div 
                 key={sub.id} 
                 className={`folder-card ${selectedFolderIds.includes(sub.id) ? 'selected' : ''} ${isCut('folder', sub.id) ? 'is-cut' : ''}`}
@@ -1062,6 +1119,40 @@ export default function FolderExplorer({
               </div>
             ))}
           </div>
+
+          {/* Paging for the shared root. With one folder per account this list
+              grows with the user base, so it is never rendered whole. */}
+          {isSharedRoot && rootData.total_pages > 1 && (
+            <div className="folder-pager">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={rootPage <= 1}
+                onClick={() => setRootPage(p => Math.max(1, p - 1))}
+              >
+                <ChevronLeft size={14} />
+                <span className="hide-mobile">이전</span>
+              </button>
+              <span className="folder-pager-status">
+                {rootPage} / {rootData.total_pages}
+              </span>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={rootPage >= rootData.total_pages}
+                onClick={() => setRootPage(p => Math.min(rootData.total_pages, p + 1))}
+              >
+                <span className="hide-mobile">다음</span>
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+
+          {isSharedRoot && !isRootLoading && rootData.items.length === 0 && (
+            <div className="folder-empty-hint">
+              {rootSearch ? `'${rootSearch}'와 일치하는 이용자 폴더가 없습니다.` : '아직 이용자 폴더가 없습니다.'}
+            </div>
+          )}
         </div>
       )}
 
