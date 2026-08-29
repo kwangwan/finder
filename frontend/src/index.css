@@ -1831,15 +1831,17 @@ h1, h2, h3, h4, h5, h6,
     width: calc(100vw - 20px) !important;
     max-width: calc(100vw - 20px) !important;
     margin: 10px !important;
-    padding: 1.15rem !important;
     max-height: 92vh !important;
   }
 
-  /* Version history manages its own header/body/footer padding (padding:0 on
-     .modal-content itself) — the blanket mobile padding above fought that and
-     squeezed the already-narrow preview pane even further. */
-  .modal-content.version-history-modal {
-    padding: 0 !important;
+  /* Several modals lay out their own header/body/footer and set padding:0 on
+     the shell. A blanket mobile padding with !important overrode that and
+     inset those inner sections from the modal edges — a footer with its own
+     background ended up floating inside the dialog instead of meeting its
+     corners. So the blanket padding applies only to modals that do NOT manage
+     their own, marked with .modal-self-padded. */
+  .modal-content:not(.modal-self-padded) {
+    padding: 1.15rem !important;
   }
 
   .version-history-body {
@@ -2326,14 +2328,47 @@ h1, h2, h3, h4, h5, h6,
 }
 
 @media (max-width: 480px) {
+  /* One column on a phone. Two columns left each card about 180px wide, which
+     had to hold five controls — they ended up 26px with 2px between them, and
+     the one 2px from 파일 정보 is 삭제. A single column gives them room to be
+     real touch targets, and lets a long filename actually show. */
   .grid-cards {
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 0.5rem !important;
+    grid-template-columns: 1fr !important;
+    gap: 0.6rem !important;
   }
 
   .grid-folders {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: 1fr !important;
     gap: 0.5rem !important;
+  }
+
+  .file-card .card-action-btn {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .file-card .file-card-top > div:last-child {
+    gap: 4px !important;
+  }
+
+  /* Extra separation before the destructive action, so a slightly-off tap
+     aimed at 파일 정보 does not land on 삭제. */
+  .file-card .card-action-btn:last-child {
+    margin-left: 6px !important;
+  }
+
+  /* The thumbnail panel is the tallest part of a card; trimmed so a
+     one-column list does not turn six files into six screens of scrolling. */
+  .file-card .file-card-thumbnail {
+    height: 96px !important;
+    min-height: 96px !important;
+  }
+
+  /* The select toggle is a tap target like the rest of the row, not a 22px
+     icon — it is what turns a browse into a multi-select. */
+  .file-card .file-card-top > div:first-child > div[title="선택"] {
+    width: 40px !important;
+    height: 40px !important;
   }
 
   .file-card {
@@ -4469,4 +4504,44 @@ select option {
 
 .fw-body[data-drop-copy="true"] {
   box-shadow: inset 0 0 0 2px var(--accent-primary);
+}
+
+/* ==========================================================================
+   Confirm / alert dialog
+   ========================================================================== */
+
+/* The dialog lays out its own body and footer, so it sets padding:0 on the
+   shell. The blanket mobile .modal-content padding overrode that with
+   !important, which inset the footer's own background from the modal edges
+   and left it floating — the same clash version-history already had to opt
+   out of. */
+.dialog-body {
+  padding: 1.35rem 1.35rem 1.1rem;
+}
+
+.dialog-footer {
+  padding: 0.85rem 1.35rem;
+  background-color: var(--bg-tertiary);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+@media (max-width: 768px) {
+  .dialog-body {
+    padding: 1.05rem 1.05rem 0.9rem;
+  }
+
+  .dialog-footer {
+    padding: 0.75rem 1.05rem;
+  }
+
+  /* Side by side until they genuinely do not fit; a stacked pair of full-width
+     buttons puts the destructive one under the thumb by default, which is the
+     wrong default for a confirm dialog. */
+  .dialog-footer button {
+    flex: 1 1 auto;
+    max-width: 100%;
+  }
 }

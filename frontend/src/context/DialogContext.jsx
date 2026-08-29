@@ -120,7 +120,7 @@ export function DialogProvider({ children }) {
     const isFolder = targetItemName && (mainPrompt.includes('폴더') || targetItemName.includes('/'));
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '0.35rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
         {targetItemName ? (
           <>
             {/* 1. Prompt Question */}
@@ -141,16 +141,16 @@ export function DialogProvider({ children }) {
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.75rem',
-              padding: '0.75rem 1rem',
+              gap: '0.65rem',
+              padding: '0.6rem 0.8rem',
               borderRadius: 'var(--radius-md)',
               backgroundColor: 'var(--bg-primary)',
               border: '1px solid var(--border-subtle)',
               boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)'
             }}>
               <div style={{
-                width: 34,
-                height: 34,
+                width: 30,
+                height: 30,
                 borderRadius: 'var(--radius-sm)',
                 backgroundColor: isFolder ? 'rgba(59, 130, 246, 0.12)' : 'rgba(239, 68, 68, 0.12)',
                 display: 'flex',
@@ -170,7 +170,11 @@ export function DialogProvider({ children }) {
                 fontSize: '0.88rem',
                 fontWeight: 600,
                 color: 'var(--text-primary)',
-                wordBreak: 'break-all',
+                // keep-all stops a Korean filename splitting mid-word ("문서 파 /
+                // 일.md"); anywhere still lets a single unbroken token that is
+                // wider than the dialog wrap rather than overflow it.
+                wordBreak: 'keep-all',
+                overflowWrap: 'anywhere',
                 lineHeight: 1.4
               }}>
                 {targetItemName}
@@ -192,16 +196,18 @@ export function DialogProvider({ children }) {
         {/* 3. Sub-Notes / Warning callout */}
         {subNotes.length > 0 && (
           <div style={{
-            padding: '0.75rem 1rem',
+            padding: '0.6rem 0.8rem',
             borderRadius: 'var(--radius-md)',
             backgroundColor: 'var(--bg-tertiary)',
             border: '1px solid var(--border-subtle)',
-            fontSize: '0.82rem',
+            fontSize: '0.8rem',
             color: 'var(--text-muted)',
             display: 'flex',
             alignItems: 'flex-start',
             gap: '0.6rem',
-            lineHeight: 1.55
+            lineHeight: 1.55,
+            wordBreak: 'keep-all',
+            overflowWrap: 'anywhere'
           }}>
             <Info size={15} style={{ marginTop: 2, flexShrink: 0, color: 'var(--text-muted)' }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -223,10 +229,10 @@ export function DialogProvider({ children }) {
       {dialogState && (
         <div className="modal-overlay" onClick={handleCancel} style={{ zIndex: 9999 }}>
           <div 
-            className="modal-content" 
+            className="modal-content dialog-modal modal-self-padded" 
             onClick={e => e.stopPropagation()}
             style={{ 
-              maxWidth: 500, 
+              maxWidth: 460, 
               width: '92vw',
               padding: 0,
               overflow: 'hidden',
@@ -235,15 +241,15 @@ export function DialogProvider({ children }) {
               animation: 'mediaModalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
           >
-            <div style={{ padding: '1.75rem 1.75rem 1.25rem' }}>
+            <div className="dialog-body">
               {/* The icon sits beside the title only. It used to head a column
                   that also contained the message, the item card and the notes,
                   which indented every one of them by the icon's width and left
                   a wide empty gutter down the left of the dialog. */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.1rem' }}>
                 <div style={{
-                  width: 44,
-                  height: 44,
+                  width: 38,
+                  height: 38,
                   borderRadius: 'var(--radius-md)',
                   backgroundColor: dialogState.type === 'danger' || dialogState.type === 'error'
                     ? 'rgba(239, 68, 68, 0.14)'
@@ -282,25 +288,18 @@ export function DialogProvider({ children }) {
 
               {/* Full width, so the message and the item name get the whole
                   dialog rather than what is left beside the icon. */}
-              <div style={{ marginTop: '0.9rem' }}>
+              <div style={{ marginTop: '0.7rem' }}>
                 {renderMessageContent(dialogState.message)}
               </div>
             </div>
 
-            <div style={{ 
-              padding: '1rem 1.75rem', 
-              backgroundColor: 'var(--bg-tertiary)', 
-              borderTop: '1px solid var(--border-subtle)',
-              display: 'flex', 
-              justifyContent: 'flex-end', 
-              gap: '0.75rem' 
-            }}>
+            <div className="dialog-footer">
               {dialogState.mode === 'confirm' && (
                 <button 
                   type="button" 
                   className="btn-secondary" 
                   onClick={handleCancel}
-                  style={{ minWidth: 84, padding: '0.6rem 1.15rem', fontSize: '0.875rem' }}
+                  style={{ minWidth: 78, padding: '0.55rem 1rem', fontSize: '0.85rem' }}
                 >
                   {dialogState.cancelText || '취소'}
                 </button>

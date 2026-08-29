@@ -90,7 +90,7 @@ export default function TrashPreviewModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9500 }}>
       <div 
-        className="modal-content trash-preview-modal-content" 
+        className="modal-content trash-preview-modal-content modal-self-padded" 
         onClick={e => e.stopPropagation()} 
         style={{
           width: '94vw',

@@ -364,7 +364,7 @@ export default function SemanticSearchModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
       <div 
-        className="modal-content" 
+        className="modal-content modal-self-padded" 
         onClick={e => e.stopPropagation()}
         style={{
           maxWidth: 680,

@@ -98,7 +98,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
       <div
-        className="modal-content version-history-modal"
+        className="modal-content version-history-modal modal-self-padded"
         onClick={e => e.stopPropagation()}
         style={{ maxWidth: 720, width: '90vw', height: '80vh', display: 'flex', flexDirection: 'column', padding: 0 }}
       >

@@ -129,7 +129,7 @@ export default function MediaPreviewModal({
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100, backgroundColor: 'rgba(0, 0, 0, 0.85)' }}>
       <div 
-        className="modal-content media-preview-content" 
+        className="modal-content media-preview-content modal-self-padded" 
         onClick={e => e.stopPropagation()} 
         style={{ 
           maxWidth: isVideo || isPdf ? 960 : 880, 
