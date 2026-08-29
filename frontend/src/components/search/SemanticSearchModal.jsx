@@ -489,7 +489,7 @@ export default function SemanticSearchModal({
                         fontSize: '0.75rem',
                         fontWeight: datePreset === p.id ? 700 : 500,
                         backgroundColor: datePreset === p.id ? 'var(--accent-primary)' : 'var(--bg-card)',
-                        color: datePreset === p.id ? '#fff' : 'var(--text-secondary)',
+                        color: datePreset === p.id ? 'var(--on-accent)' : 'var(--text-secondary)',
                         border: '1px solid var(--border-subtle)',
                         borderRadius: 4,
                         cursor: 'pointer'

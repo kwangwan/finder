@@ -143,7 +143,7 @@ export default function MoveFilesModal({
                 padding: '0.55rem 0.75rem',
                 borderRadius: 'var(--radius-sm)',
                 background: selectedTargetId === null ? 'var(--accent-primary)' : 'transparent',
-                color: selectedTargetId === null ? '#fff' : 'var(--text-primary)',
+                color: selectedTargetId === null ? 'var(--on-accent)' : 'var(--text-primary)',
                 cursor: 'pointer',
                 fontSize: '0.85rem',
                 fontWeight: 600,
@@ -174,7 +174,7 @@ export default function MoveFilesModal({
                     paddingLeft: `${12 + indentPadding}px`,
                     borderRadius: 'var(--radius-sm)',
                     background: isSelected ? 'var(--accent-primary)' : 'transparent',
-                    color: isSelected ? '#fff' : 'var(--text-primary)',
+                    color: isSelected ? 'var(--on-accent)' : 'var(--text-primary)',
                     cursor: 'pointer',
                     fontSize: '0.84rem',
                     fontWeight: isSelected ? 600 : 500,
@@ -184,7 +184,7 @@ export default function MoveFilesModal({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                     <FolderIcon 
                       size={15} 
-                      color={isSelected ? '#fff' : folder.color || 'var(--accent-primary)'} 
+                      color={isSelected ? 'var(--on-accent)' : folder.color || 'var(--accent-primary)'}
                       style={{ flexShrink: 0 }} 
                     />
                     <span title={folder.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

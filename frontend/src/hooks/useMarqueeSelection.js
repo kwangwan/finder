@@ -65,8 +65,9 @@ export function useMarqueeSelection({ containerRef, onChange, onClearSelection, 
     if (!container) return;
     // Only empty space starts a band. Pressing on a card must stay available
     // for click-to-open and for HTML5 drag-and-drop, which a marquee would
-    // otherwise swallow.
-    if (e.target.closest('[data-select-id], button, a, input, select, textarea, [role="button"]')) return;
+    // otherwise swallow — and a floating overlay that merely sits above the
+    // grid is not empty space either.
+    if (e.target.closest('[data-select-id], button, a, input, select, textarea, [role="button"], .batch-floating-bar')) return;
 
     stateRef.current = {
       startX: e.clientX,
@@ -76,12 +77,29 @@ export function useMarqueeSelection({ containerRef, onChange, onClearSelection, 
       scroller: findScrollParent(container),
       pointerY: e.clientY,
     };
+    stateRef.current.startScrollTop = stateRef.current.scroller?.scrollTop ?? 0;
+
+    // Where the drag started, in viewport coordinates, right now.
+    //
+    // The band is drawn in viewport space but anchored to *content*: as the
+    // list scrolls under the pointer, the anchor has to travel with the row it
+    // was placed on. Derived from how far the scroller has actually moved
+    // since the press rather than accumulated per frame — a running total
+    // drifts the moment a scroll is clamped at either end, which is what left
+    // the band the wrong shape after dragging to the bottom and back up. This
+    // also keeps it correct if anything else scrolls the list mid-drag.
+    const anchorY = () => {
+      const st = stateRef.current;
+      const scroller = st?.scroller;
+      if (!scroller) return st.startY;
+      return st.startY - (scroller.scrollTop - st.startScrollTop);
+    };
 
     const bandFrom = (x, y) => ({
       left: Math.min(stateRef.current.startX, x),
       right: Math.max(stateRef.current.startX, x),
-      top: Math.min(stateRef.current.startY, y),
-      bottom: Math.max(stateRef.current.startY, y),
+      top: Math.min(anchorY(), y),
+      bottom: Math.max(anchorY(), y),
     });
 
     let raf = null;
@@ -102,10 +120,6 @@ export function useMarqueeSelection({ containerRef, onChange, onClearSelection, 
 
       if (delta) {
         scroller.scrollTop += delta;
-        // The band is in viewport coordinates, so scrolling moves the content
-        // under a fixed anchor: shift the anchor by the same amount to keep
-        // the band covering the region the user actually dragged over.
-        st.startY -= delta;
         const band = bandFrom(st.pointerX ?? st.startX, st.pointerY);
         setRect(band);
         applySelection(band);

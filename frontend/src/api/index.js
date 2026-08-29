@@ -564,7 +564,12 @@ export async function createFolder({ name, parent_id = null, workspace_id = null
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, parent_id, workspace_id, icon, color }),
   });
-  if (!res.ok) throw new Error('Failed to create folder');
+  // The server explains a refusal in the message a person should read — a
+  // folder limit, a permission — so pass it through instead of replacing it.
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `폴더를 만들지 못했습니다. (${res.status})`);
+  }
   return res.json();
 }
 
@@ -574,7 +579,10 @@ export async function updateFolder(folderId, { name, parent_id, workspace_id, ic
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, parent_id, workspace_id, icon, color }),
   });
-  if (!res.ok) throw new Error('Failed to update folder');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `폴더를 변경하지 못했습니다. (${res.status})`);
+  }
   return res.json();
 }
 

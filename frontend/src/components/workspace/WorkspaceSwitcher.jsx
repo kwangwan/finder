@@ -184,7 +184,7 @@ export default function WorkspaceSwitcher({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: isSelected ? '#fff' : 'var(--text-secondary)',
+                      color: isSelected ? 'var(--on-accent)' : 'var(--text-secondary)',
                       flexShrink: 0
                     }}>
                       <WsIcon size={13} />

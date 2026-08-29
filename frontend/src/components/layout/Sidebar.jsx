@@ -224,7 +224,11 @@ export default function Sidebar({
           ) : (
             <span style={{ width: 14 }} />
           )}
-          <FolderIcon size={16} color={folder.color || (isSelected ? '#3b82f6' : '#94a3b8')} />
+          {/* Only a folder the user actually gave a colour keeps a literal one.
+              The default has to come from the theme: hardcoding blue and slate
+              left every uncoloured folder in the sidebar rendering in a palette
+              no theme selected — plainly wrong against matrix's green on black. */}
+          <FolderIcon size={16} color={folder.color || (isSelected ? 'var(--accent-primary)' : 'var(--text-muted)')} />
           <span title={folder.name}>{folder.name}</span>
           {folder.file_count > 0 && (
             <span className="menu-badge" style={{ marginLeft: 0 }}>{folder.file_count}</span>

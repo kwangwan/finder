@@ -441,7 +441,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                 ['max_file_mb', '파일 하나 최대 크기', 'MB', null],
                 ['new_account_days', '신규 계정 기간', '일', '가입 후 이 기간에는 아래 한도가 적용됩니다.'],
                 ['new_account_daily_limit_mb', '신규 계정 하루 한도', 'MB', '기간이 지나면 자동으로 정상 한도가 됩니다.'],
-                ['alert_threshold_percent', '용량 경고 기준', '%', '이 비율을 넘으면 모든 관리자에게 메일을 보냅니다.'],
+                ['alert_threshold_percent', '용량 경고 기준', '%', '이 비율을 넘으면 모든 최고 관리자에게 메일을 보냅니다.'],
               ].map(([key, label, unit, hint]) => (
                 <div key={key}>
                   <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
@@ -766,7 +766,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                             is their entire account. */}
                         <td style={{ padding: '1rem 1rem' }}>
                           {user.is_admin ? (
-                            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>관리자</span>
+                            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>최고 관리자</span>
                           ) : (
                             <button
                               type="button"
@@ -852,7 +852,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 }}
                               >
                                 <ShieldCheck size={13} />
-                                <span>{user.is_admin ? '관리자 해제' : '관리자 지정'}</span>
+                                <span>{user.is_admin ? '최고 관리자 해제' : '최고 관리자 지정'}</span>
                               </button>
                             )}
 

@@ -165,7 +165,7 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
           alignItems: 'center',
           justifyContent: 'center',
           margin: '0 auto 1rem',
-          color: 'white',
+          color: 'var(--on-accent)',
           boxShadow: '0 8px 24px rgba(59, 130, 246, 0.4)'
         }}>
           <Sparkles size={28} />

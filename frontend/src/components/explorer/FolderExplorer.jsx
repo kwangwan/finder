@@ -150,37 +150,91 @@ export default function FolderExplorer({
     return { x: 0, y: 0 };
   });
   const barDragRef = useRef(null);
+  const barRef = useRef(null);
+
+  const persistBarOffset = (offset) => {
+    try { localStorage.setItem('kb_batchbar_offset', JSON.stringify(offset)); } catch (e) {}
+  };
+
+  /**
+   * Keep the whole bar inside the viewport.
+   *
+   * `anchor` is where the bar sits with no offset applied, measured from the
+   * element itself. The offset is then whatever moves it to a position where
+   * both edges are still on screen — so the limit follows the bar's real
+   * width, which changes with the selection text and with the breakpoint.
+   * A bar wider than the viewport is centred instead of pinned to one side.
+   */
+  const clampBarOffset = (want, anchor) => {
+    if (!anchor) return want;
+    const M = 8;
+    const fit = (v, base, size, extent) => {
+      const lo = M;
+      const hi = extent - M - size;
+      const pos = hi < lo ? (extent - size) / 2 : Math.min(Math.max(base + v, lo), hi);
+      return pos - base;
+    };
+    return {
+      x: fit(want.x, anchor.left, anchor.width, window.innerWidth),
+      y: fit(want.y, anchor.top, anchor.height, window.innerHeight),
+    };
+  };
+
+  // Measured with the current offset already applied, so subtracting it gives
+  // the un-offset anchor. Returns null while the bar is pinned by CSS on
+  // narrow screens (transform is disabled there — there is nothing to move).
+  const measureBarAnchor = () => {
+    const el = barRef.current;
+    if (!el || getComputedStyle(el).transform === 'none') return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      left: rect.left - barOffset.x,
+      top: rect.top - barOffset.y,
+      width: rect.width,
+      height: rect.height,
+    };
+  };
 
   const handleBarDragStart = (e) => {
+    // The bar floats above the grid but is still a descendant of it, so a press
+    // here would otherwise also start a marquee band underneath — and releasing
+    // it wipes the very selection the bar exists to act on.
+    e.stopPropagation();
     if (e.target.closest('button')) return;   // buttons stay clickable
+    const anchor = measureBarAnchor();
+    if (!anchor) return;                      // pinned full-width on narrow screens
     e.preventDefault();
     const point = e.touches ? e.touches[0] : e;
-    barDragRef.current = { startX: point.clientX, startY: point.clientY, originX: barOffset.x, originY: barOffset.y };
+    barDragRef.current = {
+      startX: point.clientX, startY: point.clientY,
+      originX: barOffset.x, originY: barOffset.y,
+      anchor,
+    };
 
     const move = (ev) => {
+      const drag = barDragRef.current;
+      if (!drag) return;
       const p = ev.touches ? ev.touches[0] : ev;
-      const next = {
-        x: barDragRef.current.originX + (p.clientX - barDragRef.current.startX),
-        y: barDragRef.current.originY + (p.clientY - barDragRef.current.startY),
-      };
-      // Kept within the viewport so it can never be dragged somewhere it
-      // cannot be reached again.
-      const limitX = Math.max(0, window.innerWidth / 2 - 80);
-      const limitY = Math.max(0, window.innerHeight - 140);
-      next.x = Math.max(-limitX, Math.min(limitX, next.x));
-      next.y = Math.max(-limitY, Math.min(60, next.y));
-      setBarOffset(next);
+      const dx = p.clientX - drag.startX;
+      const dy = p.clientY - drag.startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+      setBarOffset(clampBarOffset({ x: drag.originX + dx, y: drag.originY + dy }, drag.anchor));
     };
     const up = () => {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
       window.removeEventListener('touchmove', move);
       window.removeEventListener('touchend', up);
+      // Letting go anywhere but over the bar itself lands a click on whatever
+      // is underneath — which, over the grid, clears the very selection the
+      // bar was acting on. Swallow the click this drag produced.
+      if (barDragRef.current?.moved) {
+        const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+        window.addEventListener('click', swallow, { capture: true, once: true });
+        setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 250);
+      }
       barDragRef.current = null;
-      setBarOffset(prev => {
-        try { localStorage.setItem('kb_batchbar_offset', JSON.stringify(prev)); } catch (e) {}
-        return prev;
-      });
+      setBarOffset(prev => { persistBarOffset(prev); return prev; });
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -369,6 +423,33 @@ export default function FolderExplorer({
 
   const visibleFileIds = files.filter(f => !hiddenIds.has(f.id)).map(f => f.id);
   const selectedCount = selectedFileIds.length + selectedFolderIds.length;
+
+  // A position is remembered across sessions, so it can outlive the window it
+  // was chosen in: dragged to the right edge of a wide screen and reopened on
+  // a narrower one, it would otherwise sit entirely off-screen. Re-checked
+  // whenever the viewport or the bar's own width changes.
+  useEffect(() => {
+    if (selectedCount === 0) return undefined;
+    const recheck = () => {
+      if (barDragRef.current) return;         // the drag handler clamps its own
+      const anchor = measureBarAnchor();
+      if (!anchor) return;
+      const fixed = clampBarOffset(barOffset, anchor);
+      if (Math.abs(fixed.x - barOffset.x) > 0.5 || Math.abs(fixed.y - barOffset.y) > 0.5) {
+        setBarOffset(fixed);
+        persistBarOffset(fixed);
+      }
+    };
+    recheck();
+    window.addEventListener('resize', recheck);
+    const observer = barRef.current ? new ResizeObserver(recheck) : null;
+    if (observer && barRef.current) observer.observe(barRef.current);
+    return () => {
+      window.removeEventListener('resize', recheck);
+      observer?.disconnect();
+    };
+  }, [barOffset, selectedCount]);
+
   // The shared workspace's root belongs to nobody: it holds one folder per
   // person and nothing else. Offering upload or "new document" there would be
   // inviting an action the server refuses.
@@ -442,7 +523,12 @@ export default function FolderExplorer({
     kind === 'folder' ? clipboard.folderIds.includes(id) : clipboard.fileIds.includes(id)
   );
 
+  // The parts of the explorer that are controls rather than listing: pressing
+  // in the breadcrumb bar or the toolbar must not start a band.
+  const isChromeTarget = (target) => !!target?.closest?.('.explorer-header, .explorer-toolbar, .batch-floating-bar');
+
   const handleGridMouseDown = (e) => {
+    if (isChromeTarget(e.target)) return;
     marqueeBaseRef.current = { files: selectedFileIds, folders: selectedFolderIds };
     startMarquee(e);
   };
@@ -689,6 +775,16 @@ export default function FolderExplorer({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      // Band-select and the background menu belong to the whole listing area,
+      // not to the box the cards happen to occupy. Bound to the grid alone,
+      // neither worked in the page's side margins or in the empty space below
+      // the last row — which is exactly where a drag naturally starts.
+      onMouseDown={handleGridMouseDown}
+      onContextMenu={(e) => {
+        if (e.target.closest('[data-select-id]') || isChromeTarget(e.target)) return;
+        e.preventDefault();
+        if (onBackgroundContextMenu) onBackgroundContextMenu(e);
+      }}
     >
       {/* Download Floating Progress Bar */}
       {downloadProgress && (
@@ -1029,17 +1125,6 @@ export default function FolderExplorer({
         <div
           ref={gridAreaRef}
           className="explorer-grid-area"
-          onMouseDown={handleGridMouseDown}
-          // The background menu had a handler passed in from App but was never
-          // attached to anything, so right-clicking empty space did nothing at
-          // all. Bound here rather than on the explorer root so it covers the
-          // listing area without firing on the header and toolbar; the cards
-          // stop propagation and raise their own menus.
-          onContextMenu={(e) => {
-            if (e.target.closest('[data-select-id]')) return;
-            e.preventDefault();
-            if (onBackgroundContextMenu) onBackgroundContextMenu(e);
-          }}
         >
           {/* 1. Subfolders Section (Only in all/folder view) */}
           {activeView !== 'notes' && activeView !== 'favorites' && (isSharedRoot || sortedSubfolders.length > 0) && (
@@ -1503,6 +1588,7 @@ export default function FolderExplorer({
       {/* Floating Batch Action Bar */}
       {selectedCount > 0 && (
         <div
+          ref={barRef}
           className={`batch-floating-bar ${hasOpenWindows ? 'has-open-windows' : ''}`}
           onMouseDown={handleBarDragStart}
           onTouchStart={handleBarDragStart}

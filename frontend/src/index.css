@@ -1902,6 +1902,12 @@ h1, h2, h3, h4, h5, h6,
     bottom: 62px !important;
   }
 
+  /* The bar is pinned to the full width here, so it cannot be moved — the
+     grip would be an affordance for something that does nothing. */
+  .batch-bar-grip {
+    display: none !important;
+  }
+
   .transfer-manager-container {
     bottom: 0.85rem !important;
     right: 0.85rem !important;

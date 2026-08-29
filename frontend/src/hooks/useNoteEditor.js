@@ -43,7 +43,7 @@ const BN_THEME = {
     menu: { text: 'var(--text-primary)', background: 'var(--bg-secondary)' },
     tooltip: { text: 'var(--text-primary)', background: 'var(--bg-tertiary)' },
     hovered: { text: 'var(--text-primary)', background: 'var(--bg-tertiary)' },
-    selected: { text: '#ffffff', background: 'var(--accent-primary)' },
+    selected: { text: 'var(--on-accent)', background: 'var(--accent-primary)' },
     disabled: { text: 'var(--text-muted)', background: 'var(--bg-tertiary)' },
     shadow: 'var(--border-subtle)',
     border: 'var(--border-subtle)',

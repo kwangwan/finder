@@ -24,6 +24,7 @@ from app.services.access_service import access_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
+from app.services import folder_limit_service
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/folders", tags=["Folders"])
@@ -275,6 +276,8 @@ async def create_folder(
         if not workspace_id and parent.workspace_id:
             workspace_id = parent.workspace_id
 
+    await folder_limit_service.require_room(db, workspace_id, req.parent_id)
+
     folder = Folder(
         name=req.name,
         parent_id=req.parent_id,
@@ -320,6 +323,7 @@ async def update_folder(
     if "parent_id" in req.model_fields_set:
         if req.parent_id is None:
             await access_service.require_write_at(db, current_user, folder.workspace_id, None)
+            await folder_limit_service.require_room(db, folder.workspace_id, None)
             folder.parent_id = None
         else:
             if req.parent_id == folder_id:
@@ -352,6 +356,7 @@ async def update_folder(
             # The destination has to accept it as well; the check above only
             # covered taking it out of where it was.
             await access_service.require_write_at(db, current_user, folder.workspace_id, req.parent_id)
+            await folder_limit_service.require_room(db, folder.workspace_id, req.parent_id)
             folder.parent_id = req.parent_id
     if req.icon is not None:
         folder.icon = req.icon
@@ -454,6 +459,28 @@ async def restore_folder(
     return resp
 
 
+
+async def _descendant_folder_ids(db: AsyncSession, root_id: uuid.UUID) -> List[uuid.UUID]:
+    """
+    Every folder in the subtree, root first, breadth-first — so reversing it
+    gives deepest-first, which is the order a delete has to run in.
+
+    Trashed folders are included: a permanent delete has to take them too, or
+    they outlive the parent that held them.
+    """
+    seen = {root_id}
+    ordered = [root_id]
+    frontier = [root_id]
+    while frontier:
+        rows = (await db.execute(
+            select(Folder.id).where(Folder.parent_id.in_(frontier))
+        )).scalars().all()
+        frontier = [cid for cid in rows if cid not in seen]   # a cycle would otherwise spin here
+        seen.update(frontier)
+        ordered.extend(frontier)
+    return ordered
+
+
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_folder(
     folder_id: uuid.UUID, 
@@ -469,8 +496,17 @@ async def delete_folder(
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
 
-    # Find all files in this folder and clean up S3 objects and thumbnails
-    files_res = await db.execute(select(FileItem).where(FileItem.folder_id == folder_id))
+    # The whole subtree, not just this folder.
+    #
+    # Deleting only the folder itself left its subfolders behind — SQLAlchemy
+    # detaches the children it has loaded rather than letting the database
+    # cascade, so they resurfaced at the workspace root, still holding their
+    # files. In the shared workspace that root is meant to hold one folder per
+    # person and nothing else. Their storage was never reclaimed either, since
+    # nothing walked past the first level.
+    subtree_ids = await _descendant_folder_ids(db, folder_id)
+
+    files_res = await db.execute(select(FileItem).where(FileItem.folder_id.in_(subtree_ids)))
     files_to_delete = files_res.scalars().all()
     for f in files_to_delete:
         if f.s3_key:
@@ -492,7 +528,11 @@ async def delete_folder(
             bytes_freed=f.size_bytes or 0
         )
 
-    await db.delete(folder)
+    # Deepest first, so no row is ever left pointing at a parent that is gone.
+    for fid in reversed(subtree_ids):
+        node = await db.get(Folder, fid)
+        if node is not None:
+            await db.delete(node)
     await db.commit()
     return None
 
@@ -550,7 +590,10 @@ async def ensure_folder_path(
                 current_parent_id = existing.id
                 last_folder = existing
             else:
-                # Create new folder
+                # An uploaded tree creates folders the same way a person does,
+                # so it answers to the same ceiling — otherwise dropping one
+                # deep directory would walk straight past it.
+                await folder_limit_service.require_room(db, req.workspace_id, current_parent_id)
                 new_folder = Folder(
                     name=part,
                     workspace_id=req.workspace_id,

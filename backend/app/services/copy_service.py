@@ -12,6 +12,7 @@ from app.core.database import AsyncSessionLocal
 from app.models import CopyJob, DocumentChunk, FileItem, Folder, User
 from app.services.s3_service import s3_service, build_storage_key
 from app.services.quota_service import quota_service
+from app.services import folder_limit_service
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,13 @@ async def _copy_folder_recursive(
     counters: dict,
 ) -> None:
     if depth > MAX_COPY_DEPTH:
+        return
+
+    # The destination answers to the same ceiling a person creating folders by
+    # hand does. A copy that does not fit is skipped rather than aborted: the
+    # rest of the job is still worth doing, and the count is reported back.
+    if not await folder_limit_service.has_room(db, workspace_id, target_parent_id):
+        counters["skipped"] += 1
         return
 
     name = await _unique_copy_name(db, workspace_id, target_parent_id, src.name, is_folder=True) if rename else src.name
