@@ -1055,6 +1055,7 @@ export async function searchDocuments({
   start_date = null,
   end_date = null,
   limit = 10,
+  offset = 0,
   min_similarity = 0.2
 }) {
   const res = await fetch(`${API_BASE}/search`, {
@@ -1069,6 +1070,7 @@ export async function searchDocuments({
       start_date,
       end_date,
       limit,
+      offset,
       min_similarity
     }),
   });

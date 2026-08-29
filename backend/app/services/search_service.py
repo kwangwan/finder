@@ -10,6 +10,85 @@ from app.services.access_service import access_service
 
 class SearchService:
     @staticmethod
+    def _append_filters(sql: str, params: dict, req: SearchRequest, user_ws_ids, current_user, prefix: str) -> str:
+        """
+        Append the workspace-access and user-filter WHERE clauses shared by
+        every query in this service.
+
+        `prefix` namespaces the generated workspace bind parameters so two of
+        these clauses can coexist in one statement (the total-count query
+        UNIONs two of them) without colliding on :ws_0, :ws_1, ...
+        """
+        if req.workspace_id:
+            sql += " AND f.workspace_id = :workspace_id"
+            params["workspace_id"] = req.workspace_id
+        elif user_ws_ids is not None:
+            if user_ws_ids:
+                ws_params = {f"{prefix}ws_{i}": wid for i, wid in enumerate(user_ws_ids)}
+                placeholders = ", ".join(f":{prefix}ws_{i}" for i in range(len(user_ws_ids)))
+                sql += f" AND (f.workspace_id IN ({placeholders}) OR (f.workspace_id IS NULL AND f.created_by = :current_user_id))"
+                params.update(ws_params)
+                params["current_user_id"] = current_user.id
+            else:
+                sql += " AND (f.workspace_id IS NULL AND f.created_by = :current_user_id)"
+                params["current_user_id"] = current_user.id
+
+        if req.folder_id:
+            sql += " AND f.folder_id = :folder_id"
+            params["folder_id"] = req.folder_id
+        if req.file_type:
+            sql += " AND f.file_type = :file_type"
+            params["file_type"] = req.file_type
+        if req.author_id:
+            sql += " AND f.created_by = :author_id"
+            params["author_id"] = req.author_id
+        if req.start_date:
+            sql += " AND f.created_at >= :start_date"
+            params["start_date"] = req.start_date
+        if req.end_date:
+            sql += " AND f.created_at <= :end_date"
+            params["end_date"] = req.end_date
+        return sql
+
+    async def _count_total_matches(self, db: AsyncSession, req: SearchRequest, user_ws_ids, current_user, vec_str) -> int:
+        """
+        Count the distinct files this query matches, independently of the
+        candidate pool actually fetched, so the UI can honestly say
+        "N개 중 M개 표시" and know whether a "더 보기" is worth offering.
+
+        Cheap here: the chunk table is small (only text-bearing documents are
+        embedded), and the file-name scan is a single pass over kb_files.
+        """
+        name_sql = "SELECT f.id AS fid FROM kb_files f WHERE f.is_trashed = FALSE AND f.name ILIKE :kw"
+        params = {"kw": f"%{req.query.strip()}%", "min_sim": req.min_similarity}
+        name_sql = self._append_filters(name_sql, params, req, user_ws_ids, current_user, "cn_")
+
+        chunk_conditions = ["c.content ILIKE :kw"] if req.include_keyword_match else []
+        if vec_str is not None:
+            chunk_conditions.append(f"(c.embedding IS NOT NULL AND 1 - (c.embedding <=> '{vec_str}'::vector) >= :min_sim)")
+
+        parts = []
+        if req.include_keyword_match:
+            parts.append(name_sql)
+        if chunk_conditions:
+            chunk_sql = (
+                "SELECT c.file_id AS fid FROM kb_document_chunks c "
+                "JOIN kb_files f ON c.file_id = f.id "
+                f"WHERE f.is_trashed = FALSE AND ({' OR '.join(chunk_conditions)})"
+            )
+            parts.append(self._append_filters(chunk_sql, params, req, user_ws_ids, current_user, "cc_"))
+
+        if not parts:
+            return 0
+
+        count_sql = f"SELECT COUNT(*) FROM (SELECT DISTINCT fid FROM ({' UNION '.join(parts)}) u) t"
+        try:
+            return int((await db.execute(text(count_sql), params)).scalar_one())
+        except Exception as e:
+            print(f"[Search Error] Total count failed: {e}")
+            return 0
+
+    @staticmethod
     def _create_snippet(content: str, query: str, max_length: int = 250) -> str:
         """Extract a highlighted snippet around query match or the first part of chunk."""
         if not content:
@@ -53,13 +132,20 @@ class SearchService:
         # 2. Generate query embedding
         query_vector = await embedding_service.get_embedding(req.query)
 
-        # Candidate pool limit to gather diverse document chunks
-        candidate_limit = max(req.limit * 5, 50)
+        # Candidate pool. Sized from offset+limit, not limit alone, because
+        # the merged result list is sliced by offset at the end: paging to
+        # offset=60 needs at least 60+limit ranked files to slice from. The
+        # x5 factor absorbs chunk→file dedupe (one document can occupy many
+        # of the top chunks, so N chunks yield fewer than N distinct files).
+        fetch_target = req.offset + req.limit
+        candidate_limit = max(fetch_target * 5, 100)
+
+        vec_str = None
 
         # 3. Semantic vector search if embedding is available
         if query_vector is not None:
             vec_str = "[" + ",".join(str(x) for x in query_vector) + "]"
-            
+
             query_sql = f"""
                 SELECT 
                     c.id as chunk_id,
@@ -87,37 +173,7 @@ class SearchService:
             """
             
             params = {"min_sim": req.min_similarity, "limit": candidate_limit}
-            
-            if req.workspace_id:
-                query_sql += " AND f.workspace_id = :workspace_id"
-                params["workspace_id"] = req.workspace_id
-            elif user_ws_ids is not None:
-                if user_ws_ids:
-                    ws_params = {f"ws_{i}": wid for i, wid in enumerate(user_ws_ids)}
-                    ws_placeholders = ", ".join(f":ws_{i}" for i in range(len(user_ws_ids)))
-                    query_sql += f" AND (f.workspace_id IN ({ws_placeholders}) OR (f.workspace_id IS NULL AND f.created_by = :current_user_id))"
-                    params.update(ws_params)
-                    params["current_user_id"] = current_user.id
-                else:
-                    query_sql += " AND (f.workspace_id IS NULL AND f.created_by = :current_user_id)"
-                    params["current_user_id"] = current_user.id
-
-            if req.folder_id:
-                query_sql += " AND f.folder_id = :folder_id"
-                params["folder_id"] = req.folder_id
-            if req.file_type:
-                query_sql += " AND f.file_type = :file_type"
-                params["file_type"] = req.file_type
-            if req.author_id:
-                query_sql += " AND f.created_by = :author_id"
-                params["author_id"] = req.author_id
-            if req.start_date:
-                query_sql += " AND f.created_at >= :start_date"
-                params["start_date"] = req.start_date
-            if req.end_date:
-                query_sql += " AND f.created_at <= :end_date"
-                params["end_date"] = req.end_date
-
+            query_sql = self._append_filters(query_sql, params, req, user_ws_ids, current_user, "s_")
             query_sql += " ORDER BY similarity DESC LIMIT :limit;"
 
             try:
@@ -196,38 +252,10 @@ class SearchService:
                   AND f.name ILIKE :kw
             """
             name_params = {"kw": name_term, "limit": candidate_limit}
-
-            if req.workspace_id:
-                name_sql += " AND f.workspace_id = :workspace_id"
-                name_params["workspace_id"] = req.workspace_id
-            elif user_ws_ids is not None:
-                if user_ws_ids:
-                    ws_params = {f"n_ws_{i}": wid for i, wid in enumerate(user_ws_ids)}
-                    ws_placeholders = ", ".join(f":n_ws_{i}" for i in range(len(user_ws_ids)))
-                    name_sql += f" AND (f.workspace_id IN ({ws_placeholders}) OR (f.workspace_id IS NULL AND f.created_by = :current_user_id))"
-                    name_params.update(ws_params)
-                    name_params["current_user_id"] = current_user.id
-                else:
-                    name_sql += " AND (f.workspace_id IS NULL AND f.created_by = :current_user_id)"
-                    name_params["current_user_id"] = current_user.id
-
-            if req.folder_id:
-                name_sql += " AND f.folder_id = :folder_id"
-                name_params["folder_id"] = req.folder_id
-            if req.file_type:
-                name_sql += " AND f.file_type = :file_type"
-                name_params["file_type"] = req.file_type
-            if req.author_id:
-                name_sql += " AND f.created_by = :author_id"
-                name_params["author_id"] = req.author_id
-            if req.start_date:
-                name_sql += " AND f.created_at >= :start_date"
-                name_params["start_date"] = req.start_date
-            if req.end_date:
-                name_sql += " AND f.created_at <= :end_date"
-                name_params["end_date"] = req.end_date
-
-            name_sql += " LIMIT :limit;"
+            name_sql = self._append_filters(name_sql, name_params, req, user_ws_ids, current_user, "n_")
+            # Deterministic order so the same file can't drift between pages
+            # as the pool grows (name is not unique here, hence the id).
+            name_sql += " ORDER BY f.name ASC, f.id ASC LIMIT :limit;"
 
             try:
                 name_res = await db.execute(text(name_sql), name_params)
@@ -306,38 +334,8 @@ class SearchService:
                   AND (c.content ILIKE :kw OR f.name ILIKE :kw)
             """
             kw_params = {"kw": keyword_term, "limit": candidate_limit}
-            
-            if req.workspace_id:
-                kw_sql += " AND f.workspace_id = :workspace_id"
-                kw_params["workspace_id"] = req.workspace_id
-            elif user_ws_ids is not None:
-                if user_ws_ids:
-                    ws_params = {f"k_ws_{i}": wid for i, wid in enumerate(user_ws_ids)}
-                    ws_placeholders = ", ".join(f":k_ws_{i}" for i in range(len(user_ws_ids)))
-                    kw_sql += f" AND (f.workspace_id IN ({ws_placeholders}) OR (f.workspace_id IS NULL AND f.created_by = :current_user_id))"
-                    kw_params.update(ws_params)
-                    kw_params["current_user_id"] = current_user.id
-                else:
-                    kw_sql += " AND (f.workspace_id IS NULL AND f.created_by = :current_user_id)"
-                    kw_params["current_user_id"] = current_user.id
-
-            if req.folder_id:
-                kw_sql += " AND f.folder_id = :folder_id"
-                kw_params["folder_id"] = req.folder_id
-            if req.file_type:
-                kw_sql += " AND f.file_type = :file_type"
-                kw_params["file_type"] = req.file_type
-            if req.author_id:
-                kw_sql += " AND f.created_by = :author_id"
-                kw_params["author_id"] = req.author_id
-            if req.start_date:
-                kw_sql += " AND f.created_at >= :start_date"
-                kw_params["start_date"] = req.start_date
-            if req.end_date:
-                kw_sql += " AND f.created_at <= :end_date"
-                kw_params["end_date"] = req.end_date
-                
-            kw_sql += " LIMIT :limit;"
+            kw_sql = self._append_filters(kw_sql, kw_params, req, user_ws_ids, current_user, "k_")
+            kw_sql += " ORDER BY c.file_id, c.chunk_index LIMIT :limit;"
 
             try:
                 kw_res = await db.execute(text(kw_sql), kw_params)
@@ -372,16 +370,34 @@ class SearchService:
             except Exception as e:
                 print(f"[Search Error] Keyword search failed: {e}")
 
-        # Convert to list and sort results by similarity score descending
+        # Convert to list and sort results by similarity score descending.
+        # file_id is the tiebreaker: scores collide constantly here (every
+        # plain filename match is 0.9, every content keyword match 0.85), and
+        # without a deterministic secondary key the order of tied items could
+        # differ between the request for one page and the request for the
+        # next — putting the same file on two pages while another never
+        # appears, the same defect that OFFSET pagination hit in list_files.
         results = list(best_by_file.values())
-        results.sort(key=lambda x: x.similarity_score, reverse=True)
+        results.sort(key=lambda x: (-x.similarity_score, str(x.file_id)))
+
+        total_results = await self._count_total_matches(db, req, user_ws_ids, current_user, vec_str)
+        page = results[req.offset:req.offset + req.limit]
+        # Fall back to the pool size if the count query failed, so "has_more"
+        # never claims there is nothing left purely because counting broke.
+        total_results = max(total_results, req.offset + len(page))
+
         duration_ms = (time.time() - start_time) * 1000.0
 
         return SearchResponse(
             query=req.query,
-            total_results=len(results),
-            results=results[:req.limit],
-            duration_ms=round(duration_ms, 2)
+            total_results=total_results,
+            results=page,
+            duration_ms=round(duration_ms, 2),
+            offset=req.offset,
+            # Only claim more exists when this page was actually full — a
+            # short page means the ranked pool is exhausted, whatever the
+            # count says.
+            has_more=len(page) == req.limit and (req.offset + len(page)) < total_results
         )
 
 search_service = SearchService()

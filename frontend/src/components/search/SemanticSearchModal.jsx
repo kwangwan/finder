@@ -58,6 +58,12 @@ const NAME_ONLY_FILE_TYPES = FILE_TYPE_FILTERS
   .filter(f => f.semanticSupported === false)
   .map(f => f.id);
 
+// Results load a page at a time as the list is scrolled. Kept modest so the
+// first page renders fast — a broad filename query can match thousands of
+// files, and dumping all of them into the modal at once is both slow and
+// unusable.
+const PAGE_SIZE = 30;
+
 const DATE_PRESETS = [
   { id: 'all', label: '전체 기간' },
   { id: '7d', label: '최근 7일' },
@@ -82,9 +88,21 @@ export default function SemanticSearchModal({
   const [durationMs, setDurationMs] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showOptions, setShowOptions] = useState(false);
+  const [totalResults, setTotalResults] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
+  const resultsScrollRef = useRef(null);
+  const sentinelRef = useRef(null);
+  // The search parameters the currently-displayed results came from. Held in
+  // a ref so the scroll observer can load the next page without being torn
+  // down and rebuilt every time a filter changes.
+  const activeSearchRef = useRef(null);
+  // Guards against the observer firing again for the same page while a fetch
+  // is already in flight (state updates lag the scroll events).
+  const isFetchingRef = useRef(false);
 
   // Focus on open & reset
   useEffect(() => {
@@ -94,6 +112,8 @@ export default function SemanticSearchModal({
     } else {
       setQuery('');
       setResults([]);
+      setTotalResults(0);
+      setHasMore(false);
     }
   }, [isOpen]);
 
@@ -117,33 +137,98 @@ export default function SemanticSearchModal({
   // Handle Search API
   const performSearch = async (searchQuery, targetFolder, targetType, targetDatePreset, simThreshold) => {
     if (!searchQuery || !searchQuery.trim()) {
+      activeSearchRef.current = null;
       setResults([]);
+      setTotalResults(0);
+      setHasMore(false);
       setIsLoading(false);
       return;
     }
 
+    const criteria = {
+      query: searchQuery.trim(),
+      workspace_id: activeWorkspaceId || null,
+      folder_id: targetFolder || null,
+      file_type: targetType || null,
+      start_date: getDateRange(targetDatePreset),
+      min_similarity: simThreshold
+    };
+    activeSearchRef.current = criteria;
+
+    isFetchingRef.current = true;
     setIsLoading(true);
     try {
-      const startDate = getDateRange(targetDatePreset);
-
-      const data = await searchDocuments({
-        query: searchQuery.trim(),
-        workspace_id: activeWorkspaceId || null,
-        folder_id: targetFolder || null,
-        file_type: targetType || null,
-        start_date: startDate,
-        min_similarity: simThreshold,
-        limit: 15
-      });
+      const data = await searchDocuments({ ...criteria, limit: PAGE_SIZE, offset: 0 });
+      // A slower earlier request must not overwrite the results of a newer
+      // one — the query box is debounced, not serialised.
+      if (activeSearchRef.current !== criteria) return;
       setResults(data.results || []);
+      setTotalResults(data.total_results || 0);
+      setHasMore(!!data.has_more);
       setDurationMs(data.duration_ms || 0);
       setSelectedIndex(0);
+      resultsScrollRef.current?.scrollTo({ top: 0 });
     } catch (err) {
       console.error('Search error:', err);
     } finally {
-      setIsLoading(false);
+      if (activeSearchRef.current === criteria) setIsLoading(false);
+      isFetchingRef.current = false;
     }
   };
+
+  // Fetch the next page and append. Called by the scroll observer below.
+  const loadMore = async () => {
+    const criteria = activeSearchRef.current;
+    if (!criteria || isFetchingRef.current) return;
+
+    isFetchingRef.current = true;
+    setIsLoadingMore(true);
+    try {
+      const offset = results.length;
+      const data = await searchDocuments({ ...criteria, limit: PAGE_SIZE, offset });
+      if (activeSearchRef.current !== criteria) return; // filters changed mid-flight
+      const incoming = data.results || [];
+      setResults(prev => {
+        // Defensive de-dupe: appending blind would duplicate rows if a page
+        // ever overlapped, and React would then warn on duplicate keys.
+        const seen = new Set(prev.map(r => r.file_id));
+        return [...prev, ...incoming.filter(r => !seen.has(r.file_id))];
+      });
+      setTotalResults(data.total_results || 0);
+      setHasMore(!!data.has_more);
+    } catch (err) {
+      console.error('Search load-more error:', err);
+      setHasMore(false); // don't let a failed page spin forever
+    } finally {
+      if (activeSearchRef.current === criteria) setIsLoadingMore(false);
+      isFetchingRef.current = false;
+    }
+  };
+
+  // Auto-load the next page when the sentinel scrolls into the results
+  // viewport. `root` is the results container, not the page — the list has
+  // its own scrollbar, so a viewport-relative observer would fire on the
+  // wrong element (or immediately, since the sentinel sits inside a short
+  // scrollable box that is itself fully on screen). rootMargin starts the
+  // fetch slightly before the sentinel is actually visible so the next page
+  // is usually already in place by the time the user reaches the bottom.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = resultsScrollRef.current;
+    if (!sentinel || !root || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some(e => e.isIntersecting)) loadMore();
+      },
+      { root, rootMargin: '150px' }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+    // results.length is a dependency because loadMore derives the next
+    // offset from it — without it the observer would keep re-requesting the
+    // same page after the first append.
+  }, [hasMore, results.length, isLoadingMore]);
 
   const handleQueryChange = (e) => {
     const val = e.target.value;
@@ -346,7 +431,7 @@ export default function SemanticSearchModal({
         )}
 
         {/* Results List */}
-        <div style={{ maxHeight: 380, overflowY: 'auto', padding: '0.5rem 0' }}>
+        <div ref={resultsScrollRef} style={{ maxHeight: 380, overflowY: 'auto', padding: '0.5rem 0' }}>
           {isLoading && (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
               지식 검색 중...
@@ -477,6 +562,29 @@ export default function SemanticSearchModal({
               </div>
             );
           })}
+
+          {/* Infinite scroll sentinel — the observer below loads the next
+              page as soon as this scrolls into view. Rendered only while
+              more results exist, so reaching the true end simply stops. */}
+          {!isLoading && hasMore && (
+            <div
+              ref={sentinelRef}
+              style={{
+                padding: '0.85rem',
+                textAlign: 'center',
+                fontSize: '0.75rem',
+                color: 'var(--text-muted)'
+              }}
+            >
+              {isLoadingMore ? '더 불러오는 중...' : ''}
+            </div>
+          )}
+
+          {!isLoading && !hasMore && results.length > 0 && totalResults > PAGE_SIZE && (
+            <div style={{ padding: '0.85rem', textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              모든 결과를 표시했습니다
+            </div>
+          )}
         </div>
 
         {/* Footer Meta */}
@@ -492,7 +600,14 @@ export default function SemanticSearchModal({
         }}>
           <div>
             {results.length > 0 ? (
-              <span>총 <strong>{results.length}</strong>개 결과 ({durationMs}ms)</span>
+              // Show how many of the real total are on screen — the total is
+              // now counted independently of what was fetched, so it no
+              // longer changes just because more results were loaded.
+              results.length < totalResults ? (
+                <span>총 <strong>{totalResults}</strong>개 중 <strong>{results.length}</strong>개 표시 ({durationMs}ms)</span>
+              ) : (
+                <span>총 <strong>{totalResults}</strong>개 결과 ({durationMs}ms)</span>
+              )
             ) : (
               <span>↑↓ 이동 · ↵ 선택 · ESC 닫기</span>
             )}
