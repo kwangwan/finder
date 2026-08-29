@@ -5409,17 +5409,17 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 
 /* ==========================================================================
-   일정 — boards and the workspace-wide task list
+   일정 — the board table
    ========================================================================== */
 
-/* A task is a card of two lines, not a row of a table.
-   Columns wide enough for a date range, two chips, names and two timestamps
-   cannot all fit in a window that the user is free to make narrow — the first
-   attempt was a six-column grid, and every column ended up too narrow to use.
-   The name and the two decisions that get changed most sit on the first line;
-   everything read rather than clicked sits on the second. */
+/* Laid out as a table that scrolls sideways with the name column pinned, the
+   way a board tool does it. The first attempt reflowed each task into a card
+   so nothing would overflow; that kept everything on screen but made the
+   columns impossible to compare down a page, and at narrow widths the name —
+   the one thing you always need — was the first thing squeezed out. Pinning
+   it and letting the rest scroll keeps both. */
 
-.board-pane {
+.bd-pane {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -5428,42 +5428,135 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   background: var(--bg-primary);
 }
 
-.board-scroll {
+.bd-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* The board's name is editable in place — it is the first thing a new board
+   needs and there was nowhere to do it. */
+.bd-title {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 1.02rem;
+  font-weight: 700;
+  font-family: inherit;
+}
+
+.bd-title:hover:not(:disabled) { border-color: var(--border-subtle); }
+.bd-title:focus {
+  border-color: var(--border-focus);
+  background: var(--bg-input, var(--bg-tertiary));
+  outline: none;
+}
+
+.bd-header-stat { flex-shrink: 0; font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
+.bd-header-done { color: var(--accent-emerald); }
+
+/* `.btn-primary` carries `flex: 1`, which in a flex header stretches this
+   across everything left over. */
+.bd-add-top {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 0.8rem;
+  font-size: 0.79rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bd-scroll {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 12px 14px 20px;
+  overflow: auto;
+  padding-bottom: 16px;
 }
 
-.board-list { display: flex; flex-direction: column; gap: 6px; }
+.bd-table { min-width: max-content; }
 
-.board-card {
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  padding: 8px 10px;
+.bd-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 38px;
 }
 
-.board-card.depth-1 { margin-left: 22px; background: var(--bg-secondary); }
-.board-card.open { border-color: var(--accent-primary); }
+.bd-row:hover:not(.bd-head) .bd-cell { background: var(--bg-card-hover); }
+.bd-row.is-open .bd-cell { background: var(--bg-tertiary); }
+.bd-row.is-dragging { opacity: 0.4; }
+.bd-row.is-drop { box-shadow: inset 0 2px 0 var(--accent-primary); }
+.bd-row.is-done .bd-name { text-decoration: line-through; color: var(--text-muted); }
 
-/* The left edge carries urgency, so a full board can be scanned without
-   reading a single date. */
-.board-card.tone-overdue { border-left-color: var(--accent-rose); }
-.board-card.tone-today   { border-left-color: var(--accent-amber); }
-.board-card.tone-soon    { border-left-color: var(--accent-amber); }
-.board-card.tone-done    { border-left-color: var(--accent-emerald); opacity: 0.72; }
-
-.board-card-top {
+.bd-cell {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  padding: 4px 10px;
+  background: var(--bg-primary);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
 }
 
-.board-twisty {
+/* Pinned. Without a solid background the scrolled columns show through it. */
+.bd-cell-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 300px;
+  min-width: 300px;
+  border-left: 3px solid transparent;
+  box-shadow: 2px 0 6px -4px rgba(0, 0, 0, 0.7);
+}
+
+/* Urgency on the pinned edge, so it is visible however far the table is
+   scrolled sideways. */
+.bd-cell-name.tone-overdue { border-left-color: var(--accent-rose); }
+.bd-cell-name.tone-today, .bd-cell-name.tone-soon { border-left-color: var(--accent-amber); }
+.bd-cell-name.tone-done { border-left-color: var(--accent-emerald); }
+
+.bd-cell-people { width: 108px; min-width: 108px; position: relative; }
+.bd-cell-select { width: 118px; min-width: 118px; padding: 0; }
+.bd-cell-period { width: 232px; min-width: 232px; }
+.bd-cell-stamp { width: 84px; min-width: 84px; font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 0.74rem; }
+.bd-cell-actions { width: 44px; min-width: 44px; justify-content: center; border-right: none; }
+
+.bd-head { position: sticky; top: 0; z-index: 4; }
+.bd-head .bd-cell {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-medium);
+  font-size: 0.71rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-height: 32px;
+}
+.bd-head .bd-cell-name { z-index: 5; }
+.bd-head .bd-cell-select { padding: 4px 10px; }
+
+.bd-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: grab;
+}
+
+.bd-row:hover .bd-grip { opacity: 0.75; }
+
+.bd-twisty {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5477,17 +5570,19 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   cursor: pointer;
 }
 
-.board-twisty.is-empty { cursor: default; }
+.bd-twisty.is-empty { cursor: default; }
+.bd-row.depth-1 .bd-cell-name { padding-left: 30px; }
 
-.board-name-btn {
-  flex: 0 1 auto;
+.bd-name {
+  flex: 1;
   min-width: 0;
   padding: 2px 0;
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   font-weight: 600;
+  font-family: inherit;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5495,127 +5590,166 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   cursor: pointer;
 }
 
-.board-name-btn:hover { color: var(--accent-primary); }
-.board-card.is-done .board-name-btn { text-decoration: line-through; color: var(--text-muted); }
+.bd-name:hover { color: var(--accent-primary); }
 
-.board-subcount {
+.bd-subcount {
   flex-shrink: 0;
   padding: 0 6px;
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: 0.67rem;
   font-weight: 700;
-  line-height: 1.5;
 }
 
-/* One chip style for both vocabularies. `appearance: none` because a native
-   select draws the platform's own background over a coloured pill. */
-.board-chip {
-  flex-shrink: 0;
-  min-width: 68px;
-  padding: 3px 8px;
-  border: 1px solid transparent;
+/* --- people -------------------------------------------------------------- */
+
+.bd-people {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
   border-radius: var(--radius-full);
-  font-size: 0.72rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.bd-people:disabled { cursor: default; }
+
+.bd-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -6px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--bg-primary);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.bd-avatar:first-child { margin-left: 0; }
+
+.bd-avatar.is-empty {
+  background: transparent;
+  border: 1px dashed var(--border-medium);
+  color: var(--text-muted);
+}
+
+.bd-avatar.is-more { background: var(--bg-tertiary); color: var(--text-secondary); }
+
+.bd-people-pop {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 6px;
+  z-index: 20;
+  min-width: 168px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.bd-people-pop button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 7px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.bd-people-pop button:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.bd-people-pop button.on { color: var(--accent-primary); font-weight: 700; }
+.bd-pop-name { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.bd-pop-empty { padding: 8px; font-size: 0.76rem; color: var(--text-muted); }
+
+/* --- status and priority ------------------------------------------------- */
+
+/* Solid and filling the whole cell, the way a board tool colours them: a board
+   is read by colour first, and a small outlined pill in a wide cell reads as
+   nothing at all from across a room. Tinted from the theme's own accents so a
+   remapped palette carries them with it. */
+.bd-pill {
+  width: 100%;
+  height: 100%;
+  min-height: 38px;
+  padding: 0 8px;
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
   font-weight: 700;
   font-family: inherit;
   text-align: center;
+  text-align-last: center;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
 }
 
-.board-chip:disabled { cursor: default; opacity: 0.7; }
-.board-chip.is-static { min-width: 0; cursor: default; }
+.bd-pill:disabled { cursor: default; }
 
-/* Tinted from the theme's own accents rather than from literal colours, so a
-   theme that remaps its palette — matrix turns amber into lime and cyan into
-   green — carries the chips with it instead of leaving blue and violet behind. */
-.board-chip.priority-urgent {
-  background: color-mix(in srgb, var(--accent-rose) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent-rose) 45%, transparent);
-  color: var(--accent-rose);
-}
-.board-chip.priority-high {
-  background: color-mix(in srgb, var(--accent-amber) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent-amber) 45%, transparent);
-  color: var(--accent-amber);
-}
-.board-chip.priority-normal { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-subtle); }
-.board-chip.priority-low    { background: var(--bg-tertiary); color: var(--text-muted); border-color: var(--border-subtle); }
+.bd-pill.priority-urgent { background: color-mix(in srgb, var(--accent-rose) 88%, black); color: #fff; }
+.bd-pill.priority-high   { background: color-mix(in srgb, var(--accent-amber) 88%, black); color: #fff; }
+.bd-pill.priority-normal { background: var(--bg-tertiary); color: var(--text-secondary); }
+.bd-pill.priority-low    { background: var(--bg-tertiary); color: var(--text-muted); }
 
-.board-chip.status-todo { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-subtle); }
-.board-chip.status-in_progress {
-  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
-  color: var(--accent-primary);
-}
-.board-chip.status-review {
-  background: color-mix(in srgb, var(--accent-cyan) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent-cyan) 45%, transparent);
-  color: var(--accent-cyan);
-}
-.board-chip.status-done {
-  background: color-mix(in srgb, var(--accent-emerald) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent-emerald) 45%, transparent);
-  color: var(--accent-emerald);
-}
-.board-chip.status-hold { background: var(--bg-tertiary); color: var(--text-muted); border-color: var(--border-medium); }
+.bd-pill.status-todo        { background: var(--bg-tertiary); color: var(--text-secondary); }
+.bd-pill.status-in_progress { background: color-mix(in srgb, var(--accent-primary) 88%, black); color: #fff; }
+.bd-pill.status-review      { background: color-mix(in srgb, var(--accent-cyan) 82%, black); color: #fff; }
+.bd-pill.status-done        { background: color-mix(in srgb, var(--accent-emerald) 82%, black); color: #fff; }
+.bd-pill.status-hold        { background: color-mix(in srgb, var(--text-muted) 55%, var(--bg-tertiary)); color: var(--text-primary); }
 
-.board-card-actions {
+/* --- period -------------------------------------------------------------- */
+
+.bd-period {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.board-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 14px;
-  margin-top: 6px;
-  padding-left: 24px;
-  font-size: 0.74rem;
-  color: var(--text-muted);
-}
-
-.board-card.depth-1 .board-card-meta { padding-left: 24px; }
-
-.board-period, .board-meta-people {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-/* Read as a phrase; the inputs appear only once editing starts. */
-.board-period-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 6px 1px 4px;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   font-family: inherit;
   cursor: pointer;
 }
 
-.board-period-btn:hover:not(:disabled) {
-  border-color: var(--border-medium);
+.bd-period:hover:not(:disabled) { border-color: var(--border-medium); background: var(--bg-tertiary); }
+.bd-period:disabled { cursor: default; }
+.bd-period-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bd-remaining {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
   background: var(--bg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 
-.board-period-btn:disabled { cursor: default; }
+.bd-cell-period.due-overdue { color: var(--accent-rose); }
+.bd-cell-period.due-today, .bd-cell-period.due-soon { color: var(--accent-amber); }
+.bd-cell-period.due-done { color: var(--text-muted); }
 
-.board-period-edit { display: inline-flex; align-items: center; gap: 4px; }
+.bd-period-edit { display: inline-flex; align-items: center; gap: 4px; }
 
-.board-period-edit input[type="date"] {
-  padding: 1px 4px;
+.bd-period-edit input[type="date"] {
+  padding: 2px 4px;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-sm);
   background: var(--bg-input, var(--bg-tertiary));
@@ -5625,7 +5759,9 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-variant-numeric: tabular-nums;
 }
 
-.board-period-clear {
+.bd-dash { opacity: 0.6; }
+
+.bd-period-clear {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5639,107 +5775,86 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   cursor: pointer;
 }
 
-.board-period-clear:hover { color: var(--accent-rose); background: var(--bg-tertiary); }
+.bd-period-clear:hover { color: var(--accent-rose); background: var(--bg-tertiary); }
 
-.board-name-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* --- adding -------------------------------------------------------------- */
+
+.bd-draft .bd-cell { background: var(--bg-tertiary); }
+
+.bd-draft .bd-cell-name input {
   flex: 1;
   min-width: 0;
-}
-
-.board-period-dash { opacity: 0.6; }
-
-.board-remaining {
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  font-size: 0.69rem;
-  font-weight: 700;
-}
-
-.board-period.due-overdue { color: var(--accent-rose); }
-.board-period.due-today, .board-period.due-soon { color: var(--accent-amber); }
-
-.board-person {
-  padding: 1px 7px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 0.7rem;
-  white-space: nowrap;
-}
-
-.board-muted { color: var(--text-muted); }
-
-.board-meta-stamp {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  opacity: 0.85;
-}
-
-.board-draft { border-color: var(--accent-primary); }
-
-.board-draft-input {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--border-medium);
+  padding: 4px 7px;
+  border: 1px solid var(--accent-primary);
   border-radius: var(--radius-sm);
-  background: var(--bg-input, var(--bg-tertiary));
+  background: var(--bg-input, var(--bg-primary));
   color: var(--text-primary);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   font-family: inherit;
 }
 
-.board-draft-add { height: 28px; padding: 0 0.8rem; font-size: 0.76rem; flex-shrink: 0; }
-.board-draft-hint { padding-left: 24px; }
+.bd-draft-actions {
+  gap: 6px;
+  border-right: none;
+  position: sticky;
+  left: 300px;
+}
 
-.board-empty-row {
-  padding: 2rem 0.5rem;
+.bd-draft-actions button { height: 26px; padding: 0 0.7rem; font-size: 0.75rem; }
+.bd-draft-hint { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+
+/* Sits where the next sub-item will appear, so the button is where the row
+   comes from. Sticky-left so it stays reachable while scrolled sideways. */
+.bd-subadd, .bd-addrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px 10px 5px 34px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-family: inherit;
+  cursor: pointer;
+  position: sticky;
+  left: 0;
+}
+
+/* Shown under the task the pointer is on, or under one that already has
+   sub-items. Showing it under every task doubled the number of rows and made
+   the board twice as long to read. */
+.bd-subadd { padding-left: 52px; }
+.bd-subadd:hover, .bd-addrow:hover { color: var(--accent-primary); background: var(--bg-card-hover); }
+.bd-addrow { font-weight: 600; }
+
+.bd-empty-row {
+  padding: 2.4rem 1rem;
   text-align: center;
   color: var(--text-muted);
   font-size: 0.83rem;
+  position: sticky;
+  left: 0;
 }
 
-.board-add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 10px;
-  padding: 7px 14px;
-  border: 1px dashed var(--border-medium);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.81rem;
-  font-weight: 600;
-  cursor: pointer;
-}
+.bd-readonly { padding: 10px 14px; font-size: 0.78rem; color: var(--text-muted); position: sticky; left: 0; }
 
-.board-add-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
-
-.board-readonly-note { margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); }
-
-.board-empty {
+.bd-empty {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 140px;
+  min-height: 160px;
   color: var(--text-muted);
   font-size: 0.83rem;
 }
 
 /* --- one task, opened ---------------------------------------------------- */
 
-/* Splits the window rather than covering it: the card being edited stays
-   visible above, which is what says which task these fields belong to. */
 .board-detail {
   flex-shrink: 0;
-  max-height: 58%;
+  max-height: 56%;
   display: flex;
   flex-direction: column;
   border-top: 2px solid var(--accent-primary);
@@ -5789,26 +5904,10 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .board-detail-error { color: var(--accent-rose); font-weight: 700; }
 
-.board-detail-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px;
-}
-
-.board-detail-fields label {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
+.board-detail-fields { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; }
+.board-detail-fields label { display: flex; flex-direction: column; gap: 5px; }
 .board-detail-fields label > span,
-.board-detail-label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-
+.board-detail-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); }
 .board-detail-period { display: inline-flex; align-items: center; gap: 5px; }
 
 .board-detail-fields input[type="date"] {
@@ -5822,6 +5921,18 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-variant-numeric: tabular-nums;
 }
 
+.board-detail-fields .board-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
 .board-detail-stamps {
   display: flex;
   flex-wrap: wrap;
@@ -5832,13 +5943,12 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .board-detail-people { padding: 0 12px 12px; }
-
 .board-people-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 
 .board-person-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   padding: 4px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
@@ -5856,15 +5966,10 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .board-person-toggle:disabled { cursor: default; opacity: 0.6; }
-
+.board-muted { color: var(--text-muted); }
 .board-detail-notes { padding: 0 12px 14px; }
 
-.board-detail-label-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
+.board-detail-label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 
 .board-attach-btn {
   margin-left: auto;
@@ -5882,6 +5987,12 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   background: var(--bg-primary);
   min-height: 150px;
   padding: 4px 0;
+}
+
+@media (max-width: 640px) {
+  .bd-cell-name { width: 200px; min-width: 200px; }
+  .bd-draft-actions { left: 200px; }
+  .board-detail { max-height: 72%; }
 }
 
 /* --- the workspace-wide list -------------------------------------------- */
@@ -6019,4 +6130,142 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   .board-card-meta, .board-draft-hint { padding-left: 0; }
   .board-period input[type="date"] { width: 106px; }
   .board-detail { max-height: 72%; }
+}
+
+/* --- 일정 알림 설정 ------------------------------------------------------- */
+
+.digest-modal { max-width: 520px; padding: 0; }
+
+.digest-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.digest-head h2 { flex: 1; font-size: 1rem; font-weight: 700; }
+
+.digest-intro {
+  margin: 0;
+  padding: 14px 16px 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  word-break: keep-all;
+}
+
+.digest-warn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 16px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  color: var(--accent-amber);
+  font-size: 0.77rem;
+}
+
+.digest-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.digest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  padding: 14px 16px 0;
+}
+
+.digest-grid label { display: flex; flex-direction: column; gap: 5px; }
+.digest-grid label > span:first-child,
+.digest-label { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
+.digest-grid small, .digest-horizons small {
+  font-size: 0.71rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  word-break: keep-all;
+}
+
+.digest-grid select {
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-input, var(--bg-tertiary));
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.digest-time { display: flex; gap: 6px; }
+.digest-time select { flex: 1; }
+
+.digest-horizons { display: flex; flex-direction: column; gap: 6px; padding: 16px 16px 0; }
+.digest-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.digest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.79rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.digest-chip.on {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.digest-chip:disabled { cursor: default; opacity: 0.6; }
+
+.digest-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.digest-actions .btn-secondary, .digest-actions .btn-primary {
+  height: 34px;
+  padding: 0 0.9rem;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.digest-spacer { flex: 1; }
+.digest-readonly { flex: 1; font-size: 0.78rem; color: var(--text-muted); }
+
+.schedule-head-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+
+@media (max-width: 520px) {
+  .digest-actions { flex-wrap: wrap; }
+  .digest-actions .btn-secondary, .digest-actions .btn-primary { flex: 1; justify-content: center; }
+  .digest-spacer { display: none; }
 }

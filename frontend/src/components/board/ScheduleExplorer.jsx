@@ -7,10 +7,12 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Settings,
   Folder as FolderIcon,
 } from '../../utils/icons';
 import { listWorkspaceTasks, getFileDetail } from '../../api';
-import { PRIORITIES, STATUSES, dueTone, periodText, shortStamp, fullStamp } from './BoardPane';
+import { PRIORITIES, STATUSES, dueTone, periodText, shortStamp, fullStamp, initialOf, colorForName } from './BoardPane';
+import DigestSettingsModal from './DigestSettingsModal';
 
 const PAGE_SIZE = 30;
 
@@ -22,7 +24,7 @@ const PAGE_SIZE = 30;
  * from inside any one board. Completed work is left out by default — it is
  * not outstanding, and including it would bury what is.
  */
-export default function ScheduleExplorer({ workspaceId, currentUser, onOpenBoard, refreshToken = 0 }) {
+export default function ScheduleExplorer({ workspaceId, workspaceName = '', currentUser, onOpenBoard, refreshToken = 0 }) {
   const [data, setData] = useState({ items: [], total: 0, page: 1, total_pages: 1 });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -33,6 +35,7 @@ export default function ScheduleExplorer({ workspaceId, currentUser, onOpenBoard
   const [mineOnly, setMineOnly] = useState(false);
   const [priority, setPriority] = useState('');
   const [status, setStatus] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Typing is debounced so a search does not fire a request per keystroke.
   useEffect(() => {
@@ -85,10 +88,16 @@ export default function ScheduleExplorer({ workspaceId, currentUser, onOpenBoard
           <h2>일정</h2>
           <span className="schedule-count">{data.total}건</span>
         </div>
-        <button type="button" className="btn-secondary" onClick={load} disabled={isLoading}>
-          <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
-          <span className="hide-mobile">새로고침</span>
-        </button>
+        <div className="schedule-head-actions">
+          <button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)} title="일정 알림 설정">
+            <Settings size={14} />
+            <span className="hide-mobile">알림 설정</span>
+          </button>
+          <button type="button" className="btn-secondary" onClick={load} disabled={isLoading}>
+            <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
+            <span className="hide-mobile">새로고침</span>
+          </button>
+        </div>
       </div>
 
       <div className="schedule-filters">
@@ -170,10 +179,14 @@ export default function ScheduleExplorer({ workspaceId, currentUser, onOpenBoard
                   <FolderIcon size={11} />
                   {task.board?.name || '(삭제된 일정)'}
                 </span>
-                <span className="schedule-people">
+                <span className="schedule-people" title={task.assignees.map((a) => a.name).join(', ')}>
                   {task.assignees.length === 0
                     ? <span className="board-muted">작업자 없음</span>
-                    : task.assignees.map((a) => <span key={a.id} className="board-person">{a.name}</span>)}
+                    : task.assignees.map((a) => (
+                      <span key={a.id} className="bd-avatar" style={{ background: colorForName(a.name) }}>
+                        {initialOf(a.name)}
+                      </span>
+                    ))}
                 </span>
                 <span className="board-meta-stamp" title={`만든 날 ${fullStamp(task.created_at)}`}>만듦 {shortStamp(task.created_at)}</span>
                 <span className="board-meta-stamp" title={`마지막 수정 ${fullStamp(task.updated_at)}`}>수정 {shortStamp(task.updated_at)}</span>
@@ -182,6 +195,13 @@ export default function ScheduleExplorer({ workspaceId, currentUser, onOpenBoard
           ))}
         </div>
       )}
+
+      <DigestSettingsModal
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
 
       {data.total_pages > 1 && (
         <div className="folder-pager">

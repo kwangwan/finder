@@ -123,6 +123,9 @@ async def lifespan(app: FastAPI):
         print(f"[{settings.APP_NAME}] Favorite backfill skipped: {e}")
 
     daily_alert_task = asyncio.create_task(_daily_storage_alert())
+    # Board deadline digests, at the minute each workspace's administrator set.
+    from app.services import board_digest_service
+    board_digest_task = asyncio.create_task(board_digest_service.digest_loop())
     deletion_service.start_worker()
     # A job left mid-flight by the previous shutdown is nobody's work now;
     # put it back on the queue before the worker starts draining.
@@ -134,6 +137,7 @@ async def lifespan(app: FastAPI):
     
     cleanup_task.cancel()
     daily_alert_task.cancel()
+    board_digest_task.cancel()
     await deletion_service.stop_worker()
     await copy_service.stop_worker()
     print(f"[{settings.APP_NAME}] Shutting down...")

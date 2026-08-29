@@ -1377,6 +1377,58 @@ export async function deleteBoardTask(fileId, taskId) {
   }
 }
 
+/**
+ * Set the order of one level of a board.
+ *
+ * The whole level goes in one call rather than nudging a single position:
+ * two people dragging at once would otherwise interleave into an order
+ * neither of them chose.
+ */
+export async function reorderBoardTasks(fileId, parentTaskId, taskIds) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/reorder`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ parent_task_id: parentTaskId || null, task_ids: taskIds }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `순서를 바꾸지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+/** When the daily deadline mail goes out, and by whose clock. */
+export async function getDigestSettings(workspaceId) {
+  const res = await fetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('알림 설정을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function saveDigestSettings(workspaceId, payload) {
+  const res = await fetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `설정을 저장하지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function sendTestDigest(workspaceId) {
+  const res = await fetch(`${API_BASE}/boards/digest-settings/test?workspace_id=${workspaceId}`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `보내지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
 /** Every task in a workspace, soonest deadline first then most important. */
 export async function listWorkspaceTasks({
   workspaceId, q = '', includeDone = false, assigneeId = null,

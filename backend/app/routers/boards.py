@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_approved_user
-from app.models import BoardTask, FileItem, Folder, User
+from app.models import BoardTask, FileItem, Folder, User, Workspace
 from app.models.board import (
     BOARD_FILE_TYPE,
     PRIORITIES,
@@ -18,6 +18,8 @@ from app.models.board import (
     STATUS_LABELS,
 )
 from app.services import board_service
+from app.services import board_digest_service
+from app.services.email_service import email_service
 from app.services.access_service import access_service
 
 router = APIRouter(prefix="/api/boards", tags=["boards"])
@@ -92,6 +94,89 @@ async def list_workspace_tasks(
         q=q, include_done=include_done, assignee_id=assignee_id,
         status=task_status, priority=priority, page=page, page_size=page_size,
     )
+
+
+class ReorderRequest(BaseModel):
+    parent_task_id: Optional[uuid.UUID] = None
+    task_ids: List[uuid.UUID]
+
+
+class DigestSettings(BaseModel):
+    enabled: Optional[bool] = None
+    utc_offset_hours: Optional[int] = None
+    send_hour: Optional[int] = None
+    send_minute: Optional[int] = None
+    horizons: Optional[List[str]] = None
+
+
+@router.get("/digest-settings")
+async def get_digest_settings(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    When the daily reminder goes out, and by whose clock.
+
+    Readable by anyone in the workspace — it is applied to them, so being told
+    "you will get a mail at 9" is the least the setting owes them — but only an
+    administrator may change it.
+    """
+    if not await access_service.is_workspace_member(db, current_user, workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+    config = await board_digest_service.get_settings(db, workspace_id)
+    return {
+        **config,
+        "can_edit": bool(current_user.is_admin),
+        "timezone_choices": board_digest_service.TIMEZONE_CHOICES,
+        "horizon_choices": [
+            {"value": k, "label": v} for k, v in board_digest_service.HORIZON_LABELS.items()
+        ],
+        "email_configured": email_service.is_ses_configured,   # a property, not a call
+    }
+
+
+@router.put("/digest-settings")
+async def put_digest_settings(
+    workspace_id: uuid.UUID,
+    req: DigestSettings,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="일정 알림 설정은 최고 관리자만 변경할 수 있습니다.")
+    if not await access_service.is_workspace_member(db, current_user, workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+    incoming = {k: v for k, v in req.model_dump().items() if v is not None}
+    return await board_digest_service.save_settings(db, workspace_id, incoming)
+
+
+@router.post("/digest-settings/test")
+async def send_test_digest(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Send the digest now, to the administrator asking for it.
+
+    A setting whose effect is invisible until tomorrow morning is one nobody
+    can check they got right.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="최고 관리자만 사용할 수 있습니다.")
+    workspace = await db.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="워크스페이스를 찾을 수 없습니다.")
+    config = await board_digest_service.get_settings(db, workspace_id)
+    per_user = await board_digest_service.collect_for_workspace(db, workspace_id, config)
+    entry = per_user.get(current_user.id)
+    if entry is None:
+        return {"sent": False, "reason": "본인에게 배정된 작업 중 설정한 기간에 해당하는 것이 없습니다."}
+    today = board_digest_service.local_today(config["utc_offset_hours"])
+    subject, html, text = board_digest_service.render_digest(workspace.name, entry, config, today)
+    ok = email_service.send_notification(current_user.email, f"[미리보기] {subject}", html, text)
+    return {"sent": bool(ok), "to": current_user.email}
 
 
 class BoardCreate(BaseModel):
@@ -280,6 +365,44 @@ async def update_task(
     by_task = await board_service.assignees_by_task(db, [task.id])
     names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
     return board_service.task_to_dict(task, names, by_task, include_detail=True)
+
+
+@router.put("/{file_id}/reorder")
+async def reorder_tasks(
+    file_id: uuid.UUID,
+    req: ReorderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Set the order of one level of the board in a single call.
+
+    The whole level is sent and renumbered together rather than nudging one
+    row's position: two people dragging at once would otherwise interleave
+    into an order neither of them chose, and a half-applied reorder is not
+    something anyone could look at and understand.
+    """
+    board = await board_service.get_board(db, file_id)
+    await _require_write(db, current_user, board)
+
+    conds = [BoardTask.file_id == file_id]
+    conds.append(
+        BoardTask.parent_task_id.is_(None) if req.parent_task_id is None
+        else BoardTask.parent_task_id == req.parent_task_id
+    )
+    siblings = (await db.execute(select(BoardTask).where(*conds))).scalars().all()
+    by_id = {t.id: t for t in siblings}
+
+    unknown = [tid for tid in req.task_ids if tid not in by_id]
+    if unknown:
+        raise HTTPException(status_code=400, detail="이 위치에 없는 작업이 포함되어 순서를 바꾸지 않았습니다.")
+    if len(set(req.task_ids)) != len(siblings):
+        raise HTTPException(status_code=400, detail="순서를 바꾸려면 같은 위치의 작업 전체를 보내야 합니다.")
+
+    for index, tid in enumerate(req.task_ids):
+        by_id[tid].position = (index + 1) * 100
+    await db.commit()
+    return {"reordered": len(req.task_ids)}
 
 
 @router.delete("/{file_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

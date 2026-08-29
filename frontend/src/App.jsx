@@ -2114,6 +2114,7 @@ export default function App() {
         {activeView === 'schedule' ? (
           <ScheduleExplorer
             workspaceId={activeWorkspace?.id}
+            workspaceName={activeWorkspace?.name || ''}
             currentUser={currentUser}
             refreshToken={scheduleRefreshToken}
             onOpenBoard={(boardFile) => windowManager.openWindow(boardFile)}

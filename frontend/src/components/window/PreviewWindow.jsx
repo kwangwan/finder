@@ -553,7 +553,11 @@ export default function PreviewWindow({
         ) : isBoard ? (
           // A board is a file like any other, so it opens the same way a
           // document does — moved, copied, trashed and found identically.
-          <BoardPane file={resolvedFile} onDirty={() => onUpdateWindowFile(id, { updated_at: new Date().toISOString() })} />
+          <BoardPane
+            file={resolvedFile}
+            onDirty={() => onUpdateWindowFile(id, { updated_at: new Date().toISOString() })}
+            onRenamed={(name) => onUpdateWindowFile(id, { name })}
+          />
         ) : isImage ? (
           <div 
             className="os-image-viewport"
