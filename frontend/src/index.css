@@ -3086,6 +3086,105 @@ h1, h2, h3, h4, h5, h6,
   background: #000;
 }
 
+/* ==========================================================================
+   Media (video) loading overlay
+
+   Built from theme tokens only. The previous version hardcoded a blue/purple
+   radial glow behind a circular badge with a continuously rotating icon,
+   which fought the matrix theme on two fronts: the palette clashed with its
+   green-on-black, and matrix squares off every corner globally
+   ([data-theme='matrix'] * { border-radius: 0 }) so the "circle" rendered as
+   a square sitting inside a still-round glow. The indicator here is a row of
+   bars that step discretely — rectangular by nature, no rotation, and it
+   reads correctly in every theme.
+   ========================================================================== */
+.media-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  /* Deliberately NOT --bg-primary: this scrim always sits over video, which
+     .os-video-viewport renders on black in every theme. Following the theme
+     background would wash the light theme out to a flat grey panel with the
+     frame behind it invisible. Media overlays stay dark; only the accent and
+     the matrix text override below follow the theme. */
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.media-loading-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 34px;
+}
+
+.media-loading-bars span {
+  display: block;
+  width: 7px;
+  height: 100%;
+  background: var(--accent-primary);
+  transform-origin: bottom center;
+  animation: mediaLoadingBar 1.1s infinite steps(4, end);
+}
+
+.media-loading-bars span:nth-child(2) { animation-delay: 0.14s; }
+.media-loading-bars span:nth-child(3) { animation-delay: 0.28s; }
+.media-loading-bars span:nth-child(4) { animation-delay: 0.42s; }
+
+/* steps() rather than a smooth ease keeps the motion blocky, which is what
+   makes the same indicator work for the pixel-art matrix theme. */
+@keyframes mediaLoadingBar {
+  0%, 100% { transform: scaleY(0.3); opacity: 0.45; }
+  50%      { transform: scaleY(1);   opacity: 1; }
+}
+
+/* Fixed light text because the scrim above is always dark — the light
+   theme's own --text-primary is near-black and would be unreadable here. */
+.media-loading-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+}
+
+.media-loading-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  color: #94a3b8;
+  max-width: 90%;
+}
+
+/* Matrix is monochrome green by design, so let its own text tokens through
+   instead of the neutral light greys — they're already light-on-black. */
+[data-theme='matrix'] .media-loading-title { color: var(--text-primary); }
+[data-theme='matrix'] .media-loading-meta { color: var(--accent-primary); }
+
+.media-loading-filename {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-loading-size {
+  font-weight: 600;
+  color: var(--accent-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-loading-bars span { animation: none; opacity: 0.8; }
+}
+
 .os-audio-viewport,
 .os-office-viewport {
   flex: 1;

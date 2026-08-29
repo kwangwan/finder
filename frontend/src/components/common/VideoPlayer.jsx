@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Film, Play, Download, AlertCircle, RefreshCw, Volume2, Sparkles } from '../../utils/icons';
+import { Film, Play, Download, AlertCircle, Volume2, Sparkles } from '../../utils/icons';
 import { getThumbnailUrl } from '../../api';
 
 export default function VideoPlayer({
@@ -109,79 +109,31 @@ export default function VideoPlayer({
         브라우저가 비디오 재생을 지원하지 않습니다.
       </video>
 
-      {/* Loading & Buffering Overlay */}
+      {/* Loading & Buffering Overlay.
+          Styled entirely from theme tokens (see .media-loading-* in
+          index.css) rather than the hardcoded blue/purple glow it used to
+          carry, which clashed badly with the matrix theme's green-on-black
+          palette. The indicator is a row of stepping bars instead of a
+          rotating icon inside a circle: matrix squares off every corner
+          globally, so the round glow and the circular badge came out as
+          mismatched squares there, and a smooth continuous spin reads wrong
+          against a pixel-art look. Bars are rectangular and step discretely,
+          so they suit matrix and the dark/light themes equally. */}
       {isLoading && !isError && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 2,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(7, 9, 14, 0.65)',
-            backdropFilter: 'blur(12px)',
-            pointerEvents: 'none',
-            transition: 'opacity 0.2s ease'
-          }}
-        >
-          {/* Animated Glowing Pulse */}
-          <div style={{ position: 'relative', width: 64, height: 64, marginBottom: '1rem' }}>
-            <div 
-              style={{
-                position: 'absolute',
-                inset: 0,
-                borderRadius: '50%',
-                background: 'radial-gradient(circle, rgba(59, 130, 246, 0.4) 0%, rgba(139, 92, 246, 0) 70%)',
-                animation: 'pulse 1.8s infinite ease-in-out'
-              }}
-            />
-            <div 
-              style={{
-                width: '100%',
-                height: '100%',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                border: '1px solid rgba(59, 130, 246, 0.35)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 0 20px rgba(59, 130, 246, 0.3)'
-              }}
-            >
-              <RefreshCw size={26} color="var(--accent-primary, #3b82f6)" className="spin-anim" />
-            </div>
+        <div className="media-loading-overlay">
+          <div className="media-loading-bars" aria-hidden="true">
+            <span /><span /><span /><span />
           </div>
 
-          <div style={{
-            fontSize: '0.92rem',
-            fontWeight: 700,
-            color: '#f8fafc',
-            marginBottom: '0.35rem',
-            letterSpacing: '-0.01em',
-            textShadow: '0 2px 8px rgba(0,0,0,0.8)'
-          }}>
-            동영상 스트리밍 로딩 중...
-          </div>
+          <div className="media-loading-title">동영상 스트리밍 로딩 중...</div>
 
           {file && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              fontSize: '0.76rem',
-              color: '#94a3b8'
-            }}>
-              <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {file.name}
-              </span>
+            <div className="media-loading-meta">
+              <span className="media-loading-filename">{file.name}</span>
               {file.size_bytes && (
                 <>
                   <span>•</span>
-                  <span style={{ fontWeight: 600, color: 'var(--accent-primary, #3b82f6)' }}>
-                    {formatFileSize(file.size_bytes)}
-                  </span>
+                  <span className="media-loading-size">{formatFileSize(file.size_bytes)}</span>
                 </>
               )}
             </div>
