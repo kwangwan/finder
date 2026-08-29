@@ -150,6 +150,12 @@ class AccessService:
         role = await self.get_workspace_role(db, user, workspace_id)
         return role in ("owner", "admin")
 
+    async def _is_shared_workspace(self, db: AsyncSession, workspace_id) -> bool:
+        if not workspace_id:
+            return False
+        ws = await db.get(Workspace, workspace_id)
+        return bool(ws and ws.is_shared)
+
     async def can_access_file(self, db: AsyncSession, user: User, file_id: uuid.UUID) -> bool:
         """Check if user can access the file via workspace membership."""
         if user.is_admin:
@@ -157,6 +163,23 @@ class AccessService:
         file_item = await db.get(FileItem, file_id)
         if not file_item:
             return False
+
+        # In the shared workspace, something in the trash is often there
+        # precisely because it should not have been shared — removed by an
+        # administrator, or by the uploader thinking better of it. Membership
+        # is enough to reach a live file there, but not one that has been taken
+        # down: only whoever uploaded it (so they can undo their own mistake)
+        # and administrators can still see it.
+        #
+        # Scoped to the shared workspace on purpose. A private or team
+        # workspace has a chosen set of members who already see each other's
+        # work, and hiding a teammate's deleted file from them would break
+        # recovering it — the exposure this guards against does not exist
+        # there.
+        if file_item.is_trashed and file_item.created_by != user.id:
+            if await self._is_shared_workspace(db, file_item.workspace_id):
+                return False
+
         if not file_item.workspace_id:
             # Legacy file without workspace — allow if user created it
             return file_item.created_by == user.id
@@ -169,6 +192,14 @@ class AccessService:
         folder = await db.get(Folder, folder_id)
         if not folder:
             return False
+
+        # Same rule as a trashed file, and likewise only in the shared
+        # workspace: a folder in the trash may hold, or be named, exactly what
+        # was taken down.
+        if folder.is_trashed and folder.created_by != user.id:
+            if await self._is_shared_workspace(db, folder.workspace_id):
+                return False
+
         if not folder.workspace_id:
             return folder.created_by == user.id
         return await self.is_workspace_member(db, user, folder.workspace_id)

@@ -113,6 +113,29 @@ async def get_trash(
     folder_conditions = [Folder.is_trashed == True]
     file_conditions = [FileItem.is_trashed == True]
 
+    # In the shared workspace the trash is per-person. Something in there is
+    # often there precisely because it should not have been shared — taken down
+    # by an administrator, or by the uploader thinking better of it — so
+    # listing it to every member would turn the trash into a gallery of exactly
+    # the material that was removed.
+    #
+    # Only the shared workspace. A private or team workspace has a chosen set
+    # of members who already see each other's work, and hiding a teammate's
+    # deleted file would break recovering it.
+    if not current_user.is_admin:
+        shared_ids = list(await access_service.get_shared_workspace_ids(db))
+        if shared_ids:
+            folder_conditions.append(or_(
+                Folder.workspace_id.is_(None),
+                Folder.workspace_id.notin_(shared_ids),
+                Folder.created_by == current_user.id,
+            ))
+            file_conditions.append(or_(
+                FileItem.workspace_id.is_(None),
+                FileItem.workspace_id.notin_(shared_ids),
+                FileItem.created_by == current_user.id,
+            ))
+
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
