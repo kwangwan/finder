@@ -23,6 +23,9 @@ class FolderUpdate(BaseModel):
 class FolderResponse(FolderBase):
     id: uuid.UUID
     created_by: Optional[uuid.UUID] = None
+    # Set on a personal folder in the shared workspace. The client needs it to
+    # know whose folder this is — only the owner is offered the share setting.
+    owner_user_id: Optional[uuid.UUID] = None
     is_trashed: bool = False
     trashed_at: Optional[datetime] = None
     created_at: datetime

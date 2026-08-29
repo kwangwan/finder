@@ -97,6 +97,8 @@ export default function FolderExplorer({
   workspaceId = null,
   isSharedWorkspace = false,
   canWrite = true,
+  uploaderFilter = null,
+  onFilterUploader,
   allFolders = [],
   hasOpenWindows = false,
   hasNewFiles = false,
@@ -885,6 +887,18 @@ export default function FolderExplorer({
         </div>
       )}
 
+      {uploaderFilter && (
+        <div className="uploader-filter-bar">
+          <span>
+            <strong>{uploaderFilter.name}</strong> 님이 올린 파일만 보고 있습니다.
+          </span>
+          <button type="button" onClick={() => onFilterUploader?.(null)}>
+            <X size={13} />
+            <span>필터 해제</span>
+          </button>
+        </div>
+      )}
+
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           {files.length > 0 && (
@@ -1460,9 +1474,19 @@ export default function FolderExplorer({
                       {isSharedWorkspace && file.creator_name && (
                         <>
                           <span>•</span>
-                          <span className="file-card-uploader" title={`올린 사람: ${file.creator_name}`}>
+                          <button
+                            type="button"
+                            className="file-card-uploader"
+                            title={`${file.creator_name} 님이 올린 파일만 보기`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onFilterUploader?.(
+                                uploaderFilter?.id === file.created_by ? null : { id: file.created_by, name: file.creator_name }
+                              );
+                            }}
+                          >
                             {file.creator_name}
-                          </span>
+                          </button>
                         </>
                       )}
                     </div>

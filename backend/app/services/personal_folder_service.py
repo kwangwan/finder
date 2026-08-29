@@ -148,7 +148,7 @@ async def list_grants(db: AsyncSession, folder_id):
         {
             "id": str(g.id),
             "user_id": str(u.id),
-            "name": u.name or u.email,
+            "name": u.username or u.name or u.email,
             "email": u.email,
             "created_at": g.created_at,
         }

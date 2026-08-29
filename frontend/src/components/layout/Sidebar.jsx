@@ -14,7 +14,8 @@ import {
   Layers,
   Settings,
   Trash2,
-  ChevronsLeft
+  ChevronsLeft,
+  Flag
 } from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
@@ -32,6 +33,8 @@ export default function Sidebar({
   onSelectFolder,
   activeView,
   onSelectView,
+  currentUser,
+  pendingReportCount = 0,
   onNewNote,
   onNewFolder,
   onOpenUpload,
@@ -343,6 +346,19 @@ export default function Sidebar({
           <Trash2 size={16} color="var(--accent-rose)" />
           <span>휴지통</span>
         </li>
+        {/* Administrators only: the queue of reported content. Kept in the
+            sidebar rather than inside the dashboard because it is worked
+            through while browsing, not while managing accounts. */}
+        {currentUser?.is_admin && (
+          <li
+            className={`menu-item ${activeView === 'reports' ? 'active' : ''}`}
+            onClick={() => onSelectView('reports')}
+          >
+            <Flag size={16} color={pendingReportCount > 0 ? 'var(--accent-rose)' : 'var(--text-muted)'} />
+            <span>신고 관리</span>
+            {pendingReportCount > 0 && <span className="menu-badge">{pendingReportCount}</span>}
+          </li>
+        )}
       </ul>
 
       {/* Folders Hierarchy Tree */}

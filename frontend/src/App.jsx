@@ -13,6 +13,9 @@ import WorkspaceSettingsModal from './components/workspace/WorkspaceSettingsModa
 import MediaPreviewModal from './components/modals/MediaPreviewModal';
 import InvitationManagerModal from './components/admin/InvitationManagerModal';
 import TrashExplorer from './components/trash/TrashExplorer';
+import ReportsExplorer from './components/admin/ReportsExplorer';
+import ReportModal from './components/modals/ReportModal';
+import FolderShareModal from './components/modals/FolderShareModal';
 import ContextMenu from './components/common/ContextMenu';
 import RenameModal from './components/modals/RenameModal';
 import MoveFilesModal from './components/modals/MoveFilesModal';
@@ -38,6 +41,8 @@ import {
   FileArchive,
   FolderInput,
   ExternalLink,
+  Flag,
+  Users,
   Scissors,
   Copy,
   ClipboardPaste
@@ -70,7 +75,8 @@ import {
   batchDownloadFiles,
   batchMoveFiles,
   batchCopyItems,
-  listFileIds
+  listFileIds,
+  getPendingReportCount
 } from './api';
 import { useDialog } from './context/DialogContext';
 import { useToast } from './context/ToastContext';
@@ -591,9 +597,20 @@ export default function App() {
   // Folders move one PUT each — there is no batch endpoint for them, and a
   // drag realistically carries one or a handful, not thousands like a file
   // multi-select can.
-  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null, { announce = true } = {}) => {
+  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null, { announce = true, undoable = true } = {}) => {
     if (!activeWorkspace?.id) return;
     if (!fileIds.length && !folderIds.length) return;
+
+    // Where each item is right now, captured before the move. A multi-select
+    // drag can pull items out of several different folders, so "put it back"
+    // has to mean the folder each one actually came from — a single origin
+    // would scatter them somewhere they never were.
+    const originById = new Map();
+    files.forEach((f) => { if (fileIds.includes(f.id)) originById.set(f.id, f.folder_id ?? null); });
+    const folderOrigins = folderIds.map((id) => {
+      const node = findFolderById(folders, id);
+      return { id, parentId: node?.parent_id ?? null };
+    });
 
     try {
       let movedFiles = 0;
@@ -612,6 +629,30 @@ export default function App() {
       if (movedFiles) parts.push(`파일 ${movedFiles}개`);
       if (folderIds.length) parts.push(`폴더 ${folderIds.length}개`);
       if (announce) showToast(`${parts.join(', ')}를 이동했습니다.`, { type: 'success' });
+
+      if (undoable) {
+        const wsId = activeWorkspace.id;
+        pushUndo({
+          label: '이동',
+          undo: async () => {
+            // Grouped by origin so each item returns to the folder it left,
+            // and issued as one request per origin rather than per file.
+            const byOrigin = new Map();
+            originById.forEach((origin, fileId) => {
+              const key = origin ?? '__root__';
+              if (!byOrigin.has(key)) byOrigin.set(key, { origin, ids: [] });
+              byOrigin.get(key).ids.push(fileId);
+            });
+            for (const { origin, ids } of byOrigin.values()) {
+              await batchMoveFiles(wsId, ids, origin);
+            }
+            for (const { id, parentId } of folderOrigins) {
+              await updateFolder(id, { parent_id: parentId });
+            }
+          },
+        });
+      }
+
       return { movedFiles, movedFolders: folderIds.length };
     } catch (err) {
       await showAlert({
@@ -631,7 +672,31 @@ export default function App() {
   // changed would otherwise keep displaying the old contents.
   const [windowRefreshToken, setWindowRefreshToken] = useState(0);
   const [queuedJobCount, setQueuedJobCount] = useState(0);
+  const [reportFile, setReportFile] = useState(null);
+  const [shareFolder, setShareFolder] = useState(null);
+  const [uploaderFilter, setUploaderFilter] = useState(null);
+  const [pendingReportCount, setPendingReportCount] = useState(0);
+
+  // The badge is what tells an administrator there is anything to look at, so
+  // it is refreshed on a slow interval rather than only on page load.
+  const refreshReportCount = useCallback(async () => {
+    if (!currentUser?.is_admin) { setPendingReportCount(0); return; }
+    try {
+      const res = await getPendingReportCount();
+      setPendingReportCount(res.pending || 0);
+    } catch (e) { /* best-effort */ }
+  }, [currentUser?.is_admin]);
+
+  useEffect(() => {
+    refreshReportCount();
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') refreshReportCount();
+    }, 60000);
+    return () => clearInterval(id);
+  }, [refreshReportCount]);
   const bumpWindowRefresh = useCallback(() => setWindowRefreshToken((n) => n + 1), []);
+
+
 
   /**
    * The one path every move/copy goes through, wherever it was started —
@@ -841,6 +906,16 @@ export default function App() {
         : `${what.join(', ')}를 휴지통으로 이동했습니다.`,
       type: failed ? 'error' : 'success',
     });
+
+    if (!failed) {
+      pushUndo({
+        label: '삭제',
+        undo: async () => {
+          for (const fid of fileIds) await restoreFile(fid);
+          for (const fid of folderIds) await restoreFolder(fid);
+        },
+      });
+    }
     return true;
   };
 
@@ -1095,8 +1170,9 @@ export default function App() {
     } else if (activeView === 'favorites') {
       params.is_favorite = true;
     }
+    if (uploaderFilter?.id) params.uploader_id = uploaderFilter.id;
     return params;
-  }, [activeWorkspace?.id, activeView, activeFolderId]);
+  }, [activeWorkspace?.id, activeView, activeFolderId, uploaderFilter?.id]);
 
   const refreshFiles = useCallback(async (silent = false) => {
     if (!currentUser || (!currentUser.is_approved && !currentUser.is_admin)) return;
@@ -1176,6 +1252,69 @@ export default function App() {
       }
     }
   }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, buildFileViewParams, sortBy, sortOrder, currentPage, pageSize]);
+
+  // Undo stack for operations that move or remove things.
+  //
+  // Each entry carries the inverse of what was just done, captured at the time
+  // it was done — a move records where every item came from, one by one,
+  // because a multi-select drag can pull items out of several folders at once
+  // and "put it back" has to mean the folder each one actually left.
+  //
+  // Copy is deliberately absent: it is queued on the server and finishes
+  // whether or not this page is still open, so there is nothing here that can
+  // reliably know what to take back. Deleting the copies afterwards is a
+  // normal delete, not an undo.
+  const UNDO_LIMIT = 20;
+  const [undoStack, setUndoStack] = useState([]);
+
+  const pushUndo = useCallback((entry) => {
+    setUndoStack((prev) => [...prev.slice(-(UNDO_LIMIT - 1)), entry]);
+  }, []);
+
+  const runUndo = useCallback(async () => {
+    let entry = null;
+    setUndoStack((prev) => {
+      if (!prev.length) return prev;
+      entry = prev[prev.length - 1];
+      return prev.slice(0, -1);
+    });
+    // The state updater above runs synchronously enough for `entry` to be set,
+    // but guard anyway rather than assuming it.
+    await Promise.resolve();
+    if (!entry) return;
+
+    const toastId = showToast(`${entry.label} 되돌리는 중...`, { type: 'loading', duration: 0 });
+    try {
+      await entry.undo();
+      await refreshFiles();
+      await refreshFoldersAndStats();
+      bumpWindowRefresh();
+      updateToast(toastId, { message: `${entry.label}을(를) 되돌렸습니다.`, type: 'success' });
+    } catch (err) {
+      dismissToast(toastId);
+      await showAlert({
+        title: '되돌리기 실패',
+        message: err.message || '되돌릴 수 없습니다. 대상이 이미 변경되었을 수 있습니다.',
+        type: 'error',
+      });
+    }
+  }, [showToast, updateToast, dismissToast, showAlert, refreshFiles, refreshFoldersAndStats, bumpWindowRefresh]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      const el = document.activeElement;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      // A window or modal on top owns the keyboard while focus is inside it.
+      if (el?.closest?.('.os-preview-window, .modal-overlay')) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        runUndo();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [runUndo]);
+
 
   useEffect(() => {
     refreshFiles();
@@ -1422,6 +1561,13 @@ export default function App() {
           icon: ExternalLink,
           onClick: () => windowManager.openFolderWindow(folder, folderWorkspaceId),
         },
+        // Only the owner's own personal folder can be shared, and only in the
+        // shared workspace — elsewhere membership already decides who writes.
+        ...(activeWorkspace?.is_shared && folder.owner_user_id === currentUser?.id ? [{
+          label: '폴더 공유 설정',
+          icon: Users,
+          onClick: () => setShareFolder(folder),
+        }] : []),
         {
           label: '하위 폴더 생성',
           icon: FolderPlus,
@@ -1508,6 +1654,13 @@ export default function App() {
           icon: Download,
           onClick: () => startDownloadFile(file),
         },
+        // Only where it means something: reporting exists for material other
+        // people can see, which is the shared workspace.
+        ...(activeWorkspace?.is_shared && file.created_by !== currentUser?.id ? [{
+          label: '신고하기',
+          icon: Flag,
+          onClick: () => setReportFile(file),
+        }] : []),
         {
           label: '다른 폴더로 이동',
           icon: FolderInput,
@@ -1678,6 +1831,8 @@ export default function App() {
       )}
 
       <Sidebar
+        currentUser={currentUser}
+        pendingReportCount={pendingReportCount}
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
         isWorkspacesLoaded={isWorkspacesLoaded}
@@ -1731,7 +1886,15 @@ export default function App() {
           onLogout={handleLogout}
         />
 
-        {activeView === 'trash' ? (
+        {activeView === 'reports' ? (
+          <ReportsExplorer
+            onOpenFile={(f) => windowManager.openWindow(f)}
+            onResolved={() => {
+              refreshReportCount();
+              refreshFiles();
+            }}
+          />
+        ) : activeView === 'trash' ? (
           <TrashExplorer
             activeWorkspace={activeWorkspace}
             currentUser={currentUser}
@@ -1782,6 +1945,8 @@ export default function App() {
             onOpenFolderWindow={(folder) => windowManager.openFolderWindow(folder, activeWorkspace?.id)}
             workspaceId={activeWorkspace?.id || null}
             isSharedWorkspace={!!activeWorkspace?.is_shared}
+            uploaderFilter={uploaderFilter}
+            onFilterUploader={(u) => { setUploaderFilter(u); setCurrentPage(1); }}
             canWrite={activeWorkspace?.can_write !== false}
             onSelectAllInFolder={async () => {
               const viewParams = buildFileViewParams();
@@ -1932,6 +2097,19 @@ export default function App() {
           setIsUploadOpen(true);
         }}
         externalRefreshToken={windowRefreshToken}
+      />
+
+      <FolderShareModal
+        isOpen={!!shareFolder}
+        folder={shareFolder}
+        onClose={() => setShareFolder(null)}
+      />
+
+      <ReportModal
+        isOpen={!!reportFile}
+        file={reportFile}
+        onClose={() => setReportFile(null)}
+        onDone={refreshReportCount}
       />
 
       {/* Invitation Manager Modal (7-day invites & AWS SES) */}

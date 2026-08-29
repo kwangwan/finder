@@ -4881,3 +4881,274 @@ select option {
 }
 
 .input-field[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* ==========================================================================
+   Content reports
+   ========================================================================== */
+
+.reports-explorer { padding: 1.25rem 1.5rem; overflow-y: auto; height: 100%; }
+
+.reports-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.reports-title { display: flex; align-items: center; gap: 0.55rem; }
+.reports-title h2 { font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; }
+
+.reports-header button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+.reports-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.reports-tab {
+  padding: 0.45rem 0.85rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.83rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.reports-tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+
+.reports-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+/* One row per report, carrying enough of the file to judge it without leaving
+   the queue — that decision is the whole purpose of this screen. */
+.report-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.report-preview {
+  width: 84px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.report-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+.report-text-preview {
+  padding: 5px 6px;
+  font-size: 0.6rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+  overflow: hidden;
+}
+
+.report-no-preview { color: var(--text-muted); opacity: 0.6; }
+
+.report-body { flex: 1; min-width: 0; }
+
+.report-file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-flag-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.report-meta,
+.report-reason {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.report-meta span { display: inline-flex; align-items: center; gap: 3px; }
+
+.report-reason-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.14);
+  color: var(--accent-rose);
+  font-weight: 700;
+}
+
+.report-detail {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.report-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 0.6rem;
+  font-size: 0.78rem;
+}
+
+.report-actions .report-delete { color: var(--accent-rose); }
+
+.report-resolved-tag { font-size: 0.76rem; color: var(--text-muted); font-weight: 600; }
+
+.reports-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 4rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+/* Reason picker in the report dialog */
+.report-reason-pick {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.report-reason-pick.active {
+  border-color: var(--accent-rose);
+  color: var(--accent-rose);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+@media (max-width: 768px) {
+  .reports-explorer { padding: 1rem 0.85rem; }
+  .report-card { flex-wrap: wrap; }
+  .report-actions { width: 100%; justify-content: flex-end; }
+}
+
+.folder-grant-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.folder-grant-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-grant-email {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An active uploader filter has to be visible and clearable — otherwise a
+   shortened list reads as missing files rather than a filtered view. */
+.uploader-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid var(--accent-primary);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+}
+
+.uploader-filter-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.uploader-filter-bar button:hover { color: var(--text-primary); }
+
+button.file-card-uploader {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+button.file-card-uploader:hover { color: var(--accent-primary); }

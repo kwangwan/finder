@@ -666,6 +666,7 @@ export async function listFiles({
   root_only = false,
   file_type = null,
   is_favorite = null,
+  uploader_id = null,
   search = '',
   sort_by = 'updated_at',
   sort_order = 'desc',
@@ -679,6 +680,7 @@ export async function listFiles({
   else if (folder_id) params.append('folder_id', folder_id);
   if (file_type) params.append('file_type', file_type);
   if (is_favorite !== null && is_favorite !== undefined) params.append('is_favorite', is_favorite);
+  if (uploader_id) params.append('uploader_id', uploader_id);
   if (search) params.append('search', search);
   if (sort_by) params.append('sort_by', sort_by);
   if (sort_order) params.append('sort_order', sort_order);

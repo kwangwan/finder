@@ -7,6 +7,7 @@ import React from 'react';
 import {
   AlertCircle as LuAlertCircle,
   AtSign as LuAtSign,
+  Flag as LuFlag,
   AlertTriangle as LuAlertTriangle,
   ArrowDown as LuArrowDown,
   ArrowLeft as LuArrowLeft,
@@ -245,6 +246,7 @@ export const ArrowRight = makeIcon(LuArrowRight, PxArrowRight);
 export const ArrowUp = makeIcon(LuArrowUp, PxArrowUp);
 export const ArrowUpDown = makeIcon(LuArrowUpDown, PxSortVertical);
 export const AtSign = makeIcon(LuAtSign, null);
+export const Flag = makeIcon(LuFlag, null);
 export const Ban = makeIcon(LuBan, PxCancel);
 export const Bold = makeIcon(LuBold, null);
 export const BookOpen = makeIcon(LuBookOpen, PxBookOpen);

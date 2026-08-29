@@ -128,7 +128,7 @@ async def list_reports(
             "created_at": r.created_at,
             "resolution": r.resolution,
             "admin_note": r.admin_note,
-            "reporter": (reporter.name or reporter.email) if reporter else "(탈퇴한 이용자)",
+            "reporter": (reporter.username or reporter.name or reporter.email) if reporter else "(탈퇴한 이용자)",
             "file": None if not f else {
                 "id": str(f.id),
                 "name": f.name,
@@ -138,7 +138,7 @@ async def list_reports(
                 "workspace_id": str(f.workspace_id) if f.workspace_id else None,
                 "folder_id": str(f.folder_id) if f.folder_id else None,
                 "folder_name": folder.name if folder else None,
-                "uploader": (owner.name or owner.email) if owner else "(탈퇴한 이용자)",
+                "uploader": (owner.username or owner.name or owner.email) if owner else "(탈퇴한 이용자)",
                 "thumbnail_url": f"/api/storage/thumbnail/{f.id}" if f.thumbnail_s3_key else None,
                 "content_preview": (f.content or "")[:400] if f.is_markdown else None,
             },
