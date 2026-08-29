@@ -10,6 +10,7 @@ import {
   Loader2,
   UploadCloud,
   ArrowUpDown,
+  Check,
   Grid,
   List,
   ChevronLeft,
@@ -32,6 +33,7 @@ const MAX_ROWS = 200;
 
 // The window's sort names mapped onto the listing API's column names.
 const SORT_FIELDS = { name: 'name', size: 'size_bytes', updated: 'updated_at' };
+const SORT_LABELS = { name: '이름', size: '크기', updated: '수정일' };
 
 function formatSize(bytes) {
   if (!bytes) return '';
@@ -64,7 +66,7 @@ export default function FolderWindow({
   onTransferItems,
   onUploadFiles,
   onUndo,
-  externalRefreshToken = 0,
+  externalRefreshToken = { n: 0, keys: null },
 }) {
   const { id, folderId, workspaceId, position, size, isMinimized, isMaximized, zIndex } = windowState;
 
@@ -104,6 +106,9 @@ export default function FolderWindow({
   }, [viewMode]);
   const PAGE_SIZE = viewMode === 'grid' ? 24 : 50;
 
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef(null);
+
   const bodyRef = useRef(null);
   const windowRef = useRef(null);
   const marqueeBaseRef = useRef({ files: [], folders: [] });
@@ -112,6 +117,16 @@ export default function FolderWindow({
   const { isInteracting, handleDragStart, handleResizeStart } = useWindowChrome({
     id, position, size, isMaximized, onFocus, onPositionChange, onSizeChange,
   });
+
+  // An external refresh either names the locations that changed or names none,
+  // meaning "everywhere". Reduced to a single value so this window reloads only
+  // when a change actually reached it.
+  const locationKey = `${workspaceId || 'none'}:${folderId || 'root'}`;
+  const externalRefreshSignal = (() => {
+    const token = typeof externalRefreshToken === 'object' ? externalRefreshToken : { n: externalRefreshToken, keys: null };
+    if (token.keys && !token.keys.includes(locationKey)) return 'unchanged';
+    return `n${token.n}`;
+  })();
 
   // ---- data -----------------------------------------------------------------
   // The whole workspace's folder list is fetched, not just this folder's
@@ -158,7 +173,7 @@ export default function FolderWindow({
       setIsLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [workspaceId, folderId, reloadToken, externalRefreshToken, page, PAGE_SIZE, sortBy, sortOrder]);
+  }, [workspaceId, folderId, reloadToken, externalRefreshSignal, page, PAGE_SIZE, sortBy, sortOrder]);
 
   // Navigating, re-sorting or switching view changes what page 1 means, so a
   // page number carried over from the previous listing would be meaningless —
@@ -166,6 +181,19 @@ export default function FolderWindow({
   useEffect(() => { setPage(1); }, [folderId, workspaceId, sortBy, sortOrder, PAGE_SIZE]);
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
+
+
+  // Closes on a press anywhere else, including inside this window — a menu
+  // left hanging over the listing is in the way of the next thing.
+  useEffect(() => {
+    if (!isSortMenuOpen) return undefined;
+    const close = (e) => {
+      if (sortMenuRef.current?.contains(e.target)) return;
+      setIsSortMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
+  }, [isSortMenuOpen]);
 
   const compare = useCallback((a, b) => {
     const dir = sortOrder === 'asc' ? 1 : -1;
@@ -465,24 +493,53 @@ export default function FolderWindow({
           >
             {viewMode === 'grid' ? <List size={13} /> : <Grid size={13} />}
           </button>
-          <button
-            type="button"
-            className="window-action-btn icon-only"
-            title={`정렬: ${sortBy === 'name' ? '이름' : sortBy === 'size' ? '크기' : '수정일'} ${sortOrder === 'asc' ? '오름차순' : '내림차순'} (클릭하여 변경)`}
-            onClick={(e) => {
-              e.stopPropagation();
-              // One control cycling name → size → updated, flipping direction
-              // on the way round. A window header has no room for a select,
-              // and this keeps every order reachable in at most six clicks.
-              if (sortOrder === 'asc') setSortOrder('desc');
-              else {
-                setSortOrder('asc');
-                setSortBy((prev) => (prev === 'name' ? 'size' : prev === 'size' ? 'updated' : 'name'));
-              }
-            }}
-          >
-            <ArrowUpDown size={13} />
-          </button>
+          {/* A menu, not a cycle. One button stepping through three fields and
+              two directions took up to five clicks to reach an order, and
+              never showed which one was current without hovering. */}
+          <div className="fw-sort" ref={sortMenuRef}>
+            <button
+              type="button"
+              className={`window-action-btn icon-only ${isSortMenuOpen ? 'is-active' : ''}`}
+              title={`정렬: ${SORT_LABELS[sortBy]} ${sortOrder === 'asc' ? '오름차순' : '내림차순'}`}
+              aria-haspopup="menu"
+              aria-expanded={isSortMenuOpen}
+              onClick={(e) => { e.stopPropagation(); setIsSortMenuOpen((v) => !v); }}
+            >
+              <ArrowUpDown size={13} />
+            </button>
+            {isSortMenuOpen && (
+              <div className="fw-sort-menu" role="menu" onMouseDown={(e) => e.stopPropagation()}>
+                <div className="fw-sort-head">정렬 기준</div>
+                {Object.entries(SORT_LABELS).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={sortBy === key}
+                    className={sortBy === key ? 'active' : ''}
+                    onClick={(e) => { e.stopPropagation(); setSortBy(key); setIsSortMenuOpen(false); }}
+                  >
+                    <Check size={12} style={{ opacity: sortBy === key ? 1 : 0 }} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+                <div className="fw-sort-sep" />
+                {[['asc', '오름차순'], ['desc', '내림차순']].map(([dir, label]) => (
+                  <button
+                    key={dir}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={sortOrder === dir}
+                    className={sortOrder === dir ? 'active' : ''}
+                    onClick={(e) => { e.stopPropagation(); setSortOrder(dir); setIsSortMenuOpen(false); }}
+                  >
+                    <Check size={12} style={{ opacity: sortOrder === dir ? 1 : 0 }} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="window-action-btn icon-only"

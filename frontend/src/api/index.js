@@ -1186,6 +1186,31 @@ export async function batchMoveFiles(workspaceId, fileIds, targetFolderId = null
   return res.json();
 }
 
+/**
+ * Move folders as one operation.
+ *
+ * One request per folder meant the ceiling on how many folders a location may
+ * hold was hit partway through the selection: some arrived, the rest stayed,
+ * and the user had to work out which. The server checks the whole set first
+ * and refuses as a whole.
+ */
+export async function batchMoveFolders(workspaceId, folderIds, targetFolderId = null) {
+  const res = await fetch(`${API_BASE}/folders/batch-move`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      folder_ids: folderIds,
+      target_folder_id: targetFolderId || null,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `폴더를 옮기지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
 /** Duplicate files and folders (recursively) into a target folder — the paste
  *  half of copy/paste. Unlike a move this consumes storage, so the server can
  *  refuse the whole operation with 413 when it would not fit in the quota. */

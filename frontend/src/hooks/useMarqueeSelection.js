@@ -10,8 +10,12 @@ const DRAG_THRESHOLD_PX = 5;
 const AUTOSCROLL_EDGE_PX = 48;
 const AUTOSCROLL_MAX_SPEED_PX = 18;
 
+// Starts at the node itself, not at its parent. A folder window's body *is*
+// the scroller, so starting one level up walked straight past it and settled
+// on the document — which does not scroll — and a band dragged past the edge
+// of a window sat there instead of pulling the list along.
 function findScrollParent(node) {
-  let el = node?.parentElement;
+  let el = node;
   while (el && el !== document.body) {
     const { overflowY } = window.getComputedStyle(el);
     if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) return el;

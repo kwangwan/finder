@@ -297,6 +297,93 @@ async def create_folder(
     return resp
 
 
+class BatchMoveFoldersRequest(BaseModel):
+    workspace_id: uuid.UUID
+    folder_ids: List[uuid.UUID]
+    target_folder_id: Optional[uuid.UUID] = None
+
+
+@router.post("/batch-move")
+async def batch_move_folders(
+    req: BatchMoveFoldersRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Move several folders at once — all of them, or none.
+
+    Moving them one request at a time meant the ceiling on how many folders a
+    location may hold was reached partway through: some of the selection
+    arrived and the rest stayed put, and the user was left to work out which.
+    Nobody intends half a move. Everything is checked first — permission at
+    both ends, cycles, and whether the destination can take the whole set —
+    and only then is anything written.
+    """
+    if not await access_service.is_workspace_member(db, current_user, req.workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+    if not req.folder_ids:
+        return {"moved_count": 0, "target_folder_id": str(req.target_folder_id) if req.target_folder_id else None}
+
+    target_id = req.target_folder_id
+    if target_id is not None:
+        target = await db.get(Folder, target_id)
+        if not target or target.is_trashed or target.workspace_id != req.workspace_id:
+            raise HTTPException(status_code=404, detail="대상 폴더를 찾을 수 없습니다.")
+    await access_service.require_write_at(db, current_user, req.workspace_id, target_id)
+
+    # Resolve and vet every folder before touching any of them.
+    folders: List[Folder] = []
+    for fid in req.folder_ids:
+        folder = await db.get(Folder, fid)
+        if not folder or folder.is_trashed:
+            raise HTTPException(status_code=404, detail="옮기려는 폴더 중 찾을 수 없는 것이 있어 이동을 취소했습니다.")
+        if folder.workspace_id != req.workspace_id:
+            raise HTTPException(status_code=400, detail="다른 워크스페이스의 폴더는 함께 옮길 수 없습니다.")
+        if not await access_service.can_access_folder(db, current_user, fid):
+            raise HTTPException(status_code=403, detail=f"'{folder.name}' 폴더에 접근할 권한이 없어 이동을 취소했습니다.")
+        # Taking a folder out of where it sits is a write there too.
+        if not await access_service.can_write_at(db, current_user, folder.workspace_id, folder.parent_id):
+            raise HTTPException(status_code=403, detail=f"'{folder.name}' 폴더를 지금 위치에서 옮길 권한이 없어 이동을 취소했습니다.")
+        if target_id is not None and target_id == fid:
+            raise HTTPException(status_code=400, detail=f"'{folder.name}' 폴더를 자기 자신 안으로 옮길 수 없습니다.")
+        folders.append(folder)
+
+    # A folder may not end up inside its own subtree — that detaches the whole
+    # branch from the root, where nothing can reach it again.
+    if target_id is not None:
+        moving = {f.id for f in folders}
+        ancestor_id = target_id
+        seen = set()
+        while ancestor_id is not None and ancestor_id not in seen:
+            seen.add(ancestor_id)
+            if ancestor_id in moving:
+                bad = next(f.name for f in folders if f.id == ancestor_id)
+                raise HTTPException(status_code=400, detail=f"'{bad}' 폴더를 자기 하위 폴더로 옮길 수 없어 이동을 취소했습니다.")
+            node = await db.get(Folder, ancestor_id)
+            if node is None:
+                break
+            ancestor_id = node.parent_id
+
+    # Folders already at the destination are not arriving, so they must not be
+    # counted twice against the ceiling.
+    arriving = [f for f in folders if (f.parent_id or None) != (target_id or None)]
+    if arriving:
+        await folder_limit_service.require_room(
+            db, req.workspace_id, target_id,
+            adding=len(arriving),
+            excluding=[f.id for f in arriving],
+        )
+
+    for folder in arriving:
+        folder.parent_id = target_id
+    await db.commit()
+    return {
+        "moved_count": len(arriving),
+        "unchanged_count": len(folders) - len(arriving),
+        "target_folder_id": str(target_id) if target_id else None,
+    }
+
+
 @router.put("/{folder_id}", response_model=FolderResponse)
 async def update_folder(
     folder_id: uuid.UUID, 

@@ -76,6 +76,7 @@ import {
   downloadFolderAsZip,
   batchDownloadFiles,
   batchMoveFiles,
+  batchMoveFolders,
   batchCopyItems,
   listFileIds,
   getPendingReportCount
@@ -346,8 +347,15 @@ export default function App() {
   const refreshDebounceTimerRef = useRef(null);
 
   // Persistent Upload Manager
+  // Where this batch of uploads is landing, collected as they complete so the
+  // refresh at the end knows which views actually changed.
+  const uploadTargetsRef = useRef(new Set());
+
   const uploadManager = useUploadManager({
     onUploadSuccess: (completedItem) => {
+      uploadTargetsRef.current.add(
+        `${completedItem?.activeWorkspaceId || 'none'}:${completedItem?.targetFolderId || 'root'}`
+      );
       if (refreshDebounceTimerRef.current) {
         clearTimeout(refreshDebounceTimerRef.current);
       }
@@ -568,6 +576,7 @@ export default function App() {
       const res = await batchMoveFiles(activeWorkspace.id, moveFilesModal.fileIds, targetFolderId);
       await refreshFiles();
       await refreshFoldersAndStats();
+      bumpWindowRefresh();
       showToast(`${res.moved_count}개의 파일이 이동되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
@@ -584,6 +593,7 @@ export default function App() {
       const res = await batchMoveFiles(activeWorkspace.id, fileIds, targetFolderId);
       await refreshFiles();
       await refreshFoldersAndStats();
+      bumpWindowRefresh();
       showToast(`${res.moved_count}개의 파일이 이동되었습니다.`, { type: 'success' });
     } catch (err) {
       await showAlert({
@@ -623,17 +633,22 @@ export default function App() {
     });
 
     try {
+      // Folders first, and in one request. The destination has a ceiling on
+      // how many folders it may hold, so this is the part that can be refused
+      // — and it has to be refused before any file has moved, or a selection
+      // of both would end up half-arrived. The server accepts all or none.
+      if (folderIds.length) {
+        await batchMoveFolders(activeWorkspace.id, folderIds, targetFolderId);
+      }
       let movedFiles = 0;
       if (fileIds.length) {
         const res = await batchMoveFiles(activeWorkspace.id, fileIds, targetFolderId);
         movedFiles = res.moved_count ?? fileIds.length;
       }
-      for (const folderId of folderIds) {
-        await updateFolder(folderId, { parent_id: targetFolderId });
-      }
 
       await refreshFiles();
       await refreshFoldersAndStats();
+      bumpWindowRefresh();
 
       const parts = [];
       if (movedFiles) parts.push(`파일 ${movedFiles}개`);
@@ -656,8 +671,16 @@ export default function App() {
             for (const { origin, ids } of byOrigin.values()) {
               await batchMoveFiles(wsId, ids, origin);
             }
-            for (const { id, parentId } of folderOrigins) {
-              await updateFolder(id, { parent_id: parentId });
+            // Grouped the same way, and as one request per origin — an undo
+            // that only partly lands is the very thing being undone.
+            const foldersByOrigin = new Map();
+            folderOrigins.forEach(({ id, parentId }) => {
+              const key = parentId ?? '__root__';
+              if (!foldersByOrigin.has(key)) foldersByOrigin.set(key, { parentId, ids: [] });
+              foldersByOrigin.get(key).ids.push(id);
+            });
+            for (const { parentId, ids } of foldersByOrigin.values()) {
+              await batchMoveFolders(wsId, ids, parentId);
             }
           },
         });
@@ -665,15 +688,19 @@ export default function App() {
 
       return { movedFiles, movedFolders: folderIds.length };
     } catch (err) {
+      // The server explains a refusal in the sentence a person should read —
+      // how full the destination is, and that nothing was moved. Prefixing it
+      // with a generic line only buries that.
       await showAlert({
-        title: '이동 실패',
-        message: '이동 중 오류가 발생했습니다: ' + err.message,
+        title: '이동하지 않았습니다',
+        message: err.message || '이동 중 오류가 발생했습니다.',
         type: 'error',
       });
-      // The folder loop can fail partway through, so resync rather than
-      // leaving the tree showing a move that only partly happened.
+      // Files and folders move in separate requests, so one can land while
+      // the other is refused — resync rather than trusting the local view.
       await refreshFiles();
       await refreshFoldersAndStats();
+      bumpWindowRefresh();
     }
   };
 
@@ -686,7 +713,7 @@ export default function App() {
   const [favoriteFolderIds, setFavoriteFolderIds] = useState(() => new Set());
   const [favoriteRefreshToken, setFavoriteRefreshToken] = useState(0);
 
-  const [windowRefreshToken, setWindowRefreshToken] = useState(0);
+  const [windowRefreshToken, setWindowRefreshToken] = useState({ n: 0, keys: null });
   const [queuedJobCount, setQueuedJobCount] = useState(0);
   const [reportFile, setReportFile] = useState(null);
   const [shareFolder, setShareFolder] = useState(null);
@@ -755,7 +782,14 @@ export default function App() {
     }, 60000);
     return () => clearInterval(id);
   }, [refreshReportCount]);
-  const bumpWindowRefresh = useCallback(() => setWindowRefreshToken((n) => n + 1), []);
+  // `keys` narrows the refresh to particular locations, as
+  // `${workspaceId}:${folderId|root}`. Omitted means every open window, which
+  // is right for a move or a delete — those change two places at once. An
+  // upload only changes where it landed, and refetching a window showing
+  // something else is work nobody asked for.
+  const bumpWindowRefresh = useCallback((keys = null) => {
+    setWindowRefreshToken((n) => ({ n: (typeof n === 'object' ? n.n : n) + 1, keys }));
+  }, []);
 
 
 
@@ -978,6 +1012,7 @@ export default function App() {
     }
     await refreshFiles();
     await refreshFoldersAndStats();
+    bumpWindowRefresh();
     updateToast(toastId, {
       message: failed
         ? `${what.join(', ')} 중 ${failed}개를 옮기지 못했습니다.`
@@ -1331,6 +1366,31 @@ export default function App() {
     }
   }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, buildFileViewParams, sortBy, sortOrder, currentPage, pageSize]);
 
+  // A batch of uploads lands one file at a time, and refetching the list on
+  // each arrival would keep reshuffling the page under the person watching it
+  // — hence the "새로고침" prompt while it runs. But once the batch is done
+  // there is nothing left to disturb, so the prompt has served its purpose:
+  // the view catches up on its own rather than leaving one last click to do.
+  const wasUploadingRef = useRef(false);
+  useEffect(() => {
+    const wasUploading = wasUploadingRef.current;
+    wasUploadingRef.current = uploadManager.isUploading;
+    if (!wasUploading || uploadManager.isUploading) return;
+
+    // Only where the files actually landed — and everywhere that place is on
+    // screen: the folder window the upload was started from, another window
+    // onto the same folder, and the main listing if it is showing it too.
+    const targets = Array.from(uploadTargetsRef.current);
+    uploadTargetsRef.current = new Set();
+    bumpWindowRefresh(targets.length ? targets : null);
+    refreshFoldersAndStats();
+    const viewingKey = `${activeWorkspace?.id || 'none'}:${activeFolderId || 'root'}`;
+    if (!targets.length || targets.includes(viewingKey)) {
+      refreshFiles(true);
+      setHasNewFilesInView(false);
+    }
+  }, [uploadManager.isUploading, refreshFiles, refreshFoldersAndStats, bumpWindowRefresh, activeWorkspace?.id, activeFolderId]);
+
   // Memoised: the copy-jobs banner keys its polling effect on this, so a fresh
   // arrow per render restarted the poll (and fired a request) on every render.
   const handleCopyJobsFinished = useCallback(() => {
@@ -1488,6 +1548,7 @@ export default function App() {
       });
       await refreshFiles();
       await refreshFoldersAndStats();
+      bumpWindowRefresh();
       windowManager.openWindow(newNote);
     } catch (err) {
       await showAlert({
@@ -1519,6 +1580,7 @@ export default function App() {
       windowManager.closeWindow(file.id);
       refreshFiles();
       refreshFoldersAndStats();
+      bumpWindowRefresh();
       updateToast(toastId, { message: `'${file.name}' 파일이 휴지통으로 이동되었습니다.`, type: 'success' });
     } catch (err) {
       dismissToast(toastId);
@@ -1543,6 +1605,7 @@ export default function App() {
         windowManager.closeWindow(fileId);
         refreshFiles();
         refreshFoldersAndStats();
+        bumpWindowRefresh();
       } catch (err) {
         await showAlert({
           title: '삭제 실패',
@@ -1573,6 +1636,7 @@ export default function App() {
       }
       refreshFiles();
       refreshFoldersAndStats();
+      bumpWindowRefresh();
       updateToast(toastId, { message: `'${folder.name}' 폴더가 휴지통으로 이동되었습니다.`, type: 'success' });
     } catch (err) {
       dismissToast(toastId);
@@ -1592,6 +1656,7 @@ export default function App() {
     }
     refreshFiles();
     refreshFoldersAndStats();
+    bumpWindowRefresh();
     windowManager.updateWindowFile(id, { name: newName });
   };
 
@@ -1684,6 +1749,7 @@ export default function App() {
               });
               await refreshFiles();
               await refreshFoldersAndStats();
+              bumpWindowRefresh();
               windowManager.openWindow(newNote);
             } catch (err) {
               await showAlert({
@@ -1816,6 +1882,7 @@ export default function App() {
           onClick: () => {
             refreshFiles();
             refreshFoldersAndStats();
+            bumpWindowRefresh();
           },
         },
       ]
@@ -2008,6 +2075,7 @@ export default function App() {
             onRefreshParent={() => {
               refreshFiles();
               refreshFoldersAndStats();
+              bumpWindowRefresh();
             }}
           />
         ) : (

@@ -27,6 +27,7 @@ from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services import shared_policy_service
 from app.services import favorite_service
+from app.services import folder_limit_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
@@ -1156,6 +1157,33 @@ async def batch_move_files(
     }
 
 
+async def _first_overfull_descendant(db: AsyncSession, root_id: uuid.UUID) -> Optional[str]:
+    """
+    The name of the first folder in this subtree holding more direct subfolders
+    than a location is allowed — or None. A copy would have to drop the excess,
+    so the copy is refused instead.
+    """
+    frontier = [root_id]
+    seen = {root_id}
+    while frontier:
+        rows = (await db.execute(
+            select(Folder.id, Folder.name, Folder.parent_id).where(
+                Folder.parent_id.in_(frontier),
+                Folder.is_trashed == False,  # noqa: E712
+            )
+        )).all()
+        per_parent = {}
+        for cid, _name, pid in rows:
+            per_parent[pid] = per_parent.get(pid, 0) + 1
+        for pid, n in per_parent.items():
+            if n > folder_limit_service.MAX_CHILD_FOLDERS:
+                parent = await db.get(Folder, pid)
+                return parent.name if parent else "폴더"
+        frontier = [cid for cid, _n, _p in rows if cid not in seen]
+        seen.update(frontier)
+    return None
+
+
 @router.post("/batch-copy")
 async def batch_copy_items(
     req: BatchCopyRequest,
@@ -1235,6 +1263,26 @@ async def batch_copy_items(
     # Checked before queueing, so a copy that cannot fit is refused while the
     # user is still looking at it rather than failing silently in the worker.
     await quota_service.check_quota(db, req.workspace_id, current_user, total_bytes)
+
+    # The same, for the ceiling on how many folders one location may hold. The
+    # worker used to skip whatever did not fit and report a count afterwards,
+    # which leaves the user with a destination holding some of what they asked
+    # for and no way to tell which. Refused up front, as a whole.
+    if src_folders:
+        await folder_limit_service.require_room(db, req.workspace_id, req.folder_id, adding=len(src_folders))
+        # A source folder that is itself over the ceiling cannot be reproduced
+        # anywhere, so say so now rather than partway through the copy.
+        for folder in src_folders:
+            over = await _first_overfull_descendant(db, folder.id)
+            if over is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"'{over}' 폴더 안에 하위 폴더가 "
+                        f"{folder_limit_service.MAX_CHILD_FOLDERS}개를 넘어 그대로 복사할 수 없습니다. "
+                        "일부만 복사하지 않고 취소했습니다."
+                    ),
+                )
 
     names = [f.name for f in src_files] + [f.name for f in src_folders]
     summary = names[0] if len(names) == 1 else f"{names[0]} 외 {len(names) - 1}개"

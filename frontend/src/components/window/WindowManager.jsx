@@ -20,7 +20,7 @@ export default function WindowManager({
   onTransferItems,
   onUploadFiles,
   onUndo,
-  externalRefreshToken = 0
+  externalRefreshToken = { n: 0, keys: null }
 }) {
   const {
     windows,
