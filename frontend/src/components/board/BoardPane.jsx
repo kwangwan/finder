@@ -5,6 +5,9 @@ import {
   ChevronRight,
   ChevronDown,
   Loader2,
+  Calendar,
+  User as UserIcon,
+  X,
 } from '../../utils/icons';
 import {
   getBoard,
@@ -47,14 +50,48 @@ export function dueTone(daysLeft, status) {
   return 'later';
 }
 
-export function dueText(dueDate, daysLeft) {
-  if (!dueDate) return '기한 없음';
-  const [, m, d] = dueDate.split('-');
-  const label = `${Number(m)}월 ${Number(d)}일`;
-  if (daysLeft === null || daysLeft === undefined) return label;
-  if (daysLeft < 0) return `${label} · ${-daysLeft}일 지남`;
-  if (daysLeft === 0) return `${label} · 오늘`;
-  return `${label} · ${daysLeft}일 남음`;
+function dayLabel(iso) {
+  if (!iso) return '';
+  const [, m, d] = iso.split('-');
+  return `${Number(m)}월 ${Number(d)}일`;
+}
+
+/** How far off the end of the period is, in words. */
+/** Date only — the time a row was created is never the question being asked. */
+export function shortStamp(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.getFullYear() % 100}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function fullStamp(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ko-KR');
+}
+
+export function remainingText(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) return '';
+  if (daysLeft < 0) return `${-daysLeft}일 지남`;
+  if (daysLeft === 0) return '오늘';
+  return `${daysLeft}일 남음`;
+}
+
+/**
+ * The period as one phrase.
+ *
+ * A task usually runs between two dates, so both are shown — but a single end
+ * date is still the common case and must not read as a broken range.
+ */
+export function periodText(startDate, dueDate, daysLeft) {
+  if (!startDate && !dueDate) return '기간 설정';
+  const left = remainingText(daysLeft);
+  const range = startDate && dueDate
+    ? `${dayLabel(startDate)} – ${dayLabel(dueDate)}`
+    : dueDate ? `${dayLabel(dueDate)}까지`
+      : `${dayLabel(startDate)}부터`;
+  return left ? `${range} · ${left}` : range;
 }
 
 export default function BoardPane({ file, onDirty }) {
@@ -67,7 +104,9 @@ export default function BoardPane({ file, onDirty }) {
   const [addingUnder, setAddingUnder] = useState(undefined);   // undefined = closed, null = top level
   const [draftName, setDraftName] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const [editingPeriodId, setEditingPeriodId] = useState(null);
   const draftRef = useRef(null);
+  const addingRef = useRef(false);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -131,16 +170,25 @@ export default function BoardPane({ file, onDirty }) {
   const addTask = async (parentTaskId) => {
     const name = draftName.trim();
     if (!name) { setAddingUnder(undefined); setDraftName(''); return; }
+    // Held down, Enter repeats — and the field was only cleared after the
+    // round trip, so every repeat sent the same name again and the task
+    // appeared twice. Cleared first, and a second call is refused while one
+    // is in flight.
+    if (addingRef.current) return;
+    addingRef.current = true;
+    setDraftName('');
     try {
       const created = await createBoardTask(file.id, { name, parent_task_id: parentTaskId ?? null });
       setBoard((prev) => ({ ...prev, tasks: [...prev.tasks, created] }));
-      setDraftName('');
       onDirty?.();
       // Left open, so a list of tasks can be typed in without reaching for the
       // button between each one.
       draftRef.current?.focus();
     } catch (e) {
+      setDraftName(name);
       await showAlert({ title: '추가하지 못했습니다', message: e.message, type: 'error' });
+    } finally {
+      addingRef.current = false;
     }
   };
 
@@ -188,29 +236,19 @@ export default function BoardPane({ file, onDirty }) {
   return (
     <div className="board-pane">
       <div className="board-scroll">
-        <div className="board-table" role="table">
-          <div className="board-row board-head" role="row">
-            <span className="bc-name">작업</span>
-            <span className="bc-priority">중요도</span>
-            <span className="bc-status">진행 상태</span>
-            <span className="bc-due">기한</span>
-            <span className="bc-people">작업자</span>
-            <span className="bc-actions" />
+        {rows.length === 0 && addingUnder === undefined && (
+          <div className="board-empty-row">
+            아직 작업이 없습니다. 아래 &apos;작업 추가&apos;로 시작해 보세요.
           </div>
+        )}
 
-          {rows.length === 0 && addingUnder === undefined && (
-            <div className="board-empty-row">
-              아직 작업이 없습니다. 아래 &apos;작업 추가&apos;로 시작해 보세요.
-            </div>
-          )}
-
+        <div className="board-list">
           {rows.map(({ task, depth, childCount }) => (
             <div
               key={task.id}
-              className={`board-row depth-${depth} ${openTaskId === task.id ? 'open' : ''} ${task.status === 'done' ? 'is-done' : ''}`}
-              role="row"
+              className={`board-card depth-${depth} ${openTaskId === task.id ? 'open' : ''} ${task.status === 'done' ? 'is-done' : ''} tone-${dueTone(task.days_left, task.status)}`}
             >
-              <span className="bc-name">
+              <div className="board-card-top">
                 {depth === 0 ? (
                   <button
                     type="button"
@@ -222,96 +260,159 @@ export default function BoardPane({ file, onDirty }) {
                     {childCount ? (collapsed.has(task.id) ? <ChevronRight size={13} /> : <ChevronDown size={13} />) : null}
                   </button>
                 ) : <span className="board-twisty is-empty" />}
-                <button type="button" className="board-name-btn" onClick={() => setOpenTaskId(task.id)} title="상세 내용 열기">
-                  {task.name}
-                </button>
-                {childCount > 0 && <span className="board-subcount">{childCount}</span>}
-              </span>
 
-              <span className="bc-priority">
+                <span className="board-name-wrap">
+                  <button type="button" className="board-name-btn" onClick={() => setOpenTaskId(task.id)} title="상세 내용 열기">
+                    {task.name}
+                  </button>
+                  {childCount > 0 && <span className="board-subcount" title={`하위 작업 ${childCount}개`}>{childCount}</span>}
+                </span>
+
                 <select
                   className={`board-chip priority-${task.priority}`}
                   value={task.priority}
                   disabled={!canWrite || busyId === task.id}
+                  aria-label="중요도"
                   onChange={(e) => patch(task, { priority: e.target.value })}
                 >
                   {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                 </select>
-              </span>
-
-              <span className="bc-status">
                 <select
                   className={`board-chip status-${task.status}`}
                   value={task.status}
                   disabled={!canWrite || busyId === task.id}
+                  aria-label="진행 상태"
                   onChange={(e) => patch(task, { status: e.target.value })}
                 >
-                  {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  {STATUSES.map((st) => <option key={st.value} value={st.value}>{st.label}</option>)}
                 </select>
-              </span>
 
-              <span className={`bc-due due-${dueTone(task.days_left, task.status)}`}>
-                <input
-                  type="date"
-                  value={task.due_date || ''}
-                  disabled={!canWrite || busyId === task.id}
-                  onChange={(e) => patch(task, { due_date: e.target.value || null })}
-                  title={dueText(task.due_date, task.days_left)}
-                />
-              </span>
+                <span className="board-card-actions">
+                  {depth === 0 && canWrite && (
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      title="하위 작업 추가"
+                      onClick={() => { setAddingUnder(task.id); setDraftName(''); }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                  )}
+                  {canWrite && (
+                    <button type="button" className="btn-icon" title="작업 삭제" onClick={() => removeTask(task)}>
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </span>
+              </div>
 
-              <span className="bc-people">
-                {task.assignees.length === 0
-                  ? <span className="board-muted">—</span>
-                  : task.assignees.map((a) => (
-                    <span key={a.id} className="board-person" title={a.name}>{a.name}</span>
-                  ))}
-              </span>
+              {/* The second line carries everything that does not need to be
+                  read at a glance. A task does not have to fit on one line,
+                  and forcing it to made every column too narrow to use. */}
+              <div className="board-card-meta">
+                {/* Read as a phrase, edited only when asked. A pair of native
+                    date inputs shows the browser's own format and a literal
+                    "mm/dd/yyyy" whenever a date is unset — two of those on
+                    every row was most of what made the board look unfinished. */}
+                <span className={`board-period due-${dueTone(task.days_left, task.status)}`}>
+                  {editingPeriodId === task.id ? (
+                    <span className="board-period-edit" onBlur={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget)) setEditingPeriodId(null);
+                    }}>
+                      <input
+                        type="date"
+                        autoFocus
+                        value={task.start_date || ''}
+                        max={task.due_date || undefined}
+                        aria-label="시작일"
+                        onChange={(e) => patch(task, { start_date: e.target.value || null })}
+                        onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setEditingPeriodId(null); }}
+                      />
+                      <span className="board-period-dash">–</span>
+                      <input
+                        type="date"
+                        value={task.due_date || ''}
+                        min={task.start_date || undefined}
+                        aria-label="종료일"
+                        onChange={(e) => patch(task, { due_date: e.target.value || null })}
+                        onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setEditingPeriodId(null); }}
+                      />
+                      {(task.start_date || task.due_date) && (
+                        <button
+                          type="button"
+                          className="board-period-clear"
+                          onClick={() => { patch(task, { start_date: null, due_date: null }); setEditingPeriodId(null); }}
+                          title="기간 지우기"
+                        >
+                          <X size={11} />
+                        </button>
+                      )}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="board-period-btn"
+                      disabled={!canWrite || busyId === task.id}
+                      onClick={() => setEditingPeriodId(task.id)}
+                      title={canWrite ? '기간 설정' : '기간'}
+                    >
+                      <Calendar size={12} />
+                      <span>{periodText(task.start_date, task.due_date, null)}</span>
+                    </button>
+                  )}
+                  {remainingText(task.days_left) && (
+                    <span className="board-remaining">{remainingText(task.days_left)}</span>
+                  )}
+                </span>
 
-              <span className="bc-actions">
-                {depth === 0 && canWrite && (
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    title="하위 작업 추가"
-                    onClick={() => { setAddingUnder(task.id); setDraftName(''); }}
-                  >
-                    <Plus size={13} />
-                  </button>
-                )}
-                {canWrite && (
-                  <button type="button" className="btn-icon" title="작업 삭제" onClick={() => removeTask(task)}>
-                    <Trash2 size={13} />
-                  </button>
-                )}
-              </span>
+                <span className="board-meta-people" title="작업자">
+                  <UserIcon size={12} />
+                  {task.assignees.length === 0
+                    ? <span className="board-muted">지정 안 함</span>
+                    : task.assignees.map((a) => (
+                      <span key={a.id} className="board-person">{a.name}</span>
+                    ))}
+                </span>
+
+                <span className="board-meta-stamp" title={`만든 날 ${fullStamp(task.created_at)}`}>
+                  만듦 {shortStamp(task.created_at)}
+                </span>
+                <span className="board-meta-stamp" title={`마지막 수정 ${fullStamp(task.updated_at)}`}>
+                  수정 {shortStamp(task.updated_at)}
+                  {task.last_edited_by_name ? ` · ${task.last_edited_by_name}` : ''}
+                </span>
+              </div>
             </div>
           ))}
 
           {addingUnder !== undefined && (
-            <div className={`board-row board-draft depth-${addingUnder ? 1 : 0}`}>
-              <span className="bc-name">
+            <div className={`board-card board-draft depth-${addingUnder ? 1 : 0}`}>
+              <div className="board-card-top">
                 <span className="board-twisty is-empty" />
                 <input
                   ref={draftRef}
                   type="text"
+                  className="board-draft-input"
                   value={draftName}
                   placeholder={addingUnder ? '하위 작업 이름' : '작업 이름'}
                   onChange={(e) => setDraftName(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); addTask(addingUnder); }
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (e.repeat || e.nativeEvent.isComposing) return;
+                      addTask(addingUnder);
+                    }
                     if (e.key === 'Escape') { e.preventDefault(); setAddingUnder(undefined); setDraftName(''); }
                   }}
                 />
-              </span>
-              <span className="bc-draft-actions">
-                <button type="button" className="btn-primary" onClick={() => addTask(addingUnder)} disabled={!draftName.trim()}>
+                <button type="button" className="btn-primary board-draft-add" onClick={() => addTask(addingUnder)} disabled={!draftName.trim()}>
                   추가
                 </button>
-                <button type="button" className="btn-secondary" onClick={() => { setAddingUnder(undefined); setDraftName(''); }}>
+                <button type="button" className="btn-secondary board-draft-add" onClick={() => { setAddingUnder(undefined); setDraftName(''); }}>
                   닫기
                 </button>
-              </span>
+              </div>
+              <div className="board-card-meta board-draft-hint">Enter로 계속 추가할 수 있습니다.</div>
             </div>
           )}
         </div>

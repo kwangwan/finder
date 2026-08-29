@@ -5407,9 +5407,17 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
 }
 
+
 /* ==========================================================================
    일정 — boards and the workspace-wide task list
    ========================================================================== */
+
+/* A task is a card of two lines, not a row of a table.
+   Columns wide enough for a date range, two chips, names and two timestamps
+   cannot all fit in a window that the user is free to make narrow — the first
+   attempt was a six-column grid, and every column ended up too narrow to use.
+   The name and the two decisions that get changed most sit on the first line;
+   everything read rather than clicked sits on the second. */
 
 .board-pane {
   display: flex;
@@ -5417,62 +5425,43 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg-primary);
 }
 
 .board-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 0.85rem 1rem 1.25rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 14px 20px;
 }
 
-/* A grid rather than a table so every row shares one set of column widths
-   without the markup having to be a real <table> — the rows are interactive
-   and carry their own controls. */
-.board-table {
-  display: grid;
-  grid-template-columns: minmax(200px, 1fr) 92px 104px 150px minmax(110px, 0.6fr) 62px;
-  align-items: center;
-  min-width: 720px;
+.board-list { display: flex; flex-direction: column; gap: 6px; }
+
+.board-card {
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 8px 10px;
 }
 
-.board-row {
-  display: contents;
-}
+.board-card.depth-1 { margin-left: 22px; background: var(--bg-secondary); }
+.board-card.open { border-color: var(--accent-primary); }
 
-.board-row > span {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  min-width: 0;
-  font-size: 0.82rem;
-}
+/* The left edge carries urgency, so a full board can be scanned without
+   reading a single date. */
+.board-card.tone-overdue { border-left-color: var(--accent-rose); }
+.board-card.tone-today   { border-left-color: var(--accent-amber); }
+.board-card.tone-soon    { border-left-color: var(--accent-amber); }
+.board-card.tone-done    { border-left-color: var(--accent-emerald); opacity: 0.72; }
 
-.board-head > span {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-medium);
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-
-.board-row.is-done .bc-name .board-name-btn {
-  text-decoration: line-through;
-  color: var(--text-muted);
-}
-
-.board-row.open > span { background: var(--bg-tertiary); }
-
-.bc-name {
+.board-card-top {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
-
-.board-row.depth-1 .bc-name { padding-left: 26px; }
 
 .board-twisty {
   display: inline-flex;
@@ -5481,6 +5470,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   width: 18px;
   height: 18px;
   flex-shrink: 0;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -5490,13 +5480,13 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .board-twisty.is-empty { cursor: default; }
 
 .board-name-btn {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   padding: 2px 0;
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-weight: 600;
   text-align: left;
   overflow: hidden;
@@ -5506,73 +5496,174 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .board-name-btn:hover { color: var(--accent-primary); }
+.board-card.is-done .board-name-btn { text-decoration: line-through; color: var(--text-muted); }
 
 .board-subcount {
   flex-shrink: 0;
-  padding: 0 5px;
+  padding: 0 6px;
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   color: var(--text-muted);
   font-size: 0.68rem;
   font-weight: 700;
+  line-height: 1.5;
 }
 
 /* One chip style for both vocabularies. `appearance: none` because a native
-   select in a coloured pill draws the platform's own background over it. */
+   select draws the platform's own background over a coloured pill. */
 .board-chip {
-  width: 100%;
-  padding: 3px 6px;
+  flex-shrink: 0;
+  min-width: 68px;
+  padding: 3px 8px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: 0.74rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
   font-weight: 700;
+  font-family: inherit;
+  text-align: center;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
-  text-align: center;
 }
 
-.board-chip:disabled { cursor: default; opacity: 0.75; }
-.board-chip.is-static { display: inline-block; width: auto; cursor: default; }
+.board-chip:disabled { cursor: default; opacity: 0.7; }
+.board-chip.is-static { min-width: 0; cursor: default; }
 
-.board-chip.priority-urgent { background: rgba(239, 68, 68, 0.16); color: var(--accent-rose); border-color: rgba(239, 68, 68, 0.35); }
-.board-chip.priority-high   { background: rgba(245, 158, 11, 0.16); color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.35); }
+/* Tinted from the theme's own accents rather than from literal colours, so a
+   theme that remaps its palette — matrix turns amber into lime and cyan into
+   green — carries the chips with it instead of leaving blue and violet behind. */
+.board-chip.priority-urgent {
+  background: color-mix(in srgb, var(--accent-rose) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-rose) 45%, transparent);
+  color: var(--accent-rose);
+}
+.board-chip.priority-high {
+  background: color-mix(in srgb, var(--accent-amber) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-amber) 45%, transparent);
+  color: var(--accent-amber);
+}
 .board-chip.priority-normal { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-subtle); }
 .board-chip.priority-low    { background: var(--bg-tertiary); color: var(--text-muted); border-color: var(--border-subtle); }
 
-.board-chip.status-todo        { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-subtle); }
-.board-chip.status-in_progress { background: rgba(59, 130, 246, 0.16); color: var(--accent-primary); border-color: rgba(59, 130, 246, 0.35); }
-.board-chip.status-review      { background: rgba(139, 92, 246, 0.16); color: #a78bfa; border-color: rgba(139, 92, 246, 0.35); }
-.board-chip.status-done        { background: rgba(16, 185, 129, 0.16); color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.35); }
-.board-chip.status-hold        { background: var(--bg-tertiary); color: var(--text-muted); border-color: var(--border-medium); }
+.board-chip.status-todo { background: var(--bg-tertiary); color: var(--text-secondary); border-color: var(--border-subtle); }
+.board-chip.status-in_progress {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  color: var(--accent-primary);
+}
+.board-chip.status-review {
+  background: color-mix(in srgb, var(--accent-cyan) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cyan) 45%, transparent);
+  color: var(--accent-cyan);
+}
+.board-chip.status-done {
+  background: color-mix(in srgb, var(--accent-emerald) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-emerald) 45%, transparent);
+  color: var(--accent-emerald);
+}
+.board-chip.status-hold { background: var(--bg-tertiary); color: var(--text-muted); border-color: var(--border-medium); }
 
-.bc-due input[type="date"] {
-  width: 100%;
-  padding: 3px 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input, var(--bg-tertiary));
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-family: inherit;
+.board-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
-/* How close the deadline is, carried by colour so a full board can be read
-   without comparing dates one by one. */
-.bc-due.due-overdue input, .schedule-due.due-overdue { color: var(--accent-rose); font-weight: 700; }
-.bc-due.due-today input,   .schedule-due.due-today   { color: var(--accent-amber); font-weight: 700; }
-.bc-due.due-soon input,    .schedule-due.due-soon    { color: var(--accent-amber); }
-.bc-due.due-done input,    .schedule-due.due-done    { color: var(--text-muted); }
-
-.bc-people {
+.board-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
   align-items: center;
+  gap: 4px 14px;
+  margin-top: 6px;
+  padding-left: 24px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
 }
 
+.board-card.depth-1 .board-card-meta { padding-left: 24px; }
+
+.board-period, .board-meta-people {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* Read as a phrase; the inputs appear only once editing starts. */
+.board-period-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px 1px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: 0.74rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.board-period-btn:hover:not(:disabled) {
+  border-color: var(--border-medium);
+  background: var(--bg-tertiary);
+}
+
+.board-period-btn:disabled { cursor: default; }
+
+.board-period-edit { display: inline-flex; align-items: center; gap: 4px; }
+
+.board-period-edit input[type="date"] {
+  padding: 1px 4px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input, var(--bg-tertiary));
+  color: var(--text-primary);
+  font-size: 0.73rem;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-period-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.board-period-clear:hover { color: var(--accent-rose); background: var(--bg-tertiary); }
+
+.board-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.board-period-dash { opacity: 0.6; }
+
+.board-remaining {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.board-period.due-overdue { color: var(--accent-rose); }
+.board-period.due-today, .board-period.due-soon { color: var(--accent-amber); }
+
 .board-person {
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
@@ -5581,42 +5672,36 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   white-space: nowrap;
 }
 
-.board-muted { color: var(--text-muted); font-size: 0.76rem; }
+.board-muted { color: var(--text-muted); }
 
-.bc-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
+.board-meta-stamp {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.85;
 }
 
-.board-draft .bc-name input {
+.board-draft { border-color: var(--accent-primary); }
+
+.board-draft-input {
   flex: 1;
   min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--accent-primary);
+  padding: 5px 8px;
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-sm);
   background: var(--bg-input, var(--bg-tertiary));
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-family: inherit;
 }
 
-.bc-draft-actions {
-  grid-column: 2 / -1;
-  display: flex;
-  gap: 5px;
-  justify-content: flex-start;
-}
-
-.bc-draft-actions button { height: 28px; padding: 0 0.7rem; font-size: 0.76rem; }
+.board-draft-add { height: 28px; padding: 0 0.8rem; font-size: 0.76rem; flex-shrink: 0; }
+.board-draft-hint { padding-left: 24px; }
 
 .board-empty-row {
-  grid-column: 1 / -1;
-  padding: 1.6rem 0.5rem;
+  padding: 2rem 0.5rem;
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.82rem;
+  font-size: 0.83rem;
 }
 
 .board-add-btn {
@@ -5624,23 +5709,19 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   align-items: center;
   gap: 5px;
   margin-top: 10px;
-  padding: 6px 12px;
+  padding: 7px 14px;
   border: 1px dashed var(--border-medium);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: 0.81rem;
   font-weight: 600;
   cursor: pointer;
 }
 
 .board-add-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
 
-.board-readonly-note {
-  margin-top: 10px;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
+.board-readonly-note { margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); }
 
 .board-empty {
   display: flex;
@@ -5649,28 +5730,28 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   gap: 8px;
   min-height: 140px;
   color: var(--text-muted);
-  font-size: 0.82rem;
+  font-size: 0.83rem;
 }
 
 /* --- one task, opened ---------------------------------------------------- */
 
-/* Splits the window rather than covering it: the row being edited stays
+/* Splits the window rather than covering it: the card being edited stays
    visible above, which is what says which task these fields belong to. */
 .board-detail {
   flex-shrink: 0;
   max-height: 58%;
   display: flex;
   flex-direction: column;
-  border-top: 2px solid var(--border-medium);
+  border-top: 2px solid var(--accent-primary);
   background: var(--bg-secondary);
-  overflow: auto;
+  overflow-y: auto;
 }
 
 .board-detail-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--border-subtle);
   position: sticky;
   top: 0;
@@ -5681,7 +5762,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .board-detail-title {
   flex: 1;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 4px 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -5711,15 +5792,14 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .board-detail-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 10px;
+  gap: 12px;
+  padding: 12px;
 }
 
 .board-detail-fields label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 108px;
+  gap: 5px;
 }
 
 .board-detail-fields label > span,
@@ -5729,48 +5809,55 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   color: var(--text-muted);
 }
 
+.board-detail-period { display: inline-flex; align-items: center; gap: 5px; }
+
 .board-detail-fields input[type="date"] {
-  padding: 4px 6px;
+  padding: 5px 7px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-input, var(--bg-tertiary));
   color: var(--text-secondary);
   font-size: 0.78rem;
   font-family: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
-.board-detail-people { padding: 0 10px 10px; }
-
-.board-people-list {
+.board-detail-stamps {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 5px;
+  gap: 4px 14px;
+  padding: 0 12px 10px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
+
+.board-detail-people { padding: 0 12px 12px; }
+
+.board-people-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 
 .board-person-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 9px;
+  padding: 4px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
 .board-person-toggle.on {
   border-color: var(--accent-primary);
-  background: rgba(59, 130, 246, 0.14);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
   color: var(--accent-primary);
   font-weight: 700;
 }
 
 .board-person-toggle:disabled { cursor: default; opacity: 0.6; }
 
-.board-detail-notes { padding: 0 10px 12px; }
+.board-detail-notes { padding: 0 12px 14px; }
 
 .board-detail-label-row {
   display: flex;
@@ -5782,7 +5869,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .board-attach-btn {
   margin-left: auto;
   height: 26px;
-  padding: 0 0.6rem;
+  padding: 0 0.65rem;
   font-size: 0.73rem;
   display: inline-flex;
   align-items: center;
@@ -5793,18 +5880,13 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-primary);
-  min-height: 140px;
+  min-height: 150px;
   padding: 4px 0;
 }
 
 /* --- the workspace-wide list -------------------------------------------- */
 
-.schedule-explorer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  min-height: 0;
-}
+.schedule-explorer { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; }
 
 .schedule-head {
   display: flex;
@@ -5825,18 +5907,12 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-weight: 700;
 }
 
-.schedule-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
+.schedule-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .schedule-search { flex: 1; min-width: 180px; }
 
 .schedule-filters select {
-  height: 30px;
-  padding: 0 8px;
+  height: 32px;
+  padding: 0 9px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
@@ -5847,8 +5923,8 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .schedule-toggle {
-  height: 30px;
-  padding: 0 11px;
+  height: 32px;
+  padding: 0 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
@@ -5860,19 +5936,19 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .schedule-toggle.on {
   border-color: var(--accent-primary);
-  background: rgba(59, 130, 246, 0.14);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
   color: var(--accent-primary);
 }
 
-.schedule-list { display: flex; flex-direction: column; gap: 5px; }
+.schedule-list { display: flex; flex-direction: column; gap: 6px; }
 
+/* Same two-line shape as a board card, for the same reason. */
 .schedule-item {
-  display: grid;
-  grid-template-columns: 148px minmax(160px, 1fr) 76px 88px minmax(100px, 0.5fr);
-  align-items: center;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 10px 13px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-card);
@@ -5881,19 +5957,15 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .schedule-item:hover { border-color: var(--accent-primary); background: var(--bg-card-hover); }
+.schedule-item.is-done { opacity: 0.72; }
 .schedule-item.is-done .schedule-name { text-decoration: line-through; color: var(--text-muted); }
 
-.schedule-due {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.schedule-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.schedule-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
 
 .schedule-name {
-  font-size: 0.85rem;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -5901,18 +5973,30 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   white-space: nowrap;
 }
 
-.schedule-where {
+.schedule-meta {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.schedule-due { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.schedule-due.due-overdue { color: var(--accent-rose); font-weight: 700; }
+.schedule-due.due-today, .schedule-due.due-soon { color: var(--accent-amber); font-weight: 700; }
+
+.schedule-where {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 0.71rem;
-  color: var(--text-muted);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.schedule-people { display: flex; flex-wrap: wrap; gap: 3px; }
+.schedule-people { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; }
 
 .schedule-empty {
   display: flex;
@@ -5928,18 +6012,11 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .menu-badge-due { background: var(--accent-amber); color: var(--on-accent); }
 
-/* Narrow screens: a task's columns cannot all fit on one line, so the row
-   reflows into two instead of the list scrolling sideways. */
-@media (max-width: 768px) {
-  .schedule-item {
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      "main due"
-      "chips people";
-    row-gap: 6px;
-  }
-  .schedule-main { grid-area: main; }
-  .schedule-due { grid-area: due; text-align: right; }
-  .schedule-people { grid-area: people; justify-content: flex-end; }
-  .board-detail { max-height: 70%; }
+@media (max-width: 640px) {
+  /* The chips move under the name rather than squeezing it out. */
+  .board-card-top, .schedule-top { flex-wrap: wrap; }
+  .board-name-btn, .schedule-name { flex: 1 1 100%; white-space: normal; }
+  .board-card-meta, .board-draft-hint { padding-left: 0; }
+  .board-period input[type="date"] { width: 106px; }
+  .board-detail { max-height: 72%; }
 }

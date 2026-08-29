@@ -10,7 +10,7 @@ import {
   Folder as FolderIcon,
 } from '../../utils/icons';
 import { listWorkspaceTasks, getFileDetail } from '../../api';
-import { PRIORITIES, STATUSES, dueTone, dueText } from './BoardPane';
+import { PRIORITIES, STATUSES, dueTone, periodText, shortStamp, fullStamp } from './BoardPane';
 
 const PAGE_SIZE = 30;
 
@@ -155,22 +155,28 @@ export default function ScheduleExplorer({ workspaceId, currentUser, onOpenBoard
               onClick={() => open(task)}
               title="이 작업이 있는 일정 열기"
             >
-              <span className={`schedule-due due-${dueTone(task.days_left, task.status)}`}>
-                {dueText(task.due_date, task.days_left)}
-              </span>
-              <span className="schedule-main">
+              <span className="schedule-top">
                 <span className="schedule-name">{task.name}</span>
+                <span className={`board-chip priority-${task.priority} is-static`}>{task.priority_label}</span>
+                <span className={`board-chip status-${task.status} is-static`}>{task.status_label}</span>
+              </span>
+              <span className="schedule-meta">
+                <span className={`schedule-due due-${dueTone(task.days_left, task.status)}`}>
+                  {task.start_date || task.due_date
+                    ? periodText(task.start_date, task.due_date, task.days_left)
+                    : '기간 없음'}
+                </span>
                 <span className="schedule-where">
                   <FolderIcon size={11} />
                   {task.board?.name || '(삭제된 일정)'}
                 </span>
-              </span>
-              <span className={`board-chip priority-${task.priority} is-static`}>{task.priority_label}</span>
-              <span className={`board-chip status-${task.status} is-static`}>{task.status_label}</span>
-              <span className="schedule-people">
-                {task.assignees.length === 0
-                  ? <span className="board-muted">—</span>
-                  : task.assignees.map((a) => <span key={a.id} className="board-person">{a.name}</span>)}
+                <span className="schedule-people">
+                  {task.assignees.length === 0
+                    ? <span className="board-muted">작업자 없음</span>
+                    : task.assignees.map((a) => <span key={a.id} className="board-person">{a.name}</span>)}
+                </span>
+                <span className="board-meta-stamp" title={`만든 날 ${fullStamp(task.created_at)}`}>만듦 {shortStamp(task.created_at)}</span>
+                <span className="board-meta-stamp" title={`마지막 수정 ${fullStamp(task.updated_at)}`}>수정 {shortStamp(task.updated_at)}</span>
               </span>
             </button>
           ))}

@@ -17,7 +17,7 @@ import {
   restoreBlankParagraphs,
 } from '../../hooks/useNoteEditor';
 import { useDialog } from '../../context/DialogContext';
-import { PRIORITIES, STATUSES } from './BoardPane';
+import { PRIORITIES, STATUSES, fullStamp } from './BoardPane';
 
 const SAVE_DEBOUNCE_MS = 900;
 
@@ -173,14 +173,32 @@ export default function BoardTaskDetail({ file, task, canWrite, assignableUsers 
           </select>
         </label>
         <label>
-          <span>기한</span>
-          <input
-            type="date"
-            value={task.due_date || ''}
-            disabled={!canWrite}
-            onChange={(e) => save({ due_date: e.target.value || null })}
-          />
+          <span>기간</span>
+          <span className="board-detail-period">
+            <input
+              type="date"
+              value={task.start_date || ''}
+              disabled={!canWrite}
+              aria-label="시작일"
+              onChange={(e) => save({ start_date: e.target.value || null })}
+            />
+            <span className="board-period-dash">–</span>
+            <input
+              type="date"
+              value={task.due_date || ''}
+              disabled={!canWrite}
+              aria-label="종료일"
+              onChange={(e) => save({ due_date: e.target.value || null })}
+            />
+          </span>
         </label>
+      </div>
+
+      {/* Read, never set — so they sit apart from the fields above rather than
+          looking like two more things to fill in. */}
+      <div className="board-detail-stamps">
+        <span>만든 날 {fullStamp(task.created_at)}{task.created_by_name ? ` · ${task.created_by_name}` : ''}</span>
+        <span>마지막 수정 {fullStamp(task.updated_at)}{task.last_edited_by_name ? ` · ${task.last_edited_by_name}` : ''}</span>
       </div>
 
       <div className="board-detail-people">

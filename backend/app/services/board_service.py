@@ -204,6 +204,7 @@ def task_to_dict(
         "priority_label": PRIORITY_LABELS.get(task.priority, task.priority),
         "status": task.status,
         "status_label": STATUS_LABELS.get(task.status, task.status),
+        "start_date": task.start_date.isoformat() if task.start_date else None,
         "due_date": task.due_date.isoformat() if task.due_date else None,
         # Worked out here so every view agrees on what "overdue" and "soon"
         # mean, instead of each one re-deriving it from a date string.
@@ -217,6 +218,7 @@ def task_to_dict(
         "created_by_name": names.get(task.created_by),
         "created_at": task.created_at,
         "updated_at": task.updated_at,
+        "last_edited_by_name": names.get(task.last_edited_by),
     }
     if include_detail:
         data["detail"] = task.detail or ""
@@ -236,7 +238,10 @@ async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID) -> List[dict]:
         select(BoardTask).where(BoardTask.file_id == file_id).order_by(BoardTask.position.asc(), BoardTask.created_at.asc())
     )).scalars().all()
     by_task = await assignees_by_task(db, [t.id for t in tasks])
-    names = await user_names(db, [t.created_by for t in tasks] + [uid for ids in by_task.values() for uid in ids])
+    names = await user_names(
+        db,
+        [t.created_by for t in tasks] + [t.last_edited_by for t in tasks] + [uid for ids in by_task.values() for uid in ids],
+    )
     return [task_to_dict(t, names, by_task) for t in tasks]
 
 
@@ -338,6 +343,7 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
             name=task.name,
             priority=task.priority,
             status=task.status,
+            start_date=task.start_date,
             due_date=task.due_date,
             detail=task.detail,
             position=task.position,

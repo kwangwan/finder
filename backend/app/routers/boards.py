@@ -28,6 +28,7 @@ class TaskCreate(BaseModel):
     parent_task_id: Optional[uuid.UUID] = None
     priority: Optional[str] = None
     status: Optional[str] = None
+    start_date: Optional[date] = None
     due_date: Optional[date] = None
     detail: Optional[str] = None
     assignee_ids: Optional[List[uuid.UUID]] = None
@@ -37,6 +38,7 @@ class TaskUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=500)
     priority: Optional[str] = None
     status: Optional[str] = None
+    start_date: Optional[date] = None
     due_date: Optional[date] = None
     detail: Optional[str] = None
     assignee_ids: Optional[List[uuid.UUID]] = None
@@ -208,6 +210,9 @@ async def create_task(
         if parent.parent_task_id is not None:
             raise HTTPException(status_code=400, detail="하위 작업 아래에는 다시 하위 작업을 만들 수 없습니다.")
 
+    if req.start_date and req.due_date and req.start_date > req.due_date:
+        raise HTTPException(status_code=400, detail="시작일이 종료일보다 뒤일 수 없습니다.")
+
     assignees = await board_service.assert_assignable(db, current_user, board.workspace_id, req.assignee_ids)
     task = BoardTask(
         file_id=file_id,
@@ -215,6 +220,7 @@ async def create_task(
         name=req.name.strip(),
         priority=board_service.validate_priority(req.priority),
         status=board_service.validate_status(req.status),
+        start_date=req.start_date,
         due_date=req.due_date,
         detail=req.detail,
         position=await board_service.next_position(db, file_id, req.parent_task_id),
@@ -251,8 +257,10 @@ async def update_task(
         task.priority = board_service.validate_priority(req.priority)
     if "status" in sent:
         task.status = board_service.validate_status(req.status)
-    # `due_date: null` means "no deadline", which is a real choice and has to
+    # `null` on either end means "not set", which is a real choice and has to
     # be distinguishable from not sending the field at all.
+    if "start_date" in sent:
+        task.start_date = req.start_date
     if "due_date" in sent:
         task.due_date = req.due_date
     if "detail" in sent:
@@ -262,6 +270,9 @@ async def update_task(
     if "assignee_ids" in sent:
         assignees = await board_service.assert_assignable(db, current_user, board.workspace_id, req.assignee_ids)
         await board_service.set_assignees(db, task.id, assignees)
+
+    if task.start_date and task.due_date and task.start_date > task.due_date:
+        raise HTTPException(status_code=400, detail="시작일이 종료일보다 뒤일 수 없습니다.")
 
     task.last_edited_by = current_user.id
     await db.commit()

@@ -56,8 +56,14 @@ class BoardTask(Base):
     name = Column(String(500), nullable=False)
     priority = Column(String(16), nullable=False, default=DEFAULT_PRIORITY)
     status = Column(String(16), nullable=False, default=DEFAULT_STATUS)
-    # A date, not a timestamp: a deadline is a day, and storing it as an
-    # instant means it shifts across time zones for no reason.
+    # A period, not a single day. Work usually runs from one date to another,
+    # and only the end was recordable. `due_date` stays the end of it — it is
+    # what "how urgent is this" is measured against, and what everything
+    # already sorts by.
+    #
+    # Dates, not timestamps: a deadline is a day, and storing it as an instant
+    # makes it shift across time zones for no reason.
+    start_date = Column(Date, nullable=True)
     due_date = Column(Date, nullable=True)
     # The task's own notes, as markdown — the same format the document editor
     # reads and writes, so the same editor renders it.

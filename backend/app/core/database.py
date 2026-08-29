@@ -114,6 +114,10 @@ async def init_db():
             # without this it degrades into a full scan of a 12k-row table
             # every time the periodic job runs.
             "CREATE INDEX IF NOT EXISTS ix_kb_files_media_scan ON kb_files (file_type, media_scanned_at) WHERE s3_key IS NOT NULL;",
+            # A board task carries a period, not a single deadline: work that
+            # runs from one day to another is the normal case, and only the end
+            # of it was recordable.
+            "ALTER TABLE kb_board_tasks ADD COLUMN IF NOT EXISTS start_date DATE;",
         ]
 
         # Every timestamp column was originally created as a naive
