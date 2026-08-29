@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { getWindowState, getWindowStateVersion, saveWindowState, getFileDetail } from '../api';
+import { getWindowState, getWindowStateVersion, openWindowStateStream, saveWindowState, getFileDetail } from '../api';
 
 const RESIZE_MIN_X = 0;
 const RESIZE_MIN_Y = 48; // keeps the header below the topbar, matching handleDragMove's clamp
@@ -50,6 +50,10 @@ function fitWindowToViewport(win, screenWidth, screenHeight, isMobile) {
 // endpoint; the full state (which resolves every entry and runs a per-file
 // access check) is fetched only when that timestamp actually moves.
 const SYNC_POLL_MS = 1500;
+// What the poll drops to while the push stream is connected, since it is then
+// only guarding against a stream that has gone silent without erroring.
+const SYNC_POLL_IDLE_MS = 30000;
+const SYNC_STREAM_MAX_BACKOFF_MS = 30000;
 // Writes are debounced: dragging a window or clicking through several files
 // would otherwise fire a PUT per change.
 const SYNC_SAVE_DEBOUNCE_MS = 800;
@@ -71,6 +75,7 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
   // Timestamp of the state this client last saw, so the cheap poll can tell
   // 'nothing changed' without pulling the full payload.
   const lastVersionRef = useRef(null);
+  const streamHealthyRef = useRef(false);
 
   useEffect(() => {
     const handleViewportResize = () => {
@@ -382,30 +387,88 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     };
   }, [enabled, currentUserId, windows, signatureOf]);
 
-  // Pick up changes made in another browser.
+  // Adopt a remote change: fetch the full state only once the timestamp has
+  // actually moved. Shared by the stream and the poll so both agree on what
+  // counts as a change and neither can apply a stale list.
+  const pullRemote = useCallback(async (remoteVersion) => {
+    // Don't overwrite anything still on its way to the server.
+    if (saveTimerRef.current) return;
+    if (!remoteVersion || remoteVersion === lastVersionRef.current) return;
+    lastVersionRef.current = remoteVersion;
+    const state = await getWindowState();
+    await applyRemote(state.windows || []);
+  }, [applyRemote]);
+
+  // Pick up changes made in another browser, pushed by the server.
   useEffect(() => {
     if (!enabled || !currentUserId) return;
+    let cancelled = false;
+    let attempt = 0;
+    let controller = null;
+    let retryTimer = null;
+
+    const connect = () => {
+      if (cancelled) return;
+      controller = new AbortController();
+      openWindowStateStream({
+        signal: controller.signal,
+        onOpen: () => { attempt = 0; streamHealthyRef.current = true; },
+        onVersion: (version) => { pullRemote(version).catch(() => {}); },
+      })
+        .catch(() => {})
+        .finally(() => {
+          streamHealthyRef.current = false;
+          if (cancelled) return;
+          // Back off so a backend that is down, or refusing because this user
+          // already holds too many streams, isn't hammered. Sync keeps working
+          // throughout — the poll below speeds back up the moment the stream
+          // is not healthy.
+          const delay = Math.min(1000 * 2 ** attempt, SYNC_STREAM_MAX_BACKOFF_MS);
+          attempt += 1;
+          retryTimer = setTimeout(connect, delay);
+        });
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      streamHealthyRef.current = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      controller?.abort();
+    };
+  }, [enabled, currentUserId, pullRemote]);
+
+  // Polling safety net. The stream is the fast path; this stays on behind it
+  // because a stream can stop delivering without ever erroring — a proxy or a
+  // sleeping laptop can leave a connection that looks open and is silent — and
+  // a taskbar that quietly stops syncing is worse than one that is a little
+  // slow. It idles to a slow interval whenever the stream is healthy.
+  useEffect(() => {
+    if (!enabled || !currentUserId) return;
+    let lastPoll = 0;
     const poll = async () => {
       if (document.visibilityState !== 'visible') return;
-      // Don't overwrite anything still on its way to the server.
       if (saveTimerRef.current) return;
+      lastPoll = Date.now();
       try {
         const { updated_at: remoteVersion } = await getWindowStateVersion();
-        if (!remoteVersion || remoteVersion === lastVersionRef.current) return;
-        lastVersionRef.current = remoteVersion;
-        const state = await getWindowState();
-        await applyRemote(state.windows || []);
+        await pullRemote(remoteVersion);
       } catch (e) { /* best-effort */ }
     };
-    const id = setInterval(poll, SYNC_POLL_MS);
-    // Coming back to a tab is exactly when it is most likely to be stale.
+    const id = setInterval(() => {
+      const interval = streamHealthyRef.current ? SYNC_POLL_IDLE_MS : SYNC_POLL_MS;
+      if (Date.now() - lastPoll < interval) return;
+      poll();
+    }, SYNC_POLL_MS);
+    // Coming back to a tab is exactly when it is most likely to be stale, and
+    // when a stream that died while the machine slept has yet to be noticed.
     const onVisible = () => { if (document.visibilityState === 'visible') poll(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [enabled, currentUserId, applyRemote]);
+  }, [enabled, currentUserId, pullRemote]);
 
   return {
     windows,

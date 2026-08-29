@@ -1327,3 +1327,54 @@ export async function getWindowStateVersion() {
   if (!res.ok) throw new Error('Failed to load window state version');
   return res.json();
 }
+
+/**
+ * Hold open the server's change stream, calling onVersion with each new
+ * timestamp. Resolves when the server closes the stream and rejects if it
+ * cannot be established — either way the caller is expected to fall back to
+ * polling and retry, so a failure here is not a sync failure.
+ *
+ * Read with fetch rather than EventSource: EventSource cannot set headers, so
+ * it would force the session token into the query string, and this app only
+ * accepts a short-lived media-scoped token there for exactly that reason.
+ */
+export async function openWindowStateStream({ signal, onOpen, onVersion } = {}) {
+  const res = await fetch(`${API_BASE}/window-state/stream`, {
+    headers: authHeaders({ Accept: 'text/event-stream' }),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`Window state stream failed (${res.status})`);
+  onOpen?.();
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Events are separated by a blank line. Whatever follows the last blank
+    // line is a partial event still in flight, so it stays buffered — a frame
+    // split across two network chunks would otherwise be parsed as garbage.
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+
+    for (const frame of frames) {
+      let event = 'message';
+      let data = '';
+      for (const line of frame.split('\n')) {
+        // Lines starting with ':' are comments — that is what the server's
+        // keep-alive is, and ignoring it here is the whole point of sending it.
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (event === 'unavailable') throw new Error('Window state stream unavailable');
+      if (event !== 'version' || !data) continue;
+      try {
+        onVersion?.(JSON.parse(data).updated_at || null);
+      } catch { /* a malformed frame is not worth tearing the stream down for */ }
+    }
+  }
+}
