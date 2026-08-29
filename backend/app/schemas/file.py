@@ -63,6 +63,16 @@ class FileResponse(BaseModel):
     is_trashed: bool = False
     trashed_at: Optional[datetime] = None
     tags: List[str]
+    # Capture metadata read from the media file itself. All optional: only
+    # camera-produced photos and videos carry any of it — screenshots and
+    # screen recordings legitimately have none.
+    taken_at: Optional[datetime] = None
+    gps_latitude: Optional[float] = None
+    gps_longitude: Optional[float] = None
+    camera_make: Optional[str] = None
+    camera_model: Optional[str] = None
+    media_width: Optional[int] = None
+    media_height: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

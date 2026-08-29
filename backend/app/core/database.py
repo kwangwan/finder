@@ -82,6 +82,22 @@ async def init_db():
             "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;",
             # Last editor (distinct from created_by/uploader) for markdown notes
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS last_edited_by UUID REFERENCES kb_users(id) ON DELETE SET NULL;",
+            # Capture metadata read from the media file itself (photo EXIF /
+            # video moov atom). media_scanned_at records that extraction ran,
+            # so the backfill can skip files it has already examined even when
+            # they turned out to carry no metadata at all.
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS taken_at TIMESTAMPTZ;",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS gps_latitude DOUBLE PRECISION;",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS gps_longitude DOUBLE PRECISION;",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS camera_make VARCHAR(128);",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS camera_model VARCHAR(128);",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS media_width INTEGER;",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS media_height INTEGER;",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS media_scanned_at TIMESTAMPTZ;",
+            # The backfill repeatedly asks for "media files not yet scanned";
+            # without this it degrades into a full scan of a 12k-row table
+            # every time the periodic job runs.
+            "CREATE INDEX IF NOT EXISTS ix_kb_files_media_scan ON kb_files (file_type, media_scanned_at) WHERE s3_key IS NOT NULL;",
         ]
 
         # Every timestamp column was originally created as a naive

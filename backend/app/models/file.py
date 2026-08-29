@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, BigInteger, Boolean, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, BigInteger, Boolean, Text, DateTime, ForeignKey, JSON, Float, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -27,6 +27,23 @@ class FileItem(Base):
     is_trashed = Column(Boolean, default=False, nullable=False, index=True)
     trashed_at = Column(DateTime(timezone=True), nullable=True)
     tags = Column(JSON, default=list, nullable=False)
+
+    # Capture metadata read out of the media file itself (EXIF for photos,
+    # the MP4/MOV moov atom for video) — distinct from created_at, which is
+    # only when the file was uploaded here. Kept as real columns rather than
+    # a JSON blob so they stay queryable (sorting or filtering by when a
+    # photo was actually taken is the obvious next thing to want).
+    taken_at = Column(DateTime(timezone=True), nullable=True)
+    gps_latitude = Column(Float, nullable=True)
+    gps_longitude = Column(Float, nullable=True)
+    camera_make = Column(String(128), nullable=True)
+    camera_model = Column(String(128), nullable=True)
+    media_width = Column(Integer, nullable=True)
+    media_height = Column(Integer, nullable=True)
+    # When extraction last ran. Set even when nothing was found, so the
+    # backfill can tell "not attempted yet" from "attempted, this file simply
+    # has no metadata" (screenshots never do) and never re-reads it forever.
+    media_scanned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 

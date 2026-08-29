@@ -9,6 +9,7 @@ from app.routers.trash import _auto_purge_expired
 from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files, backfill_missing_thumbnails
 from app.routers.folders import reconcile_orphaned_trashed_files
 from app.routers.files import prune_old_file_versions
+from app.services.media_metadata_service import backfill_media_metadata
 
 from app.services.deletion_service import deletion_service
 
@@ -46,6 +47,13 @@ async def _periodic_trash_cleanup():
                 pruned = await prune_old_file_versions(db)
                 if pruned:
                     print(f"[{settings.APP_NAME}] Pruned {pruned} old note version-history rows.")
+            # Media uploaded before capture-metadata extraction existed. Runs
+            # in bounded batches keyed off media_scanned_at, so it works
+            # through the backlog over successive passes and then stops.
+            async with AsyncSessionLocal() as db:
+                scanned = await backfill_media_metadata(db)
+                if scanned:
+                    print(f"[{settings.APP_NAME}] Scanned {scanned} media file(s) for capture metadata.")
         except asyncio.CancelledError:
             break
         except Exception as e:

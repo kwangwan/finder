@@ -34,6 +34,7 @@ from app.services.thumbnail_service import thumbnail_service
 from app.services.access_service import access_service
 from app.services.quota_service import quota_service
 from app.services.svg_sanitizer import sanitize_svg
+from app.services import media_metadata_service
 
 router = APIRouter(prefix="/api/storage", tags=["Storage & Uploads"])
 
@@ -331,6 +332,7 @@ async def get_multipart_part_urls(
 @router.post("/multipart/complete", response_model=FileResponse)
 async def complete_multipart_upload(
     req: MultipartCompleteRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
@@ -421,6 +423,11 @@ async def complete_multipart_upload(
         await document_service.index_file_chunks(db, file_item)
     except Exception as e:
         print(f"[Embedding Warning] Indexing failed for multipart file {file_item.id}: {e}")
+
+    # Capture metadata (EXIF / MP4 moov) — off the response path,
+    # since it costs two more ranged reads from storage and is only
+    # ever shown later in the file-info panel.
+    background_tasks.add_task(_scan_media_metadata, file_item.id)
 
     resp = FileResponse.model_validate(file_item)
     if file_item.thumbnail_s3_key:
@@ -732,6 +739,23 @@ async def upload_chunk_part(
 
     return {"upload_id": upload_id, "part_number": part_number, "bytes_received": len(chunk_bytes)}
 
+async def _scan_media_metadata(file_id: uuid.UUID):
+    """Runs as a BackgroundTask after the upload response has been sent.
+
+    Reading capture metadata means two more ranged round trips to MinIO, and
+    there is no reason to make the client wait for them — the value is only
+    ever displayed later, in the file-info panel. Uses its own DB session
+    because the request's is already closed by the time this runs.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            file_item = await db.get(FileItem, file_id)
+            if file_item and not file_item.is_trashed:
+                await media_metadata_service.scan_file(db, file_item)
+    except Exception as e:
+        print(f"[MediaMeta Warning] scan failed for {file_id}: {e}")
+
+
 async def _generate_and_save_video_thumbnail(file_id: uuid.UUID, s3_key: str, filename: str):
     """Runs as a FastAPI BackgroundTask, after /chunk/complete's response has
     already been sent. Video thumbnailing needs the whole object downloaded
@@ -933,6 +957,11 @@ async def complete_chunk_upload(
     except Exception as e:
         print(f"[Embedding Warning] Indexing failed for chunk file {file_item.id}: {e}")
 
+    # Capture metadata (EXIF / MP4 moov) — off the response path,
+    # since it costs two more ranged reads from storage and is only
+    # ever shown later in the file-info panel.
+    background_tasks.add_task(_scan_media_metadata, file_item.id)
+
     resp = FileResponse.model_validate(file_item)
     if file_item.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{file_item.id}"
@@ -958,6 +987,7 @@ async def abort_chunk_upload(
 
 @router.post("/direct-upload", response_model=FileResponse)
 async def direct_upload(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     workspace_id: Optional[uuid.UUID] = Form(None),
     folder_id: Optional[uuid.UUID] = Form(None),
@@ -1082,6 +1112,11 @@ async def direct_upload(
         await document_service.index_file_chunks(db, file_item, raw_bytes=file_bytes)
     except Exception as e:
         print(f"[Embedding Warning] Indexing failed for direct file {file_item.id}: {e}")
+
+    # Capture metadata (EXIF / MP4 moov) — off the response path,
+    # since it costs two more ranged reads from storage and is only
+    # ever shown later in the file-info panel.
+    background_tasks.add_task(_scan_media_metadata, file_item.id)
 
     resp = FileResponse.model_validate(file_item)
     if file_item.thumbnail_s3_key:

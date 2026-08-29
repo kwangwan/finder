@@ -30,6 +30,38 @@ export default function FileInfoModal({ file, onClose }) {
   }
   rows.push({ label: '생성일', value: formatDate(file.created_at) });
   rows.push({ label: '수정일', value: formatDate(file.updated_at) });
+
+  // Capture metadata read out of the file itself. Only camera-produced media
+  // has any — screenshots and screen recordings genuinely carry none — so
+  // each row appears only when that value actually exists, rather than
+  // padding the panel with "-" for files that can never have it.
+  if (file.taken_at) {
+    rows.push({ label: '촬영일시', value: formatDate(file.taken_at) });
+  }
+  if (file.camera_make || file.camera_model) {
+    rows.push({
+      label: '촬영 기기',
+      // Samsung writes Make "samsung" and Model "Galaxy S26+", so the two
+      // read as one device name; other makers repeat the brand in the model
+      // ("Canon" / "Canon EOS R5"), where joining would stutter.
+      value: [file.camera_make, file.camera_model]
+        .filter(Boolean)
+        .filter((part, i, all) => i === 0 || !all[0] || !part.toLowerCase().startsWith(all[0].toLowerCase()))
+        .join(' '),
+    });
+  }
+  if (file.media_width && file.media_height) {
+    rows.push({ label: '해상도', value: `${file.media_width} × ${file.media_height}` });
+  }
+  if (typeof file.gps_latitude === 'number' && typeof file.gps_longitude === 'number') {
+    rows.push({
+      label: '촬영 위치',
+      value: `${file.gps_latitude.toFixed(6)}, ${file.gps_longitude.toFixed(6)}`,
+      href: `https://www.google.com/maps/search/?api=1&query=${file.gps_latitude},${file.gps_longitude}`,
+      hrefLabel: '지도에서 보기',
+    });
+  }
+
   if (file.tags && file.tags.length > 0) {
     rows.push({ label: '태그', value: file.tags.join(', ') });
   }
@@ -88,7 +120,22 @@ export default function FileInfoModal({ file, onClose }) {
           {rows.map(r => (
             <div key={r.label} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>{r.label}</span>
-              <span style={{ fontSize: '0.86rem', color: 'var(--text-primary)', wordBreak: 'break-word' }}>{r.value}</span>
+              <span style={{ fontSize: '0.86rem', color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                {r.value}
+                {r.href && (
+                  <>
+                    {' '}
+                    <a
+                      href={r.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', whiteSpace: 'nowrap' }}
+                    >
+                      {r.hrefLabel}
+                    </a>
+                  </>
+                )}
+              </span>
             </div>
           ))}
         </div>
