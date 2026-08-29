@@ -60,6 +60,61 @@ async def _stream_s3_object(s3_key: str, chunk_size: int = 1024 * 1024):
     finally:
         body.close()
 
+
+# The largest slice served for one ranged media request. Browsers open a
+# <video> with an OPEN-ENDED range (`Range: bytes=0-`, i.e. "from here to the
+# end of the file"), and passing that straight through to S3 makes a single
+# request return the entire object — a 350MB video was being sent as one
+# 350MB 206 response, fully buffered into RAM by get_object_range's .read()
+# before a single byte left the server. That is not streaming; it is a whole-
+# file download that merely happens to be labelled 206. Capping the slice
+# makes each request cheap and bounded, and the browser simply asks for the
+# next range as playback advances (and jumps straight to the range it needs
+# when the viewer seeks) — the normal way media servers behave.
+MAX_MEDIA_RANGE_BYTES = 4 * 1024 * 1024
+
+
+def _bounded_range(range_header: Optional[str], total_size: Optional[int]):
+    """
+    Parse an HTTP Range header and clamp it to at most MAX_MEDIA_RANGE_BYTES.
+
+    Returns (range_header_for_s3, start, end) with an inclusive end, or None
+    when the header is absent/unparseable/unsatisfiable so the caller can fall
+    back to its normal non-ranged path.
+    """
+    if not range_header or not total_size or total_size <= 0:
+        return None
+    value = range_header.strip()
+    if not value.startswith("bytes="):
+        return None
+    spec = value[len("bytes="):].split(",")[0].strip()  # only the first range
+    if "-" not in spec:
+        return None
+    raw_start, _, raw_end = spec.partition("-")
+    try:
+        if not raw_start:
+            # Suffix form "bytes=-N" — the final N bytes of the object.
+            suffix = int(raw_end)
+            if suffix <= 0:
+                return None
+            start = max(0, total_size - suffix)
+            end = total_size - 1
+        else:
+            start = int(raw_start)
+            # An absent end means "through the end of the file" — this is the
+            # open-ended form the capping above exists for.
+            end = int(raw_end) if raw_end else total_size - 1
+    except ValueError:
+        return None
+
+    if start < 0 or start >= total_size:
+        return None
+    end = min(end, total_size - 1)
+    if end < start:
+        return None
+    end = min(end, start + MAX_MEDIA_RANGE_BYTES - 1)
+    return f"bytes={start}-{end}", start, end
+
 @router.get("/config", response_model=StorageConfigResponse)
 async def get_storage_config(
     current_user: User = Depends(get_current_approved_user)
@@ -1027,10 +1082,21 @@ async def preview_file(
     # executes when rendered inline in the app's own origin. Never serve raw SVG
     # bytes inline — always sanitize first (small documents, so skip range-serving).
     if range and not is_svg:
-        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range)
+        bounded = _bounded_range(range, file_item.size_bytes)
+        # Serve at most MAX_MEDIA_RANGE_BYTES per request, so an open-ended
+        # `Range: bytes=0-` from a <video> can't turn into a whole-file
+        # transfer. Content-Range is built from the clamped bounds rather
+        # than echoing S3's, so the browser is told exactly what it got.
+        range_for_s3 = bounded[0] if bounded else range
+        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range_for_s3)
         if res:
+            if bounded:
+                _, start, end = bounded
+                content_range = f"bytes {start}-{end}/{file_item.size_bytes}"
+            else:
+                content_range = res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}"
             headers = {
-                "Content-Range": res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}",
+                "Content-Range": content_range,
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(len(res["body"])),
                 "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
@@ -1111,10 +1177,19 @@ async def direct_file_download(
     safe_name = urllib.parse.quote(file_item.name)
 
     if range:
-        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range)
+        # Same cap as preview_file — a ranged download request must never be
+        # able to pull (and buffer) the whole object in one response.
+        bounded = _bounded_range(range, file_item.size_bytes)
+        range_for_s3 = bounded[0] if bounded else range
+        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range_for_s3)
         if res:
+            if bounded:
+                _, start, end = bounded
+                content_range = f"bytes {start}-{end}/{file_item.size_bytes}"
+            else:
+                content_range = res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}"
             headers = {
-                "Content-Range": res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}",
+                "Content-Range": content_range,
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(len(res["body"])),
                 "Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}",
