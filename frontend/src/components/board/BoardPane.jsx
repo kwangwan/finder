@@ -117,10 +117,10 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
   const removeTask = async (task) => {
     const kids = childrenOf.get(task.id)?.length || 0;
     const confirmed = await showConfirm({
-      title: '작업 삭제',
+      title: '할 일 삭제',
       message: kids
-        ? `'${task.name}' 작업과 하위 작업 ${kids}개를 삭제하시겠습니까?\n작업은 휴지통을 거치지 않고 바로 지워집니다.`
-        : `'${task.name}' 작업을 삭제하시겠습니까?\n작업은 휴지통을 거치지 않고 바로 지워집니다.`,
+        ? `'${task.name}' 할 일과 하위 할 일 ${kids}개를 삭제하시겠습니까?\n할 일은 휴지통을 거치지 않고 바로 지워집니다.`
+        : `'${task.name}' 할 일을 삭제하시겠습니까?\n할 일은 휴지통을 거치지 않고 바로 지워집니다.`,
       confirmText: '삭제',
       danger: true,
     });
@@ -223,7 +223,7 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
           ref={draftRef}
           type="text"
           value={draftName}
-          placeholder={parentId ? '하위 작업 이름' : '작업 이름'}
+          placeholder={parentId ? '하위 할 일 이름' : '할 일 이름'}
           onChange={(e) => setDraftName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -295,11 +295,11 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
           aria-label="일정 이름"
         />
         <span className="bd-header-stat">
-          작업 {tasks.length}개{doneCount > 0 && <span className="bd-header-done"> · 완료 {doneCount}</span>}
+          할 일 {tasks.length}개{doneCount > 0 && <span className="bd-header-done"> · 완료 {doneCount}</span>}
         </span>
         {canWrite && (
           <button type="button" className="btn-primary bd-add-top" onClick={() => { setDraftUnder(null); setDraftName(''); }}>
-            <Plus size={13} /><span>새 작업</span>
+            <Plus size={13} /><span>새 할 일</span>
           </button>
         )}
       </div>
@@ -307,17 +307,17 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
       <div className="bd-scroll">
         <div className="bd-table">
           <div className="bd-row bd-head" aria-hidden="true">
-            <div className="bd-f-name">작업</div>
+            <div className="bd-f-name">할 일</div>
             <div className="bd-f-status">진행 상태</div>
             <div className="bd-f-priority">중요도</div>
-            <div className="bd-f-people">작업자</div>
+            <div className="bd-f-people">담당자</div>
             <div className="bd-f-period">기간</div>
             <div className="bd-f-stamps">생성 · 수정</div>
             <div className="bd-f-actions" />
           </div>
 
           {topLevel.length === 0 && draftUnder === undefined && (
-            <div className="bd-empty-row">아직 작업이 없습니다. ‘새 작업’으로 시작해 보세요.</div>
+            <div className="bd-empty-row">아직 할 일이 없습니다. ‘새 할 일’으로 시작해 보세요.</div>
           )}
 
           {topLevel.map((task) => renderTask(task, 0))}
@@ -325,7 +325,7 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
 
           {canWrite && draftUnder !== null && (
             <button type="button" className="bd-addrow" onClick={() => { setDraftUnder(null); setDraftName(''); }}>
-              <Plus size={13} /><span>작업 추가</span>
+              <Plus size={13} /><span>할 일 추가</span>
             </button>
           )}
         </div>

@@ -128,7 +128,7 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
 
   return (
     <div className="td-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <aside className="td-drawer" role="dialog" aria-label="작업 상세">
+      <aside className="td-drawer" role="dialog" aria-label="할 일 상세">
         <header className="td-head">
           <input
             className="td-title"
@@ -140,7 +140,7 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
               if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
               if (e.key === 'Escape') { e.preventDefault(); setName(task.name); e.target.blur(); }
             }}
-            aria-label="작업 이름"
+            aria-label="할 일 이름"
           />
           <span className="td-state">
             {saveState === 'saving' && <><Loader2 size={12} className="spin" /> 저장 중</>}
@@ -189,7 +189,7 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
         </div>
 
         <div className="td-people">
-          <span className="td-label">작업자</span>
+          <span className="td-label">담당자</span>
           <div className="td-people-list">
             {assignableUsers.length === 0 && <span className="board-muted">지정할 수 있는 사람이 없습니다.</span>}
             {assignableUsers.map((u) => {

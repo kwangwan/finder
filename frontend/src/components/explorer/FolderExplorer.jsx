@@ -307,6 +307,11 @@ export default function FolderExplorer({
       onDragOver: (e) => {
         if (!isItemDrag(e)) return;
         e.preventDefault();
+        // The nearest target wins. Without this the event also reaches the
+        // listing behind the card, which claims the drop for "the folder I am
+        // looking at" — so hovering a folder flickered between that folder and
+        // the current one, and whichever fired last decided where it landed.
+        e.stopPropagation();
         // Crossing workspaces duplicates rather than moves, so the cursor
         // says so — the browser draws the copy badge for 'copy'. Without
         // this every drop looks like a move right up until it isn't.
@@ -317,6 +322,7 @@ export default function FolderExplorer({
         // Ignore bubbling from children, or the highlight flickers as the
         // pointer crosses the target's own inner elements.
         if (e.currentTarget.contains(e.relatedTarget)) return;
+        e.stopPropagation();
         setDropTargetId(prev => (prev === key ? null : prev));
       },
       onDrop: (e) => {

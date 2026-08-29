@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Plus, Trash2, ChevronRight, ChevronDown, Calendar, X, GripVertical, Check, MessageSquare,
+  Plus, Trash2, ChevronRight, ChevronDown, Calendar, GripVertical, Check, MessageSquare,
+  ExternalLink, FolderOpen,
 } from '../../utils/icons';
+import { DateRangePicker } from './controls';
 
 export const PRIORITIES = [
   { value: 'urgent', label: '긴급' },
@@ -180,10 +182,20 @@ export default function TaskRow({
   isDragging = false,
   isDropTarget = false,
   onHover,
+  onOpenBoardWindow,
+  onOpenFolderWindow,
 }) {
   const [editingPeriod, setEditingPeriod] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const peopleRef = useRef(null);
+  const periodRef = useRef(null);
+
+  useEffect(() => {
+    if (!editingPeriod) return undefined;
+    const close = (e) => { if (!periodRef.current?.contains(e.target)) setEditingPeriod(false); };
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
+  }, [editingPeriod]);
 
   useEffect(() => {
     if (!peopleOpen) return undefined;
@@ -216,7 +228,7 @@ export default function TaskRow({
             className={`bd-twisty ${childCount ? '' : 'is-empty'}`}
             onClick={() => childCount && onToggleCollapse?.(task.id)}
             tabIndex={childCount ? 0 : -1}
-            title={childCount ? (collapsed ? '하위 작업 펼치기' : '하위 작업 접기') : undefined}
+            title={childCount ? (collapsed ? '하위 할 일 펼치기' : '하위 할 일 접기') : undefined}
           >
             {childCount ? (collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />) : null}
           </button>
@@ -224,7 +236,7 @@ export default function TaskRow({
         <button type="button" className="bd-name" onClick={() => onOpen?.(task)} title={task.name}>
           {task.name}
         </button>
-        {childCount > 0 && <span className="bd-subcount" title={`하위 작업 ${childCount}개`}>{childCount}</span>}
+        {childCount > 0 && <span className="bd-subcount" title={`하위 할 일 ${childCount}개`}>{childCount}</span>}
         {task.has_detail && <MessageSquare size={11} className="bd-hasnote" title="상세 내용 있음" />}
         {showBoardName && task.board?.name && <span className="bd-rowboard">{task.board.name}</span>}
       </div>
@@ -251,7 +263,7 @@ export default function TaskRow({
           className="bd-people"
           disabled={!canWrite}
           onClick={() => setPeopleOpen((v) => !v)}
-          title={task.assignees.map((a) => a.name).join(', ') || '작업자 지정'}
+          title={task.assignees.map((a) => a.name).join(', ') || '담당자 지정'}
         >
           {task.assignees.length === 0
             ? <span className="bd-avatar is-empty" style={{ width: 22, height: 22 }}>+</span>
@@ -277,45 +289,29 @@ export default function TaskRow({
         )}
       </div>
 
-      <div className={`bd-f-period due-${tone}`}>
-        {editingPeriod ? (
-          <span
-            className="bd-period-edit"
-            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setEditingPeriod(false); }}
-          >
-            <input
-              type="date" autoFocus value={task.start_date || ''} max={task.due_date || undefined}
-              aria-label="시작일"
-              onChange={(e) => onPatch(task, { start_date: e.target.value || null })}
-              onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setEditingPeriod(false); }}
+      <div className={`bd-f-period due-${tone}`} ref={periodRef}>
+        <button
+          type="button" className="bd-period"
+          disabled={!canWrite || busy}
+          onClick={() => setEditingPeriod((v) => !v)}
+          title={canWrite ? '달력에서 기간 고르기' : '기간'}
+        >
+          <Calendar size={11} />
+          <span className="bd-period-text">{periodText(task.start_date, task.due_date)}</span>
+          {left && <span className="bd-remaining">{left}</span>}
+        </button>
+        {/* Clicked out on a calendar rather than typed into two date fields:
+            picking a start and an end is a question about where the days fall
+            relative to each other, which a pair of text boxes cannot show. */}
+        {editingPeriod && (
+          <div className="bd-period-pop">
+            <DateRangePicker
+              start={task.start_date}
+              end={task.due_date}
+              onChange={(from, to) => onPatch(task, { start_date: from, due_date: to })}
+              onClose={() => setEditingPeriod(false)}
             />
-            <span className="bd-dash">–</span>
-            <input
-              type="date" value={task.due_date || ''} min={task.start_date || undefined}
-              aria-label="종료일"
-              onChange={(e) => onPatch(task, { due_date: e.target.value || null })}
-              onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setEditingPeriod(false); }}
-            />
-            {(task.start_date || task.due_date) && (
-              <button
-                type="button" className="bd-period-clear" title="기간 지우기"
-                onClick={() => { onPatch(task, { start_date: null, due_date: null }); setEditingPeriod(false); }}
-              >
-                <X size={11} />
-              </button>
-            )}
-          </span>
-        ) : (
-          <button
-            type="button" className="bd-period"
-            disabled={!canWrite || busy}
-            onClick={() => setEditingPeriod(true)}
-            title={canWrite ? '기간 설정' : '기간'}
-          >
-            <Calendar size={11} />
-            <span className="bd-period-text">{periodText(task.start_date, task.due_date)}</span>
-            {left && <span className="bd-remaining">{left}</span>}
-          </button>
+          </div>
         )}
       </div>
 
@@ -327,13 +323,23 @@ export default function TaskRow({
       </div>
 
       <div className="bd-f-actions">
+        {onOpenBoardWindow && (
+          <button type="button" className="btn-icon" title="이 일정을 새 창에서 열기" onClick={() => onOpenBoardWindow(task)}>
+            <ExternalLink size={13} />
+          </button>
+        )}
+        {onOpenFolderWindow && (
+          <button type="button" className="btn-icon" title="이 일정이 있는 폴더를 새 창에서 열기" onClick={() => onOpenFolderWindow(task)}>
+            <FolderOpen size={13} />
+          </button>
+        )}
         {canWrite && depth === 0 && onAddSub && (
-          <button type="button" className="btn-icon" title="하위 작업 추가" onClick={() => onAddSub(task)}>
+          <button type="button" className="btn-icon" title="하위 할 일 추가" onClick={() => onAddSub(task)}>
             <Plus size={13} />
           </button>
         )}
         {canWrite && onDelete && (
-          <button type="button" className="btn-icon" title="작업 삭제" onClick={() => onDelete(task)}>
+          <button type="button" className="btn-icon" title="할 일 삭제" onClick={() => onDelete(task)}>
             <Trash2 size={13} />
           </button>
         )}

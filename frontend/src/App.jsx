@@ -616,6 +616,25 @@ export default function App() {
     if (!activeWorkspace?.id) return;
     if (!fileIds.length && !folderIds.length) return;
 
+    // Dropping something back where it already is is not a move. Treating it
+    // as one wrote a history entry, announced a move that never happened, and
+    // — because it still refreshed — made a drag that ended on its own row
+    // look like it had done something.
+    const target = targetFolderId ?? null;
+    const alreadyThere = (id, kind) => {
+      if (kind === 'file') {
+        const file = files.find((f) => f.id === id);
+        return file ? (file.folder_id ?? null) === target : false;
+      }
+      const node = findFolderById(folders, id);
+      return node ? (node.parent_id ?? null) === target : false;
+    };
+    const movingFiles = fileIds.filter((id) => !alreadyThere(id, 'file'));
+    const movingFolders = folderIds.filter((id) => !alreadyThere(id, 'folder'));
+    if (!movingFiles.length && !movingFolders.length) return;
+    fileIds = movingFiles;
+    folderIds = movingFolders;
+
     // Where each item is right now, captured before the move. A multi-select
     // drag can pull items out of several different folders, so "put it back"
     // has to mean the folder each one actually came from — a single origin
@@ -2102,6 +2121,7 @@ export default function App() {
             currentUser={currentUser}
             refreshToken={scheduleRefreshToken}
             onOpenBoard={(boardFile) => windowManager.openWindow(boardFile)}
+            onOpenFolder={(folder, wsId) => windowManager.openFolderWindow(folder, wsId || activeWorkspace?.id)}
           />
         ) : activeView === 'reports' ? (
           <ReportsExplorer

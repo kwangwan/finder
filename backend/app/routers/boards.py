@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_approved_user
-from app.models import BoardTask, FileItem, Folder, User, Workspace
+from app.models import BoardTask, FileItem, Folder, User, Workspace, WorkspaceMember
 from app.models.board import (
     BOARD_FILE_TYPE,
     PRIORITIES,
@@ -76,6 +76,8 @@ async def list_workspace_tasks(
     assignee_id: Optional[uuid.UUID] = None,
     task_status: Optional[str] = Query(None, alias="status"),
     priority: Optional[str] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -92,7 +94,9 @@ async def list_workspace_tasks(
     return await board_service.list_workspace_tasks(
         db, workspace_id,
         q=q, include_done=include_done, assignee_id=assignee_id,
-        status=task_status, priority=priority, page=page, page_size=page_size,
+        status=task_status, priority=priority,
+        from_date=from_date, to_date=to_date,
+        page=page, page_size=page_size,
     )
 
 
@@ -103,7 +107,7 @@ class ReorderRequest(BaseModel):
 
 class DigestSettings(BaseModel):
     enabled: Optional[bool] = None
-    utc_offset_hours: Optional[int] = None
+    timezone: Optional[str] = None
     send_hour: Optional[int] = None
     send_minute: Optional[int] = None
     horizons: Optional[List[str]] = None
@@ -116,19 +120,25 @@ async def get_digest_settings(
     current_user: User = Depends(get_current_approved_user),
 ):
     """
-    When the daily reminder goes out, and by whose clock.
+    The reference clock everything is read against, and when each person's
+    reminder goes out.
 
-    Readable by anyone in the workspace — it is applied to them, so being told
-    "you will get a mail at 9" is the least the setting owes them — but only an
-    administrator may change it.
+    Readable by anyone in the workspace — it decides what "오늘" means on every
+    board they look at, so it is not an administrator's private setting. The
+    workspace default is theirs to change; the send time is each person's own.
     """
     if not await access_service.is_workspace_member(db, current_user, workspace_id):
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
-    config = await board_digest_service.get_settings(db, workspace_id)
+    defaults = await board_digest_service.get_settings(db, workspace_id)
+    override = await board_digest_service.get_user_override(db, workspace_id, current_user.id)
+    effective = await board_digest_service.effective_settings(db, workspace_id, current_user.id)
     return {
-        **config,
-        "can_edit": bool(current_user.is_admin),
-        "timezone_choices": board_digest_service.TIMEZONE_CHOICES,
+        "defaults": defaults,
+        "mine": override,
+        "effective": effective,
+        "uses_default": {k: k not in override for k in board_digest_service.USER_OVERRIDABLE},
+        "can_edit_defaults": await _may_edit_workspace_defaults(db, current_user, workspace_id),
+        "timezone_choices": board_digest_service.timezone_options(),
         "horizon_choices": [
             {"value": k, "label": v} for k, v in board_digest_service.HORIZON_LABELS.items()
         ],
@@ -143,12 +153,43 @@ async def put_digest_settings(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="일정 알림 설정은 최고 관리자만 변경할 수 있습니다.")
+    """The workspace default, which everyone follows until they choose otherwise."""
     if not await access_service.is_workspace_member(db, current_user, workspace_id):
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+    if not await _may_edit_workspace_defaults(db, current_user, workspace_id):
+        raise HTTPException(
+            status_code=403,
+            detail="기본값은 워크스페이스 소유자와 소유자가 지정한 관리자만 변경할 수 있습니다.",
+        )
     incoming = {k: v for k, v in req.model_dump().items() if v is not None}
     return await board_digest_service.save_settings(db, workspace_id, incoming)
+
+
+class MyDigestSettings(BaseModel):
+    # `None` means "follow the workspace default again", which is why every
+    # field is optional and nothing is dropped before it reaches the service.
+    enabled: Optional[bool] = None
+    send_hour: Optional[int] = None
+    send_minute: Optional[int] = None
+    horizons: Optional[List[str]] = None
+
+
+@router.put("/digest-settings/me")
+async def put_my_digest_settings(
+    workspace_id: uuid.UUID,
+    req: MyDigestSettings,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """When *this* person's reminder goes out, and what it covers."""
+    if not await access_service.is_workspace_member(db, current_user, workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+    incoming = {k: v for k, v in req.model_dump().items() if k in req.model_fields_set}
+    await board_digest_service.save_user_override(db, workspace_id, current_user.id, incoming)
+    return {
+        "mine": await board_digest_service.get_user_override(db, workspace_id, current_user.id),
+        "effective": await board_digest_service.effective_settings(db, workspace_id, current_user.id),
+    }
 
 
 @router.post("/digest-settings/test")
@@ -163,20 +204,51 @@ async def send_test_digest(
     A setting whose effect is invisible until tomorrow morning is one nobody
     can check they got right.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="최고 관리자만 사용할 수 있습니다.")
+    if not await access_service.is_workspace_member(db, current_user, workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
     workspace = await db.get(Workspace, workspace_id)
     if workspace is None:
         raise HTTPException(status_code=404, detail="워크스페이스를 찾을 수 없습니다.")
-    config = await board_digest_service.get_settings(db, workspace_id)
-    per_user = await board_digest_service.collect_for_workspace(db, workspace_id, config)
+    config = await board_digest_service.effective_settings(db, workspace_id, current_user.id)
+    wide = dict(config)
+    wide["horizons"] = list(board_digest_service.HORIZONS)
+    per_user = await board_digest_service.collect_for_workspace(db, workspace_id, wide)
     entry = per_user.get(current_user.id)
     if entry is None:
-        return {"sent": False, "reason": "본인에게 배정된 작업 중 설정한 기간에 해당하는 것이 없습니다."}
-    today = board_digest_service.local_today(config["utc_offset_hours"])
+        return {"sent": False, "reason": "본인에게 배정된 할 일 중 설정한 기간에 해당하는 것이 없습니다."}
+    entry = board_digest_service.narrow_to(entry, config["horizons"])
+    if not any(entry["buckets"].values()):
+        return {"sent": False, "reason": "설정한 기간에 해당하는 할 일이 없습니다."}
+    today = board_digest_service.local_today(config["timezone"])
     subject, html, text = board_digest_service.render_digest(workspace.name, entry, config, today)
     ok = email_service.send_notification(current_user.email, f"[미리보기] {subject}", html, text)
     return {"sent": bool(ok), "to": current_user.email}
+
+
+async def _may_edit_workspace_defaults(db: AsyncSession, user: User, workspace_id) -> bool:
+    """
+    Who sets the workspace's reference clock and default reminder.
+
+    The person who owns the workspace and the administrators they appointed —
+    it is a decision about how *this* space reads dates, so it belongs to
+    whoever runs it. The shared workspace is the exception: it is owned by a
+    system account nobody signs in as, so it falls to the administrators who
+    manage it.
+    """
+    workspace = await db.get(Workspace, workspace_id)
+    if workspace is None:
+        return False
+    if workspace.is_shared:
+        return bool(user.is_admin)
+    if workspace.owner_id == user.id:
+        return True
+    role = (await db.execute(
+        select(WorkspaceMember.role).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user.id,
+        )
+    )).scalar_one_or_none()
+    return role in ("owner", "admin")
 
 
 class BoardCreate(BaseModel):

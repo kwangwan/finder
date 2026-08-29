@@ -1449,6 +1449,20 @@ export async function saveDigestSettings(workspaceId, payload) {
   return res.json();
 }
 
+/** This person's own send time and sections; null on a field follows the default again. */
+export async function saveMyDigestSettings(workspaceId, payload) {
+  const res = await fetch(`${API_BASE}/boards/digest-settings/me?workspace_id=${workspaceId}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `설정을 저장하지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function sendTestDigest(workspaceId) {
   const res = await fetch(`${API_BASE}/boards/digest-settings/test?workspace_id=${workspaceId}`, {
     method: 'POST',
@@ -1464,7 +1478,8 @@ export async function sendTestDigest(workspaceId) {
 /** Every task in a workspace, soonest deadline first then most important. */
 export async function listWorkspaceTasks({
   workspaceId, q = '', includeDone = false, assigneeId = null,
-  status = null, priority = null, page = 1, pageSize = 30,
+  status = null, priority = null, fromDate = null, toDate = null,
+  page = 1, pageSize = 30,
 } = {}) {
   const params = new URLSearchParams({
     workspace_id: workspaceId,
@@ -1476,6 +1491,8 @@ export async function listWorkspaceTasks({
   if (assigneeId) params.set('assignee_id', assigneeId);
   if (status) params.set('status', status);
   if (priority) params.set('priority', priority);
+  if (fromDate) params.set('from_date', fromDate);
+  if (toDate) params.set('to_date', toDate);
   const res = await fetch(`${API_BASE}/boards/tasks?${params}`, { headers: authHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => null);

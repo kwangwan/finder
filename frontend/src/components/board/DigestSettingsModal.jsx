@@ -1,59 +1,102 @@
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Mail, Check, AlertTriangle } from '../../utils/icons';
-import { getDigestSettings, saveDigestSettings, sendTestDigest } from '../../api';
+import { X, Loader2, Mail, Check, AlertTriangle, Settings as SettingsIcon } from '../../utils/icons';
+import {
+  getDigestSettings, saveDigestSettings, saveMyDigestSettings, sendTestDigest,
+} from '../../api';
 import { useDialog } from '../../context/DialogContext';
+import { Dropdown, Toggle } from './controls';
+
+const pad = (n) => String(n).padStart(2, '0');
+const HOURS = Array.from({ length: 24 }, (_, h) => ({ value: h, label: `${pad(h)}시` }));
+const MINUTES = [0, 10, 20, 30, 40, 50].map((m) => ({ value: m, label: `${pad(m)}분` }));
 
 /**
- * When the daily deadline mail goes out, and by whose clock.
+ * The reference clock, and when each person's reminder arrives.
  *
- * One setting for the whole workspace rather than a preference per person:
- * a deadline is the same moment for everyone working to it, and letting each
- * person pick their own "today" would make two people reading the same board
- * disagree about what is due.
+ * Split deliberately: the clock is one setting for the whole workspace, since
+ * it decides what "오늘" means on every board — two people disagreeing about
+ * which day it is would make their boards disagree. When the mail lands is
+ * nobody else's business, so that is each person's own, starting from whatever
+ * the administrator set as the default.
  */
 export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen, onClose }) {
   const { showAlert } = useDialog();
-  const [config, setConfig] = useState(null);
+  const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [tab, setTab] = useState('mine');
+
+  const [mine, setMine] = useState({});
+  const [defaults, setDefaults] = useState({});
+
+  const load = () => {
+    setIsLoading(true);
+    getDigestSettings(workspaceId)
+      .then((res) => {
+        setData(res);
+        setDefaults(res.defaults);
+        setMine(res.effective);
+        setTab(res.can_edit_defaults ? 'mine' : 'mine');
+      })
+      .catch(async (e) => { await showAlert({ title: '불러오지 못했습니다', message: e.message, type: 'error' }); })
+      .finally(() => setIsLoading(false));
+  };
 
   useEffect(() => {
     if (!isOpen || !workspaceId) return;
-    let cancelled = false;
-    setIsLoading(true);
-    getDigestSettings(workspaceId)
-      .then((res) => { if (!cancelled) setConfig(res); })
-      .catch(async (e) => { if (!cancelled) await showAlert({ title: '불러오지 못했습니다', message: e.message, type: 'error' }); })
-      .finally(() => { if (!cancelled) setIsLoading(false); });
-    return () => { cancelled = true; };
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, workspaceId]);
 
   if (!isOpen) return null;
 
-  const canEdit = !!config?.can_edit;
-  const set = (patch) => setConfig((prev) => ({ ...prev, ...patch }));
+  const canEditDefaults = !!data?.can_edit_defaults;
+  const editing = tab === 'mine' ? mine : defaults;
+  const setEditing = tab === 'mine' ? setMine : setDefaults;
+  const readOnly = tab === 'defaults' && !canEditDefaults;
 
   const toggleHorizon = (value) => {
-    const current = config.horizons || [];
-    set({ horizons: current.includes(value) ? current.filter((h) => h !== value) : [...current, value] });
+    const current = editing.horizons || [];
+    setEditing({ ...editing, horizons: current.includes(value) ? current.filter((h) => h !== value) : [...current, value] });
   };
 
   const save = async () => {
     setIsSaving(true);
     try {
-      const saved = await saveDigestSettings(workspaceId, {
-        enabled: config.enabled,
-        utc_offset_hours: config.utc_offset_hours,
-        send_hour: config.send_hour,
-        send_minute: config.send_minute,
-        horizons: config.horizons,
-      });
-      setConfig((prev) => ({ ...prev, ...saved }));
+      if (tab === 'mine') {
+        await saveMyDigestSettings(workspaceId, {
+          enabled: mine.enabled,
+          send_hour: mine.send_hour,
+          send_minute: mine.send_minute,
+          horizons: mine.horizons,
+        });
+      } else {
+        await saveDigestSettings(workspaceId, {
+          enabled: defaults.enabled,
+          timezone: defaults.timezone,
+          send_hour: defaults.send_hour,
+          send_minute: defaults.send_minute,
+          horizons: defaults.horizons,
+        });
+      }
       onClose(true);
     } catch (e) {
       await showAlert({ title: '저장하지 못했습니다', message: e.message, type: 'error' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const useDefault = async () => {
+    setIsSaving(true);
+    try {
+      await saveMyDigestSettings(workspaceId, {
+        enabled: null, send_hour: null, send_minute: null, horizons: null,
+      });
+      load();
+    } catch (e) {
+      await showAlert({ title: '되돌리지 못했습니다', message: e.message, type: 'error' });
     } finally {
       setIsSaving(false);
     }
@@ -65,9 +108,7 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
       const res = await sendTestDigest(workspaceId);
       await showAlert({
         title: res.sent ? '보냈습니다' : '보내지 않았습니다',
-        message: res.sent
-          ? `${res.to} 주소로 미리보기를 보냈습니다.`
-          : (res.reason || '메일을 보내지 못했습니다.'),
+        message: res.sent ? `${res.to} 주소로 미리보기를 보냈습니다.` : (res.reason || '메일을 보내지 못했습니다.'),
         type: res.sent ? 'success' : 'warning',
       });
     } catch (e) {
@@ -77,120 +118,138 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
     }
   };
 
-  const pad = (n) => String(n).padStart(2, '0');
+  const overridden = Object.keys(data?.mine || {}).length > 0;
 
   return (
     <div className="modal-overlay" onClick={() => onClose(false)}>
-      <div className="modal-content modal-self-padded digest-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="digest-head">
-          <Mail size={18} color="var(--accent-primary)" />
-          <h2>일정 알림 설정</h2>
+      <div className="modal-content modal-self-padded dg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="dg-head">
+          <SettingsIcon size={17} color="var(--accent-primary)" />
+          <h2>일정 설정</h2>
           <button type="button" className="btn-icon" onClick={() => onClose(false)} title="닫기"><X size={17} /></button>
         </div>
 
-        {isLoading || !config ? (
-          <div className="board-empty"><Loader2 size={18} className="spin" /><span>불러오는 중...</span></div>
+        {isLoading || !data ? (
+          <div className="bd-empty"><Loader2 size={18} className="spin" /><span>불러오는 중...</span></div>
         ) : (
           <>
-            <p className="digest-intro">
-              <strong>{workspaceName}</strong>의 모든 이용자에게 적용됩니다. 각자에게 배정된 작업만
-              담아 개인별로 발송됩니다.
-            </p>
+            <div className="dg-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={tab === 'mine'} className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>
+                내 알림
+              </button>
+              <button type="button" role="tab" aria-selected={tab === 'defaults'} className={tab === 'defaults' ? 'on' : ''} onClick={() => setTab('defaults')}>
+                워크스페이스 기본값
+              </button>
+            </div>
 
-            {!config.email_configured && (
-              <div className="digest-warn">
-                <AlertTriangle size={14} />
-                <span>메일 발송이 아직 설정되지 않아 실제로는 보내지지 않습니다.</span>
+            <div className="dg-body">
+              {tab === 'defaults' && (
+                <>
+                  <p className="dg-note">
+                    <strong>{workspaceName}</strong>에서 아직 따로 설정하지 않은 사람에게 적용됩니다.
+                  </p>
+                  <div className="dg-field">
+                    <span className="dg-label">기준시</span>
+                    <Dropdown
+                      value={defaults.timezone}
+                      options={(data.timezone_choices || []).map((tz) => ({ value: tz.value, label: tz.label }))}
+                      onChange={(v) => setDefaults({ ...defaults, timezone: v })}
+                      label="기준시"
+                      className="dg-wide"
+                    />
+                    <small>
+                      기한을 판단하는 기준 시각입니다. 이 워크스페이스의 모든 일정에 함께 적용되며, 개인별로는 바꿀 수 없습니다.
+                    </small>
+                  </div>
+                </>
+              )}
+
+              {tab === 'mine' && (
+                <p className="dg-note">
+                  {overridden
+                    ? '워크스페이스 기본값 대신 아래 설정이 적용되고 있습니다.'
+                    : '지금은 워크스페이스 기본값을 따르고 있습니다. 아래에서 바꾸면 나에게만 적용됩니다.'}
+                  {' '}기준시는 <strong>{(data.timezone_choices || []).find((t) => t.value === data.defaults.timezone)?.label || data.defaults.timezone}</strong>입니다.
+                </p>
+              )}
+
+              {!data.email_configured && (
+                <div className="dg-warn">
+                  <AlertTriangle size={14} />
+                  <span>메일 발송이 아직 설정되지 않아 실제로는 보내지지 않습니다.</span>
+                </div>
+              )}
+
+              <div className="dg-field">
+                <span className="dg-label">알림 메일</span>
+                <Toggle
+                  on={!!editing.enabled}
+                  onChange={(v) => !readOnly && setEditing({ ...editing, enabled: v })}
+                  onLabel="매일 받기"
+                  offLabel="받지 않기"
+                  title="매일 알림 메일을 받을지 여부"
+                />
               </div>
-            )}
 
-            <label className="digest-switch">
-              <input
-                type="checkbox"
-                checked={!!config.enabled}
-                disabled={!canEdit}
-                onChange={(e) => set({ enabled: e.target.checked })}
-              />
-              <span>매일 알림 메일 보내기</span>
-            </label>
-
-            <div className="digest-grid">
-              <label>
-                <span>기준시</span>
-                <select
-                  value={config.utc_offset_hours}
-                  disabled={!canEdit}
-                  onChange={(e) => set({ utc_offset_hours: Number(e.target.value) })}
-                >
-                  {(config.timezone_choices || []).map((tz) => (
-                    <option key={tz.value} value={tz.value}>{tz.label}</option>
-                  ))}
-                </select>
-                <small>‘오늘’과 ‘이번 주’를 판단하는 기준입니다.</small>
-              </label>
-
-              <label>
-                <span>발송 시각</span>
-                <span className="digest-time">
-                  <select
-                    value={config.send_hour}
-                    disabled={!canEdit}
-                    onChange={(e) => set({ send_hour: Number(e.target.value) })}
-                  >
-                    {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{pad(h)}시</option>)}
-                  </select>
-                  <select
-                    value={config.send_minute}
-                    disabled={!canEdit}
-                    onChange={(e) => set({ send_minute: Number(e.target.value) })}
-                  >
-                    {[0, 10, 20, 30, 40, 50].map((m) => <option key={m} value={m}>{pad(m)}분</option>)}
-                  </select>
+              <div className="dg-field">
+                <span className="dg-label">받는 시각</span>
+                <span className="dg-time">
+                  <Dropdown
+                    value={editing.send_hour} options={HOURS} label="시"
+                    onChange={(v) => !readOnly && setEditing({ ...editing, send_hour: v })}
+                  />
+                  <Dropdown
+                    value={editing.send_minute} options={MINUTES} label="분"
+                    onChange={(v) => !readOnly && setEditing({ ...editing, send_minute: v })}
+                  />
                 </span>
                 <small>기준시로 매일 이 시각에 한 번 보냅니다.</small>
-              </label>
-            </div>
-
-            <div className="digest-horizons">
-              <span className="digest-label">메일에 담을 기간</span>
-              <div className="digest-chips">
-                {(config.horizon_choices || []).map((h) => {
-                  const on = (config.horizons || []).includes(h.value);
-                  return (
-                    <button
-                      key={h.value}
-                      type="button"
-                      className={`digest-chip ${on ? 'on' : ''}`}
-                      disabled={!canEdit}
-                      onClick={() => toggleHorizon(h.value)}
-                    >
-                      {on && <Check size={11} />}
-                      <span>{h.label}</span>
-                    </button>
-                  );
-                })}
               </div>
-              <small>기한이 지난 작업은 항상 ‘오늘 중’에 함께 담깁니다.</small>
+
+              <div className="dg-field">
+                <span className="dg-label">메일에 담을 기간</span>
+                <div className="dg-chips">
+                  {(data.horizon_choices || []).map((h) => {
+                    const on = (editing.horizons || []).includes(h.value);
+                    return (
+                      <button
+                        key={h.value}
+                        type="button"
+                        className={`dg-chip ${on ? 'on' : ''}`}
+                        disabled={readOnly}
+                        onClick={() => toggleHorizon(h.value)}
+                      >
+                        {on && <Check size={11} />}
+                        <span>{h.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <small>오늘부터 세어 각 기간에 마감되는 할 일을 담습니다. 기한이 지난 것은 ‘오늘 중’에 함께 담기고, 한 할 일은 가장 가까운 기간 한 곳에만 나옵니다.</small>
+              </div>
             </div>
 
-            <div className="digest-actions">
-              {canEdit ? (
+            <div className="dg-actions">
+              {tab === 'mine' && (
                 <>
                   <button type="button" className="btn-secondary" onClick={test} disabled={isTesting}>
                     {isTesting ? <Loader2 size={13} className="spin" /> : <Mail size={13} />}
                     <span>나에게 미리보기 보내기</span>
                   </button>
-                  <span className="digest-spacer" />
-                  <button type="button" className="btn-secondary" onClick={() => onClose(false)}>취소</button>
-                  <button type="button" className="btn-primary" onClick={save} disabled={isSaving}>
-                    {isSaving ? '저장 중...' : '저장'}
-                  </button>
+                  {overridden && (
+                    <button type="button" className="btn-secondary" onClick={useDefault} disabled={isSaving}>
+                      기본값으로
+                    </button>
+                  )}
                 </>
-              ) : (
-                <>
-                  <span className="digest-readonly">설정 변경은 최고 관리자만 할 수 있습니다.</span>
-                  <button type="button" className="btn-secondary" onClick={() => onClose(false)}>닫기</button>
-                </>
+              )}
+              {readOnly && <span className="dg-readonly">기본값은 워크스페이스 소유자와 관리자만 바꿀 수 있습니다.</span>}
+              <span className="dg-spacer" />
+              <button type="button" className="btn-secondary" onClick={() => onClose(false)}>닫기</button>
+              {!readOnly && (
+                <button type="button" className="btn-primary" onClick={save} disabled={isSaving}>
+                  {isSaving ? '저장 중...' : '저장'}
+                </button>
               )}
             </div>
           </>

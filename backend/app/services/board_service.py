@@ -262,6 +262,8 @@ async def list_workspace_tasks(
     assignee_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     priority: Optional[str] = None,
+    from_date=None,
+    to_date=None,
     page: int = 1,
     page_size: int = 30,
 ):
@@ -295,6 +297,21 @@ async def list_workspace_tasks(
             .where(BoardTaskAssignee.task_id == BoardTask.id, BoardTaskAssignee.user_id == assignee_id)
             .exists()
         )
+
+    # A period filter matches anything that *overlaps* the range, not only what
+    # begins or ends inside it: something running from last month to next month
+    # is very much happening this week, and asking about this week and not being
+    # shown it would be wrong.
+    #
+    # A row with only one of the two dates spans that single day.
+    if from_date or to_date:
+        span_start = func.coalesce(BoardTask.start_date, BoardTask.due_date)
+        span_end = func.coalesce(BoardTask.due_date, BoardTask.start_date)
+        conds.append(span_start.isnot(None))
+        if to_date:
+            conds.append(span_start <= to_date)
+        if from_date:
+            conds.append(span_end >= from_date)
 
     base = select(BoardTask).join(FileItem, FileItem.id == BoardTask.file_id).where(and_(*conds))
     total = (await db.execute(

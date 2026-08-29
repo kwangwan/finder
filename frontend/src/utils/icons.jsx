@@ -55,6 +55,7 @@ import {
   Film as LuFilm,
   Filter as LuFilter,
   Folder as LuFolder,
+  FolderOpen as LuFolderOpen,
   FolderArchive as LuFolderArchive,
   FolderInput as LuFolderInput,
   FolderPlus as LuFolderPlus,
@@ -296,6 +297,7 @@ export const FileText = makeIcon(LuFileText, PxFileText);
 export const Film = makeIcon(LuFilm, PxVideo);
 export const Filter = makeIcon(LuFilter, PxFilter);
 export const Folder = makeIcon(LuFolder, PxFolder);
+export const FolderOpen = makeIcon(LuFolderOpen, PxFolder);
 export const FolderArchive = makeIcon(LuFolderArchive, PxFolder);
 export const FolderInput = makeIcon(LuFolderInput, PxMove);
 export const FolderPlus = makeIcon(LuFolderPlus, PxFolderPlus);

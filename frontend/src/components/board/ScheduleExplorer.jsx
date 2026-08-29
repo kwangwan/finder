@@ -1,15 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CalendarCheck, Search, X, Loader2, ChevronLeft, ChevronRight, RefreshCw, Settings,
-  Folder as FolderIcon,
+  Folder as FolderIcon, Clock,
 } from '../../utils/icons';
-import { listWorkspaceTasks, updateBoardTask, deleteBoardTask, getFileDetail, getBoard } from '../../api';
+import {
+  listWorkspaceTasks, updateBoardTask, deleteBoardTask, getFileDetail, getBoard, getDigestSettings,
+} from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import TaskRow from './TaskRow';
 import TaskDetailDrawer from './TaskDetailDrawer';
 import DigestSettingsModal from './DigestSettingsModal';
+import { Dropdown, DateRangeField, Toggle } from './controls';
 
 const PAGE_SIZE = 40;
+
+/** The wall clock in the workspace's reference zone, to the second. */
+function formatInZone(date, timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('ko-KR', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  } catch (e) {
+    return date.toLocaleString('ko-KR');
+  }
+}
 
 const GROUPINGS = [
   { value: 'urgency', label: '기한순' },
@@ -27,7 +43,7 @@ const GROUPINGS = [
  * spans all of them, which no single board can.
  */
 export default function ScheduleExplorer({
-  workspaceId, workspaceName = '', currentUser, onOpenBoard, refreshToken = 0,
+  workspaceId, workspaceName = '', currentUser, onOpenBoard, onOpenFolder, refreshToken = 0,
 }) {
   const { showConfirm, showAlert } = useDialog();
   const [data, setData] = useState({ items: [], total: 0, page: 1, total_pages: 1 });
@@ -42,18 +58,41 @@ export default function ScheduleExplorer({
   const [status, setStatus] = useState('');
   const [grouping, setGrouping] = useState('urgency');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsRefresh, setSettingsRefresh] = useState(0);
   const [openTask, setOpenTask] = useState(null);
   const [busyId, setBusyId] = useState(null);
   // Who may be assigned differs per board (the shared workspace allows only
   // yourself), so it is fetched for the board a task actually belongs to.
   const [peopleByBoard, setPeopleByBoard] = useState({});
+  const [fromDate, setFromDate] = useState(null);
+  const [toDate, setToDate] = useState(null);
+  // The reference clock everything on a board is read against. Shown so nobody
+  // has to guess which day the app thinks it is.
+  const [zone, setZone] = useState({ timezone: null, label: '' });
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    getDigestSettings(workspaceId)
+      .then((res) => {
+        const tz = res.defaults?.timezone;
+        const label = (res.timezone_choices || []).find((t) => t.value === tz)?.label || tz;
+        setZone({ timezone: tz, label });
+      })
+      .catch(() => {});
+  }, [workspaceId, settingsRefresh]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => { setSearch(query.trim()); setPage(1); }, 300);
     return () => clearTimeout(t);
   }, [query]);
 
-  useEffect(() => { setPage(1); }, [includeDone, mineOnly, priority, status, workspaceId]);
+  useEffect(() => { setPage(1); }, [includeDone, mineOnly, priority, status, fromDate, toDate, workspaceId]);
 
   const load = useCallback(async () => {
     if (!workspaceId) return;
@@ -66,6 +105,8 @@ export default function ScheduleExplorer({
         assigneeId: mineOnly ? currentUser?.id : null,
         priority: priority || null,
         status: status || null,
+        fromDate,
+        toDate,
         page,
         pageSize: PAGE_SIZE,
       });
@@ -77,7 +118,7 @@ export default function ScheduleExplorer({
     } finally {
       setIsLoading(false);
     }
-  }, [workspaceId, search, includeDone, mineOnly, priority, status, page, currentUser?.id]);
+  }, [workspaceId, search, includeDone, mineOnly, priority, status, fromDate, toDate, page, currentUser?.id]);
 
   useEffect(() => { load(); }, [load, refreshToken]);
 
@@ -111,8 +152,8 @@ export default function ScheduleExplorer({
 
   const removeTask = async (task) => {
     const confirmed = await showConfirm({
-      title: '작업 삭제',
-      message: `'${task.name}' 작업을 삭제하시겠습니까?\n하위 작업이 있다면 함께 지워지며, 휴지통을 거치지 않습니다.`,
+      title: '할 일 삭제',
+      message: `'${task.name}' 할 일을 삭제하시겠습니까?\n하위 할 일이 있다면 함께 지워지며, 휴지통을 거치지 않습니다.`,
       confirmText: '삭제',
       danger: true,
     });
@@ -129,6 +170,13 @@ export default function ScheduleExplorer({
   const openBoard = async (task) => {
     if (!task.board?.id) return;
     try { onOpenBoard?.(await getFileDetail(task.board.id)); } catch (e) { /* removed since listing */ }
+  };
+
+  // The folder is where the schedule's attachments live, so getting to it from
+  // a row is the difference between "I can see this" and "I can work on it".
+  const openFolder = (task) => {
+    if (!task.board) return;
+    onOpenFolder?.({ id: task.board.folder_id || null, name: task.board.name }, task.board.workspace_id);
   };
 
   /**
@@ -169,7 +217,7 @@ export default function ScheduleExplorer({
       .filter((g) => g.items.length);
   }, [data.items, grouping]);
 
-  const hasFilter = !!(search || includeDone || mineOnly || priority || status);
+  const hasFilter = !!(search || includeDone || mineOnly || priority || status || fromDate || toDate);
 
   return (
     <div className="sc-explorer">
@@ -180,9 +228,14 @@ export default function ScheduleExplorer({
           <span className="sc-count">{data.total}건</span>
         </div>
         <div className="sc-head-actions">
-          <button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)} title="일정 알림 설정">
+          <span className="sc-clock" title={`기준시: ${zone.label || '불러오는 중'}`}>
+            <Clock size={13} />
+            <span className="sc-clock-time">{zone.timezone ? formatInZone(now, zone.timezone) : '—'}</span>
+            <span className="sc-clock-zone">{zone.label ? zone.label.replace(/\s*\(.*\)$/, '') : ''}</span>
+          </span>
+          <button type="button" className="btn-secondary" onClick={() => setSettingsOpen(true)} title="기준시와 알림 설정">
             <Settings size={14} />
-            <span className="hide-mobile">알림 설정</span>
+            <span className="hide-mobile">설정</span>
           </button>
           <button type="button" className="btn-secondary" onClick={load} disabled={isLoading}>
             <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
@@ -196,7 +249,7 @@ export default function ScheduleExplorer({
           <Search size={14} />
           <input
             type="text" value={query} onChange={(e) => setQuery(e.target.value)}
-            placeholder="작업 이름 검색..." aria-label="작업 검색"
+            placeholder="할 일 이름 검색..." aria-label="할 일 검색"
           />
           {query && <button type="button" onClick={() => setQuery('')} title="검색어 지우기"><X size={13} /></button>}
         </div>
@@ -214,23 +267,47 @@ export default function ScheduleExplorer({
           ))}
         </div>
 
-        <select value={priority} onChange={(e) => setPriority(e.target.value)} aria-label="중요도로 거르기">
-          <option value="">중요도 전체</option>
-          <option value="urgent">긴급</option><option value="high">높음</option>
-          <option value="normal">보통</option><option value="low">낮음</option>
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="진행 상태로 거르기">
-          <option value="">상태 전체</option>
-          <option value="todo">대기</option><option value="in_progress">진행 중</option>
-          <option value="review">검토</option><option value="done">완료</option><option value="hold">보류</option>
-        </select>
+        <Dropdown
+          value={priority}
+          label="중요도로 거르기"
+          options={[
+            { value: '', label: '중요도 전체' },
+            { value: 'urgent', label: '긴급' }, { value: 'high', label: '높음' },
+            { value: 'normal', label: '보통' }, { value: 'low', label: '낮음' },
+          ]}
+          onChange={setPriority}
+        />
+        <Dropdown
+          value={status}
+          label="진행 상태로 거르기"
+          options={[
+            { value: '', label: '상태 전체' },
+            { value: 'todo', label: '대기' }, { value: 'in_progress', label: '진행 중' },
+            { value: 'review', label: '검토' }, { value: 'done', label: '완료' },
+            { value: 'hold', label: '보류' },
+          ]}
+          onChange={setStatus}
+        />
 
-        <button type="button" className={`sc-toggle ${mineOnly ? 'on' : ''}`} onClick={() => setMineOnly((v) => !v)}>
-          내 작업만
-        </button>
-        <button type="button" className={`sc-toggle ${includeDone ? 'on' : ''}`} onClick={() => setIncludeDone((v) => !v)}>
-          완료 포함
-        </button>
+        {/* Matches anything whose period touches the range, so a long-running
+            item still shows up in a week it is actually running through. */}
+        <DateRangeField
+          start={fromDate}
+          end={toDate}
+          placeholder="기간 전체"
+          onChange={(a, b) => { setFromDate(a); setToDate(b); }}
+        />
+
+        <Toggle
+          on={mineOnly} onChange={setMineOnly}
+          onLabel="내 담당만 보는 중" offLabel="모든 담당자"
+          title="나에게 배정된 것만 볼지"
+        />
+        <Toggle
+          on={includeDone} onChange={setIncludeDone}
+          onLabel="완료도 함께 보는 중" offLabel="완료는 숨김"
+          title="완료한 할 일을 목록에 포함할지"
+        />
       </div>
 
       {isLoading && data.items.length === 0 ? (
@@ -240,9 +317,9 @@ export default function ScheduleExplorer({
       ) : data.items.length === 0 ? (
         <div className="sc-empty">
           <CalendarCheck size={28} color="var(--text-muted)" />
-          <h3>{hasFilter ? '조건에 맞는 작업이 없습니다' : '아직 등록된 작업이 없습니다'}</h3>
+          <h3>{hasFilter ? '조건에 맞는 할 일이 없습니다' : '아직 등록된 할 일이 없습니다'}</h3>
           <p>
-            {hasFilter ? '검색어나 필터를 바꿔 보세요.' : '폴더에서 ‘새 일정’을 만들고 작업을 추가하면 여기에 모입니다.'}
+            {hasFilter ? '검색어나 필터를 바꿔 보세요.' : '폴더에서 ‘새 일정’을 만들고 할 일을 추가하면 여기에 모입니다.'}
           </p>
         </div>
       ) : (
@@ -275,6 +352,8 @@ export default function ScheduleExplorer({
                     onOpen={(t) => setOpenTask(t)}
                     onPatch={patch}
                     onDelete={removeTask}
+                    onOpenBoardWindow={openBoard}
+                    onOpenFolderWindow={openFolder}
                   />
                 ))}
               </div>
@@ -299,7 +378,7 @@ export default function ScheduleExplorer({
         workspaceId={workspaceId}
         workspaceName={workspaceName}
         isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => { setSettingsOpen(false); setSettingsRefresh((n) => n + 1); }}
       />
 
       {openTask && (

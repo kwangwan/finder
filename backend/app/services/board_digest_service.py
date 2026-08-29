@@ -2,6 +2,7 @@ import asyncio
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from sqlalchemy import select
@@ -14,21 +15,109 @@ from app.services.email_service import email_service
 
 logger = logging.getLogger(__name__)
 
-# Offsets from UTC that a person would actually choose, as (value, label). Kept
-# to a list rather than a free number so a typo cannot silently move everyone's
-# idea of "today" by nine hours.
+# Real time zones, not fixed offsets.
+#
+# An offset is wrong for half the year anywhere that changes its clocks — New
+# York is UTC-5 in January and UTC-4 in July — and two places that share an
+# offset still want to see their own name: the setting is read far more often
+# than it is changed, and "한국 표준시" tells someone they got it right in a way
+# "UTC+9" does not.
 TIMEZONE_CHOICES = [
-    {"value": 9, "label": "한국 표준시 (UTC+9)"},
-    {"value": 0, "label": "협정 세계시 (UTC)"},
-    {"value": -8, "label": "미국 서부 (UTC-8)"},
-    {"value": -5, "label": "미국 동부 (UTC-5)"},
-    {"value": 1, "label": "중부 유럽 (UTC+1)"},
-    {"value": 8, "label": "중국·싱가포르 (UTC+8)"},
+    ("Pacific/Midway", "미드웨이"),
+    ("Pacific/Honolulu", "하와이"),
+    ("America/Anchorage", "알래스카"),
+    ("America/Los_Angeles", "미국 서부 (로스앤젤레스)"),
+    ("America/Vancouver", "캐나다 밴쿠버"),
+    ("America/Denver", "미국 산악 (덴버)"),
+    ("America/Chicago", "미국 중부 (시카고)"),
+    ("America/Mexico_City", "멕시코시티"),
+    ("America/New_York", "미국 동부 (뉴욕)"),
+    ("America/Toronto", "캐나다 토론토"),
+    ("America/Bogota", "보고타"),
+    ("America/Santiago", "산티아고"),
+    ("America/Sao_Paulo", "상파울루"),
+    ("America/Argentina/Buenos_Aires", "부에노스아이레스"),
+    ("Atlantic/Azores", "아조레스"),
+    ("UTC", "협정 세계시 (UTC)"),
+    ("Europe/London", "영국 (런던)"),
+    ("Europe/Lisbon", "포르투갈 (리스본)"),
+    ("Europe/Paris", "프랑스 (파리)"),
+    ("Europe/Berlin", "독일 (베를린)"),
+    ("Europe/Madrid", "스페인 (마드리드)"),
+    ("Europe/Rome", "이탈리아 (로마)"),
+    ("Europe/Amsterdam", "네덜란드 (암스테르담)"),
+    ("Europe/Stockholm", "스웨덴 (스톡홀름)"),
+    ("Europe/Warsaw", "폴란드 (바르샤바)"),
+    ("Europe/Athens", "그리스 (아테네)"),
+    ("Europe/Helsinki", "핀란드 (헬싱키)"),
+    ("Europe/Kyiv", "우크라이나 (키이우)"),
+    ("Africa/Cairo", "이집트 (카이로)"),
+    ("Africa/Johannesburg", "남아프리카공화국"),
+    ("Africa/Lagos", "나이지리아 (라고스)"),
+    ("Africa/Nairobi", "케냐 (나이로비)"),
+    ("Europe/Moscow", "러시아 (모스크바)"),
+    ("Europe/Istanbul", "튀르키예 (이스탄불)"),
+    ("Asia/Riyadh", "사우디아라비아 (리야드)"),
+    ("Asia/Tehran", "이란 (테헤란)"),
+    ("Asia/Dubai", "아랍에미리트 (두바이)"),
+    ("Asia/Karachi", "파키스탄 (카라치)"),
+    ("Asia/Kolkata", "인도 (콜카타)"),
+    ("Asia/Kathmandu", "네팔 (카트만두)"),
+    ("Asia/Dhaka", "방글라데시 (다카)"),
+    ("Asia/Yangon", "미얀마 (양곤)"),
+    ("Asia/Bangkok", "태국 (방콕)"),
+    ("Asia/Ho_Chi_Minh", "베트남 (호찌민)"),
+    ("Asia/Jakarta", "인도네시아 (자카르타)"),
+    ("Asia/Shanghai", "중국 (상하이)"),
+    ("Asia/Hong_Kong", "홍콩"),
+    ("Asia/Taipei", "대만 (타이베이)"),
+    ("Asia/Singapore", "싱가포르"),
+    ("Asia/Manila", "필리핀 (마닐라)"),
+    ("Asia/Kuala_Lumpur", "말레이시아 (쿠알라룸푸르)"),
+    ("Australia/Perth", "호주 서부 (퍼스)"),
+    ("Asia/Seoul", "한국 표준시 (서울)"),
+    ("Asia/Tokyo", "일본 표준시 (도쿄)"),
+    ("Australia/Adelaide", "호주 애들레이드"),
+    ("Australia/Brisbane", "호주 브리즈번"),
+    ("Australia/Sydney", "호주 시드니"),
+    ("Pacific/Guam", "괌"),
+    ("Pacific/Noumea", "누메아"),
+    ("Pacific/Auckland", "뉴질랜드 (오클랜드)"),
+    ("Pacific/Fiji", "피지"),
+    ("Pacific/Apia", "사모아"),
+    ("Pacific/Tongatapu", "통가"),
 ]
+
+DEFAULT_TIMEZONE = "Asia/Seoul"
+
+
+def zone_of(name: str) -> ZoneInfo:
+    """The named zone, or the default if it is one this system does not know."""
+    try:
+        return ZoneInfo(name or DEFAULT_TIMEZONE)
+    except Exception:
+        return ZoneInfo(DEFAULT_TIMEZONE)
+
+
+def timezone_options() -> list:
+    """Each zone with the offset it is on *today*, so the list reads correctly
+    in summer and in winter rather than only in whichever one it was written."""
+    now = datetime.now(timezone.utc)
+    out = []
+    for name, label in TIMEZONE_CHOICES:
+        offset = now.astimezone(zone_of(name)).utcoffset()
+        minutes = int(offset.total_seconds() // 60)
+        sign = "+" if minutes >= 0 else "-"
+        hh, mm = divmod(abs(minutes), 60)
+        suffix = f"UTC{sign}{hh}" + (f":{mm:02d}" if mm else "")
+        out.append({"value": name, "label": f"{label} ({suffix})", "minutes": minutes})
+    out.sort(key=lambda o: (o["minutes"], o["label"]))
+    return out
+
 
 DEFAULTS = {
     "enabled": False,
-    "utc_offset_hours": 9,
+    "timezone": DEFAULT_TIMEZONE,
     "send_hour": 9,
     "send_minute": 0,
     # Which horizons to include. A digest with every horizon on is a wall of
@@ -56,8 +145,18 @@ def _key(workspace_id) -> str:
     return f"boards.digest.{workspace_id}"
 
 
-def _sent_key(workspace_id) -> str:
-    return f"boards.digest.{workspace_id}.last_sent_on"
+def _user_key(workspace_id, user_id) -> str:
+    return f"boards.digest.{workspace_id}.user.{user_id}"
+
+
+def _sent_key(workspace_id, user_id) -> str:
+    return f"boards.digest.{workspace_id}.sent.{user_id}"
+
+
+# What a person may decide for themselves. The reference clock is deliberately
+# not among them: it is what "오늘" means, and two people on the same board
+# disagreeing about which day it is would make the boards disagree too.
+USER_OVERRIDABLE = ["enabled", "send_hour", "send_minute", "horizons"]
 
 
 async def get_settings(db: AsyncSession, workspace_id) -> dict:
@@ -70,18 +169,32 @@ async def get_settings(db: AsyncSession, workspace_id) -> dict:
     return data
 
 
-async def save_settings(db: AsyncSession, workspace_id, incoming: dict) -> dict:
-    current = await get_settings(db, workspace_id)
-    current.update({k: v for k, v in incoming.items() if k in DEFAULTS})
-
-    current["utc_offset_hours"] = int(current["utc_offset_hours"])
-    current["send_hour"] = max(0, min(23, int(current["send_hour"])))
-    current["send_minute"] = max(0, min(59, int(current["send_minute"])))
-    current["enabled"] = bool(current["enabled"])
+def _clean(config: dict) -> dict:
+    # An older setting stored a fixed offset. Read it once and turn it into the
+    # nearest real zone, so nobody has to notice the change.
+    if "utc_offset_hours" in config and not config.get("timezone"):
+        legacy = {9: "Asia/Seoul", 0: "UTC", -8: "America/Los_Angeles",
+                  -5: "America/New_York", 1: "Europe/Paris", 8: "Asia/Shanghai"}
+        config["timezone"] = legacy.get(int(config["timezone"]), DEFAULT_TIMEZONE)
+    config.pop("utc_offset_hours", None)
+    known = {name for name, _ in TIMEZONE_CHOICES}
+    if config.get("timezone") not in known:
+        config["timezone"] = DEFAULT_TIMEZONE
+    config["send_hour"] = max(0, min(23, int(config["send_hour"])))
+    config["send_minute"] = max(0, min(59, int(config["send_minute"])))
+    config["enabled"] = bool(config["enabled"])
     # Kept in the fixed order so the mail's sections always read nearest first,
     # whatever order they arrived in.
-    chosen = {h for h in (current.get("horizons") or []) if h in HORIZON_LABELS}
-    current["horizons"] = [h for h in HORIZONS if h in chosen] or list(DEFAULTS["horizons"])
+    chosen = {h for h in (config.get("horizons") or []) if h in HORIZON_LABELS}
+    config["horizons"] = [h for h in HORIZONS if h in chosen] or list(DEFAULTS["horizons"])
+    return config
+
+
+async def save_settings(db: AsyncSession, workspace_id, incoming: dict) -> dict:
+    """The workspace default — what someone gets before choosing anything."""
+    current = await get_settings(db, workspace_id)
+    current.update({k: v for k, v in incoming.items() if k in DEFAULTS})
+    current = _clean(current)
 
     row = (await db.execute(
         select(AppSetting).where(AppSetting.key == _key(workspace_id))
@@ -94,8 +207,69 @@ async def save_settings(db: AsyncSession, workspace_id, incoming: dict) -> dict:
     return current
 
 
-def local_today(utc_offset_hours: int) -> date:
-    return (datetime.now(timezone.utc) + timedelta(hours=utc_offset_hours)).date()
+async def get_user_override(db: AsyncSession, workspace_id, user_id) -> dict:
+    """Only the keys this person actually set; empty means "use the default"."""
+    row = (await db.execute(
+        select(AppSetting).where(AppSetting.key == _user_key(workspace_id, user_id))
+    )).scalars().first()
+    if not row or not isinstance(row.value, dict):
+        return {}
+    return {k: v for k, v in row.value.items() if k in USER_OVERRIDABLE}
+
+
+async def save_user_override(db: AsyncSession, workspace_id, user_id, incoming: dict) -> dict:
+    """
+    What one person decided for themselves.
+
+    `None` for a key means "go back to the workspace default" rather than
+    "set it to nothing" — following the default afterwards is the point of
+    being able to clear it.
+    """
+    override = await get_user_override(db, workspace_id, user_id)
+    for key in USER_OVERRIDABLE:
+        if key not in incoming:
+            continue
+        if incoming[key] is None:
+            override.pop(key, None)
+        else:
+            override[key] = incoming[key]
+
+    if "send_hour" in override:
+        override["send_hour"] = max(0, min(23, int(override["send_hour"])))
+    if "send_minute" in override:
+        override["send_minute"] = max(0, min(59, int(override["send_minute"])))
+    if "enabled" in override:
+        override["enabled"] = bool(override["enabled"])
+    if "horizons" in override:
+        chosen = {h for h in (override["horizons"] or []) if h in HORIZON_LABELS}
+        override["horizons"] = [h for h in HORIZONS if h in chosen]
+        if not override["horizons"]:
+            override.pop("horizons")
+
+    row = (await db.execute(
+        select(AppSetting).where(AppSetting.key == _user_key(workspace_id, user_id))
+    )).scalars().first()
+    if row is None:
+        db.add(AppSetting(key=_user_key(workspace_id, user_id), value=override))
+    else:
+        row.value = override
+    await db.commit()
+    return override
+
+
+async def effective_settings(db: AsyncSession, workspace_id, user_id) -> dict:
+    """The workspace default with this person's own choices laid over it."""
+    base = await get_settings(db, workspace_id)
+    base.update(await get_user_override(db, workspace_id, user_id))
+    return _clean(base)
+
+
+def local_now(tz_name: str) -> datetime:
+    return datetime.now(zone_of(tz_name))
+
+
+def local_today(tz_name: str) -> date:
+    return local_now(tz_name).date()
 
 
 def horizon_bounds(today: date) -> dict:
@@ -129,7 +303,7 @@ async def collect_for_workspace(db: AsyncSession, workspace_id, config: dict) ->
     A task with nobody on it is left out: a digest is addressed to a person,
     and there is nobody to address it to.
     """
-    today = local_today(config["utc_offset_hours"])
+    today = local_today(config["timezone"])
     bounds = horizon_bounds(today)
     horizons = config["horizons"]
     furthest = max((bounds[h] for h in horizons), default=today)
@@ -242,21 +416,60 @@ def render_digest(workspace_name: str, entry: dict, config: dict, today: date) -
     return subject, html, text
 
 
+def narrow_to(entry: dict, horizons) -> dict:
+    """The same collection, limited to the sections one person asked for."""
+    return {"user": entry["user"], "buckets": {h: entry["buckets"].get(h, []) for h in horizons}}
+
+
 async def send_for_workspace(db: AsyncSession, workspace: Workspace, config: dict) -> int:
-    per_user = await collect_for_workspace(db, workspace.id, config)
+    """
+    Send to whoever is due right now.
+
+    Collected once for the workspace with every horizon, then narrowed per
+    person — the times and the sections are each person's own choice, so this
+    is the only place that can know whether a given mail is due.
+    """
+    wide = dict(config)
+    wide["horizons"] = list(HORIZONS)
+    per_user = await collect_for_workspace(db, workspace.id, wide)
     if not per_user:
         return 0
-    today = local_today(config["utc_offset_hours"])
+
+    today = local_today(config["timezone"])
+    now_local = local_now(config["timezone"])
     sent = 0
-    for entry in per_user.values():
-        if not any(entry["buckets"].values()):
+
+    for uid, entry in per_user.items():
+        mine = await effective_settings(db, workspace.id, uid)
+        if not mine["enabled"]:
             continue
-        subject, html, text = render_digest(workspace.name, entry, config, today)
+        due_at = now_local.replace(hour=mine["send_hour"], minute=mine["send_minute"], second=0, microsecond=0)
+        if now_local < due_at:
+            continue
+
+        marker = (await db.execute(
+            select(AppSetting).where(AppSetting.key == _sent_key(workspace.id, uid))
+        )).scalars().first()
+        today_str = today.isoformat()
+        if marker is not None and marker.value == today_str:
+            continue
+
+        narrowed = narrow_to(entry, mine["horizons"])
+        if not any(narrowed["buckets"].values()):
+            continue
+        subject, html, text = render_digest(workspace.name, narrowed, mine, today)
         try:
             if email_service.send_notification(entry["user"].email, subject, html, text):
                 sent += 1
         except Exception as e:  # pragma: no cover - a bad address must not stop the rest
             logger.warning(f"[BoardDigest] could not send to {entry['user'].email}: {e}")
+            continue
+
+        if marker is None:
+            db.add(AppSetting(key=_sent_key(workspace.id, uid), value=today_str))
+        else:
+            marker.value = today_str
+    await db.commit()
     return sent
 
 
@@ -264,37 +477,19 @@ async def run_due_digests() -> None:
     """
     Send each workspace's digest once, at the minute its administrator chose.
 
-    The marker records the local date already sent, so a restart inside the
-    send window does not deliver a second copy — and a service that was down
-    at the chosen minute still sends late that day rather than skipping it.
+    Each recipient has their own send time and their own marker: the marker
+    records the local date already sent, so a restart inside the send window
+    does not deliver a second copy — and a service that was down at someone's
+    chosen minute still sends late that day rather than skipping it.
     """
     async with AsyncSessionLocal() as db:
         workspaces = (await db.execute(select(Workspace))).scalars().all()
         for workspace in workspaces:
             try:
                 config = await get_settings(db, workspace.id)
-                if not config["enabled"]:
-                    continue
-                now_local = datetime.now(timezone.utc) + timedelta(hours=config["utc_offset_hours"])
-                due_at = now_local.replace(
-                    hour=config["send_hour"], minute=config["send_minute"], second=0, microsecond=0
-                )
-                if now_local < due_at:
-                    continue
-
-                marker = (await db.execute(
-                    select(AppSetting).where(AppSetting.key == _sent_key(workspace.id))
-                )).scalars().first()
-                today_str = now_local.date().isoformat()
-                if marker is not None and marker.value == today_str:
-                    continue
-
+                # Each person has their own time and their own marker, so the
+                # decision of who is due now is made per recipient.
                 count = await send_for_workspace(db, workspace, config)
-                if marker is None:
-                    db.add(AppSetting(key=_sent_key(workspace.id), value=today_str))
-                else:
-                    marker.value = today_str
-                await db.commit()
                 if count:
                     logger.info(f"[BoardDigest] sent {count} digest(s) for '{workspace.name}'")
             except Exception as e:  # pragma: no cover
