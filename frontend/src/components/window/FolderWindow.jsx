@@ -10,19 +10,28 @@ import {
   Loader2,
   UploadCloud,
   ArrowUpDown,
+  Grid,
+  List,
+  ChevronLeft,
+  FileText,
+  Image as ImageIcon,
+  Film,
+  FileArchive,
+  File as FileIcon,
 } from '../../utils/icons';
 import { folderIconColor } from '../../utils/folderColors';
-import { listFolders, listFiles } from '../../api';
+import { listFolders, listFiles, getThumbnailUrl, ensureMediaToken, clearMediaToken } from '../../api';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 import { useMarqueeSelection } from '../../hooks/useMarqueeSelection';
 import { useWindowChrome, RESIZE_DIRECTIONS } from '../../hooks/useWindowChrome';
 
-// A window lists its folder in one go rather than paginating: it is a working
-// surface for moving things between places, and a page control would make a
-// selection silently span items that are no longer shown. Capped at the
-// listing API's own maximum page_size — asking for more is a 422, not a
-// larger page.
+// The ceiling on the folder list, which is not paged — a location holds at
+// most a hundred folders, and the breadcrumb and drop rules need them all.
+// The file list is paged; see PAGE_SIZE.
 const MAX_ROWS = 200;
+
+// The window's sort names mapped onto the listing API's column names.
+const SORT_FIELDS = { name: 'name', size: 'size_bytes', updated: 'updated_at' };
 
 function formatSize(bytes) {
   if (!bytes) return '';
@@ -77,7 +86,25 @@ export default function FolderWindow({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Files are paged on the server. Folders are not: a location now holds at
+  // most a hundred of them, and the breadcrumb and the drop rules need the
+  // whole tree anyway — it is the file list that has no ceiling.
+  const [page, setPage] = useState(1);
+  const [fileTotal, setFileTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // Thumbnails or a list. Remembered so a new window opens the way the last
+  // one was left, but held per window so two can differ.
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem('kb_fw_view_mode') === 'grid' ? 'grid' : 'list'; } catch (e) { return 'list'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('kb_fw_view_mode', viewMode); } catch (e) {}
+  }, [viewMode]);
+  const PAGE_SIZE = viewMode === 'grid' ? 24 : 50;
+
   const bodyRef = useRef(null);
+  const windowRef = useRef(null);
   const marqueeBaseRef = useRef({ files: [], folders: [] });
   const anchorRef = useRef(null);
 
@@ -99,7 +126,18 @@ export default function FolderWindow({
       // empty folder that is not empty.
       const [folderRes, fileRes] = await Promise.allSettled([
         listFolders({ workspace_id: workspaceId }),
-        listFiles({ workspace_id: workspaceId, folder_id: folderId, page_size: MAX_ROWS, paged: true }),
+        listFiles({
+          workspace_id: workspaceId,
+          folder_id: folderId,
+          root_only: !folderId,
+          // Sorting has to happen server-side once the list is paged, or each
+          // page would only be sorted within itself.
+          sort_by: SORT_FIELDS[sortBy] || 'name',
+          sort_order: sortOrder,
+          page,
+          page_size: PAGE_SIZE,
+          paged: true,
+        }),
       ]);
       if (cancelled) return;
 
@@ -110,6 +148,8 @@ export default function FolderWindow({
       if (fileRes.status === 'fulfilled') {
         const v = fileRes.value;
         setFiles(Array.isArray(v) ? v : (v.items || []));
+        setFileTotal(Array.isArray(v) ? v.length : (v.total_count ?? 0));
+        setTotalPages(Array.isArray(v) ? 1 : (v.total_pages || 1));
       }
 
       const failed = [folderRes, fileRes].filter((r) => r.status === 'rejected');
@@ -117,7 +157,12 @@ export default function FolderWindow({
       setIsLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [workspaceId, folderId, reloadToken, externalRefreshToken]);
+  }, [workspaceId, folderId, reloadToken, externalRefreshToken, page, PAGE_SIZE, sortBy, sortOrder]);
+
+  // Navigating, re-sorting or switching view changes what page 1 means, so a
+  // page number carried over from the previous listing would be meaningless —
+  // and past the end, it would show nothing at all.
+  useEffect(() => { setPage(1); }, [folderId, workspaceId, sortBy, sortOrder, PAGE_SIZE]);
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -137,7 +182,8 @@ export default function FolderWindow({
     [folders, folderId, compare]
   );
 
-  const sortedFiles = useMemo(() => files.slice().sort(compare), [files, compare]);
+  // Already ordered by the server, which is what makes the paging coherent.
+  const sortedFiles = files;
 
   const folderById = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const currentFolder = folderId ? folderById.get(folderId) : null;
@@ -189,7 +235,9 @@ export default function FolderWindow({
     anchorRef.current = null;
   }, []);
 
-  useEffect(() => { clearSelection(); }, [folderId, workspaceId, clearSelection]);
+  // Also on a page turn: a selection that outlived the rows it was made from
+  // would have a batch action quietly act on items no longer on screen.
+  useEffect(() => { clearSelection(); }, [folderId, workspaceId, page, clearSelection]);
 
   const orderedItems = useMemo(() => [
     ...subfolders.map((f) => ({ kind: 'folder', id: f.id })),
@@ -345,6 +393,22 @@ export default function FolderWindow({
 
   if (isMinimized) return null;
 
+  const isImage = (f) => {
+    const t = (f.file_type || '').toLowerCase();
+    return t === 'image' || /\.(png|jpe?g|gif|webp|bmp|ico|svg)$/i.test(f.name || '');
+  };
+  const isVideo = (f) => {
+    const t = (f.file_type || '').toLowerCase();
+    return t === 'video' || /\.(mp4|webm|ogg|mov)$/i.test(f.name || '');
+  };
+  const fileGlyph = (f, size) => {
+    if (isImage(f)) return <ImageIcon size={size} color="var(--accent-cyan)" />;
+    if (isVideo(f)) return <Film size={size} color="var(--accent-primary)" />;
+    if (/\.(zip|tar|gz|7z|rar)$/i.test(f.name || '')) return <FileArchive size={size} color="var(--accent-amber)" />;
+    if (/\.(md|markdown|txt)$/i.test(f.name || '')) return <FileText size={size} color="var(--accent-primary)" />;
+    return <FileIcon size={size} color="var(--text-muted)" />;
+  };
+
   const rows = [
     ...subfolders.map((f) => ({ kind: 'folder', item: f })),
     ...sortedFiles.map((f) => ({ kind: 'file', item: f })),
@@ -352,6 +416,7 @@ export default function FolderWindow({
 
   return (
     <div
+      ref={windowRef}
       className={`os-preview-window folder-window ${isInteracting ? 'is-interacting' : ''}`}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
@@ -379,6 +444,14 @@ export default function FolderWindow({
           )}
         </div>
         <div className="window-header-actions">
+          <button
+            type="button"
+            className="window-action-btn icon-only"
+            title={viewMode === 'grid' ? '목록으로 보기' : '썸네일로 보기'}
+            onClick={(e) => { e.stopPropagation(); setViewMode((m) => (m === 'grid' ? 'list' : 'grid')); }}
+          >
+            {viewMode === 'grid' ? <List size={13} /> : <Grid size={13} />}
+          </button>
           <button
             type="button"
             className="window-action-btn icon-only"
@@ -475,7 +548,7 @@ export default function FolderWindow({
 
       <div
         ref={bodyRef}
-        className="os-window-body fw-body"
+        className={`os-window-body fw-body ${viewMode === 'grid' ? 'fw-body-grid' : ''}`}
         onMouseDown={handleBodyMouseDown}
         onContextMenu={(e) => {
           if (e.target.closest('[data-select-id]')) return;
@@ -497,7 +570,7 @@ export default function FolderWindow({
             return (
               <div
                 key={`${kind}-${item.id}`}
-                className={`fw-row ${selected ? 'selected' : ''} ${isCut(kind, item.id) ? 'is-cut' : ''}`}
+                className={`${viewMode === 'grid' ? 'fw-tile' : 'fw-row'} ${selected ? 'selected' : ''} ${isCut(kind, item.id) ? 'is-cut' : ''}`}
                 data-select-id={item.id}
                 data-select-kind={kind}
                 draggable
@@ -518,17 +591,48 @@ export default function FolderWindow({
                 }}
                 {...(kind === 'folder' ? dropProps(item.id, `row-${item.id}`) : {})}
               >
-                <span className="fw-row-icon">
-                  {kind === 'folder'
-                    ? <FolderIcon size={15} color={folderIconColor(item)} />
-                    : <span className="fw-file-dot" />}
-                </span>
-                <span className="fw-row-name" title={item.name}>{item.name}</span>
-                <span className="fw-row-meta">
-                  {kind === 'folder'
-                    ? (item.file_count ? `${item.file_count}개` : '')
-                    : formatSize(item.size_bytes)}
-                </span>
+                {viewMode === 'grid' ? (
+                  <>
+                    <span className="fw-tile-art">
+                      {kind === 'folder'
+                        ? <FolderIcon size={34} color={folderIconColor(item)} />
+                        : item.thumbnail_url
+                          ? (
+                            <img
+                              src={getThumbnailUrl(item.id)}
+                              alt=""
+                              loading="lazy"
+                              onError={async (e) => {
+                                // The media token expires on its own schedule;
+                                // one silent retry beats a broken tile.
+                                const img = e.target;
+                                if (img.dataset.retried) { img.style.display = 'none'; return; }
+                                img.dataset.retried = '1';
+                                clearMediaToken();
+                                await ensureMediaToken();
+                                img.src = getThumbnailUrl(item.id);
+                              }}
+                            />
+                          )
+                          : fileGlyph(item, 30)}
+                    </span>
+                    <span className="fw-tile-name" title={item.name}>{item.name}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="fw-row-icon">
+                      {kind === 'folder'
+                        ? <FolderIcon size={15} color={folderIconColor(item)} />
+                        : fileGlyph(item, 14)}
+                    </span>
+                    <span className="fw-row-name" title={item.name}>{item.name}</span>
+                    <span className="fw-row-meta">
+                      {kind === 'folder'
+                        ? (item.file_count ? `${item.file_count}개` : '')
+                        : formatSize(item.size_bytes)}
+                    </span>
+                  </>
+                )}
               </div>
             );
           })
@@ -541,27 +645,59 @@ export default function FolderWindow({
           <div className="fw-drop-hint">다른 워크스페이스로 복사됩니다</div>
         )}
 
-        {marqueeRect && (
+      </div>
+
+      {/* Drawn here rather than inside the scrolling body, and in the window's
+          own coordinates. The window is placed with a transform, which makes
+          it the containing block for anything positioned `fixed` inside it —
+          so the band's viewport coordinates landed at the wrong place by
+          exactly the window's offset. */}
+      {marqueeRect && (() => {
+        const origin = windowRef.current?.getBoundingClientRect();
+        const ox = origin?.left ?? 0;
+        const oy = origin?.top ?? 0;
+        return (
           <div
-            className="selection-marquee"
+            className="selection-marquee fw-marquee"
             style={{
-              left: marqueeRect.left,
-              top: marqueeRect.top,
+              left: marqueeRect.left - ox,
+              top: marqueeRect.top - oy,
               width: marqueeRect.right - marqueeRect.left,
               height: marqueeRect.bottom - marqueeRect.top,
             }}
           />
-        )}
-      </div>
+        );
+      })()}
 
       <div className="os-window-footer fw-footer">
         <span>
-          {subfolders.length}개 폴더 · {files.length}개 파일
+          {subfolders.length}개 폴더 · {fileTotal}개 파일
           {' · '}
           {sortBy === 'name' ? '이름순' : sortBy === 'size' ? '크기순' : '수정일순'}
           {sortOrder === 'asc' ? ' ↑' : ' ↓'}
         </span>
-        {selectedCount > 0 && <span>{selectedCount}개 선택됨</span>}
+        {selectedCount > 0 && <span className="fw-footer-selected">{selectedCount}개 선택됨</span>}
+        {totalPages > 1 && (
+          <span className="fw-footer-pager">
+            <button
+              type="button"
+              title="이전 페이지"
+              disabled={page <= 1 || isLoading}
+              onClick={(e) => { e.stopPropagation(); setPage((p) => Math.max(1, p - 1)); }}
+            >
+              <ChevronLeft size={12} />
+            </button>
+            <span className="fw-pager-status">{page} / {totalPages}</span>
+            <button
+              type="button"
+              title="다음 페이지"
+              disabled={page >= totalPages || isLoading}
+              onClick={(e) => { e.stopPropagation(); setPage((p) => Math.min(totalPages, p + 1)); }}
+            >
+              <ChevronRight size={12} />
+            </button>
+          </span>
+        )}
       </div>
 
       {/* Same grab regions as the preview window: seven invisible edges plus

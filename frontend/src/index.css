@@ -4392,6 +4392,138 @@ select option {
   box-shadow: inset 0 0 0 2px var(--accent-primary);
 }
 
+/* --- thumbnail view ------------------------------------------------------ */
+
+/* auto-fill, not auto-fit: a window can be dragged to any width, and with
+   auto-fit a single tile stretches across the whole row. */
+.fw-body-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+  align-content: start;
+  padding: 8px;
+}
+
+/* The states that have nothing to lay out span the grid instead of being
+   squeezed into one cell. */
+.fw-body-grid > .fw-empty,
+.fw-body-grid > .fw-drop-hint { grid-column: 1 / -1; }
+
+.fw-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  min-width: 0;
+}
+
+.fw-tile:hover { background: var(--bg-tertiary); }
+
+.fw-tile.selected {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: var(--accent-primary);
+}
+
+.fw-tile.is-cut {
+  opacity: 0.6;
+  border-style: dashed;
+  border-color: var(--accent-primary);
+}
+
+.fw-tile[data-drop-active="true"] {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: var(--accent-primary);
+}
+
+.fw-tile-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 62px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.fw-tile-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Two lines, then an ellipsis: one line cuts off most filenames at this width,
+   and an unbounded name makes the tiles different heights. */
+.fw-tile-name {
+  width: 100%;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+/* --- band selection inside a window -------------------------------------- */
+
+/* The window is placed with a transform, so it is the containing block for
+   anything `fixed` inside it. The band is given the window's own coordinates
+   and positioned against it directly. */
+.fw-marquee {
+  position: absolute;
+}
+
+/* --- paging -------------------------------------------------------------- */
+
+.fw-footer-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.fw-footer-pager button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.fw-footer-pager button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+.fw-footer-pager button:disabled { opacity: 0.35; cursor: default; }
+
+.fw-pager-status {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: center;
+}
+
+.fw-footer-selected { flex-shrink: 0; }
+
 /* ==========================================================================
    Background copy queue banner
    ========================================================================== */
