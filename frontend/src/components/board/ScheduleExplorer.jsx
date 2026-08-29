@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck, Search, X, Loader2, ChevronLeft, ChevronRight, RefreshCw, Settings,
-  Folder as FolderIcon, Clock,
+  Folder as FolderIcon, Clock, Plus,
 } from '../../utils/icons';
 import {
-  listWorkspaceTasks, updateBoardTask, deleteBoardTask, getFileDetail, getBoard, getDigestSettings,
+  listWorkspaceTasks, updateBoardTask, deleteBoardTask, createBoardTask,
+  getFileDetail, getBoard, getDigestSettings,
 } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import TaskRow from './TaskRow';
@@ -64,6 +65,18 @@ export default function ScheduleExplorer({
   // Who may be assigned differs per board (the shared workspace allows only
   // yourself), so it is fetched for the board a task actually belongs to.
   const [peopleByBoard, setPeopleByBoard] = useState({});
+  // Adding here works the same as on a board: `{fileId, parentTaskId}` says
+  // which 일정 the new 할 일 belongs to and, for a sub-item, under what.
+  const [draft, setDraft] = useState(null);
+  const [draftName, setDraftName] = useState('');
+  const draftRef = useRef(null);
+  const addingRef = useRef(false);
+
+  useEffect(() => {
+    if (!draft) return undefined;
+    const id = setTimeout(() => draftRef.current?.focus(), 30);
+    return () => clearTimeout(id);
+  }, [draft]);
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   // The reference clock everything on a board is read against. Shown so nobody
@@ -166,6 +179,52 @@ export default function ScheduleExplorer({
       await showAlert({ title: '삭제하지 못했습니다', message: e.message, type: 'error' });
     }
   };
+
+  const addTask = async () => {
+    const name = draftName.trim();
+    if (!draft || !name) { setDraft(null); setDraftName(''); return; }
+    if (addingRef.current) return;
+    addingRef.current = true;
+    setDraftName('');
+    try {
+      await createBoardTask(draft.fileId, { name, parent_task_id: draft.parentTaskId ?? null });
+      await load();
+      draftRef.current?.focus();
+    } catch (e) {
+      setDraftName(name);
+      await showAlert({ title: '추가하지 못했습니다', message: e.message, type: 'error' });
+    } finally {
+      addingRef.current = false;
+    }
+  };
+
+  const renderDraft = () => (
+    <div className="bd-row bd-draft">
+      <div className="bd-f-name">
+        <span className="bd-twisty is-empty" />
+        <input
+          ref={draftRef}
+          type="text"
+          value={draftName}
+          placeholder={draft?.parentTaskId ? '하위 할 일 이름' : '할 일 이름'}
+          onChange={(e) => setDraftName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (e.repeat || e.nativeEvent.isComposing) return;
+              addTask();
+            }
+            if (e.key === 'Escape') { e.preventDefault(); setDraft(null); setDraftName(''); }
+          }}
+        />
+      </div>
+      <div className="bd-draft-actions">
+        <button type="button" className="btn-primary" onClick={addTask} disabled={!draftName.trim()}>추가</button>
+        <button type="button" className="btn-secondary" onClick={() => { setDraft(null); setDraftName(''); }}>닫기</button>
+        <span className="bd-draft-hint">Enter로 계속 추가</span>
+      </div>
+    </div>
+  );
 
   const openBoard = async (task) => {
     if (!task.board?.id) return;
@@ -342,20 +401,39 @@ export default function ScheduleExplorer({
               </header>
               <div className="bd-table">
                 {group.items.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    busy={busyId === task.id}
-                    people={peopleByBoard[task.board?.id] || []}
-                    showBoardName={grouping !== 'board'}
-                    isOpen={openTask?.id === task.id}
-                    onOpen={(t) => setOpenTask(t)}
-                    onPatch={patch}
-                    onDelete={removeTask}
-                    onOpenBoardWindow={openBoard}
-                    onOpenFolderWindow={openFolder}
-                  />
+                  <React.Fragment key={task.id}>
+                    <TaskRow
+                      task={task}
+                      depth={task.parent_task_id ? 1 : 0}
+                      busy={busyId === task.id}
+                      people={peopleByBoard[task.board?.id] || []}
+                      showBoardName={grouping !== 'board'}
+                      isOpen={openTask?.id === task.id}
+                      onOpen={(t) => setOpenTask(t)}
+                      onPatch={patch}
+                      onDelete={removeTask}
+                      onAddSub={(t) => { setDraft({ fileId: t.file_id, parentTaskId: t.id }); setDraftName(''); }}
+                      onOpenBoardWindow={openBoard}
+                      onOpenFolderWindow={openFolder}
+                    />
+                    {draft && draft.parentTaskId === task.id && renderDraft()}
+                  </React.Fragment>
                 ))}
+                {/* Grouped by 일정, a group *is* one board, so a new 할 일 can
+                    be added here without asking which board it belongs to. */}
+                {grouping === 'board' && group.items[0]?.file_id && (
+                  draft && !draft.parentTaskId && draft.fileId === group.items[0].file_id
+                    ? renderDraft()
+                    : (
+                      <button
+                        type="button"
+                        className="bd-addrow"
+                        onClick={() => { setDraft({ fileId: group.items[0].file_id, parentTaskId: null }); setDraftName(''); }}
+                      >
+                        <Plus size={13} /><span>이 일정에 할 일 추가</span>
+                      </button>
+                    )
+                )}
               </div>
             </section>
           ))}

@@ -495,18 +495,21 @@ export default function PreviewWindow({
             </>
           )}
 
-          {/* Download Button */}
-          <button
-            type="button"
-            className="window-action-btn icon-only"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDownload();
-            }}
-            title="다운로드"
-          >
-            <Download size={13} />
-          </button>
+          {/* A board has no stored file behind it — its rows live in the
+              database — so downloading it would hand back nothing. */}
+          {!isBoard && (
+            <button
+              type="button"
+              className="window-action-btn icon-only"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDownload();
+              }}
+              title="다운로드"
+            >
+              <Download size={13} />
+            </button>
+          )}
 
           <div className="window-header-divider" />
 

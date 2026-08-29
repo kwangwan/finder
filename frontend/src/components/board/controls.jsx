@@ -1,5 +1,74 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, Check, X, Calendar } from '../../utils/icons';
+
+/**
+ * A popover that escapes its ancestors.
+ *
+ * Anchored menus kept being cut off: a group card rounds its corners with
+ * `overflow: hidden`, the list scrolls, a window clips its own body — each one
+ * a perfectly good reason to hide overflow, and each one enough to swallow a
+ * dropdown. Rendered at the document root and positioned against the anchor
+ * instead, so no ancestor can clip it.
+ */
+export function Popover({ anchorRef, onClose, align = 'left', children, className = '' }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  useLayoutEffect(() => {
+    const place = () => {
+      const a = anchorRef.current;
+      const el = ref.current;
+      if (!a || !el) return;
+      const r = a.getBoundingClientRect();
+      const w = el.offsetWidth || 200;
+      const h = el.offsetHeight || 160;
+      const margin = 8;
+      let left = align === 'right' ? r.right - w : r.left;
+      left = Math.max(margin, Math.min(left, window.innerWidth - w - margin));
+      // Flipped above the anchor when there is not room below, which near the
+      // bottom of a list is most of the time.
+      const below = r.bottom + 4;
+      const top = (below + h > window.innerHeight - margin && r.top - h - 4 > margin)
+        ? r.top - h - 4
+        : Math.min(below, window.innerHeight - h - margin);
+      setPos({ left, top });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [anchorRef, align, children]);
+
+  useEffect(() => {
+    const close = (e) => {
+      if (ref.current?.contains(e.target) || anchorRef.current?.contains(e.target)) return;
+      onClose();
+    };
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', close, true);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', close, true);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [anchorRef, onClose]);
+
+  return createPortal(
+    <div
+      ref={ref}
+      className={`ui-pop ${className}`}
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
 
 /**
  * A dropdown that looks like the rest of the app.
@@ -34,21 +103,23 @@ export function Dropdown({ value, options, onChange, label, className = '', widt
         <ChevronDown size={12} />
       </button>
       {open && (
-        <span className="ui-dd-menu" role="listbox">
-          {options.map((o) => (
-            <button
-              key={String(o.value)}
-              type="button"
-              role="option"
-              aria-selected={o.value === value}
-              className={o.value === value ? 'on' : ''}
-              onClick={() => { setOpen(false); if (o.value !== value) onChange(o.value); }}
-            >
-              <span>{o.label}</span>
-              {o.value === value && <Check size={12} />}
-            </button>
-          ))}
-        </span>
+        <Popover anchorRef={ref} onClose={() => setOpen(false)} className="ui-dd-menu">
+          <span role="listbox">
+            {options.map((o) => (
+              <button
+                key={String(o.value)}
+                type="button"
+                role="option"
+                aria-selected={o.value === value}
+                className={o.value === value ? 'on' : ''}
+                onClick={() => { setOpen(false); if (o.value !== value) onChange(o.value); }}
+              >
+                <span>{o.label}</span>
+                {o.value === value && <Check size={12} />}
+              </button>
+            ))}
+          </span>
+        </Popover>
       )}
     </span>
   );
@@ -194,14 +265,14 @@ export function DateRangeField({ start, end, onChange, disabled, placeholder = '
         <ChevronDown size={12} />
       </button>
       {open && (
-        <span className="ui-dd-pop">
+        <Popover anchorRef={ref} onClose={() => setOpen(false)} className="ui-dd-pop">
           <DateRangePicker
             start={start}
             end={end}
             onChange={(a, b) => onChange(a, b)}
             onClose={() => setOpen(false)}
           />
-        </span>
+        </Popover>
       )}
     </span>
   );

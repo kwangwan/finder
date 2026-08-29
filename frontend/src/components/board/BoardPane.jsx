@@ -305,6 +305,9 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
       </div>
 
       <div className="bd-scroll">
+        {/* The same card the 일정 탭 groups tasks in, so a board and the
+            workspace-wide list are recognisably the same thing. */}
+        <section className="sc-group bd-group">
         <div className="bd-table">
           <div className="bd-row bd-head" aria-hidden="true">
             <div className="bd-f-name">할 일</div>
@@ -329,6 +332,7 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
             </button>
           )}
         </div>
+        </section>
         {!canWrite && <div className="bd-readonly">읽기 전용입니다. 이 폴더에 쓰기 권한이 없습니다.</div>}
       </div>
 

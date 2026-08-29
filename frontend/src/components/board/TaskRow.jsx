@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Plus, Trash2, ChevronRight, ChevronDown, Calendar, GripVertical, Check, MessageSquare,
   ExternalLink, FolderOpen,
 } from '../../utils/icons';
-import { DateRangePicker } from './controls';
+import { DateRangePicker, Popover } from './controls';
 
 export const PRIORITIES = [
   { value: 'urgent', label: '긴급' },
@@ -112,13 +112,6 @@ export function PillSelect({ value, options, onChange, disabled, kind, label }) 
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [open]);
-
   const current = options.find((o) => o.value === value) || options[0];
   return (
     <span className="bd-pillwrap" ref={ref}>
@@ -134,7 +127,8 @@ export function PillSelect({ value, options, onChange, disabled, kind, label }) 
         {current?.label}
       </button>
       {open && (
-        <span className="bd-pill-menu" role="listbox">
+        <Popover anchorRef={ref} onClose={() => setOpen(false)} className="bd-pill-menu">
+          <span role="listbox">
           {options.map((o) => (
             <button
               key={o.value}
@@ -148,7 +142,8 @@ export function PillSelect({ value, options, onChange, disabled, kind, label }) 
               {o.value === value && <Check size={12} />}
             </button>
           ))}
-        </span>
+          </span>
+        </Popover>
       )}
     </span>
   );
@@ -190,20 +185,6 @@ export default function TaskRow({
   const peopleRef = useRef(null);
   const periodRef = useRef(null);
 
-  useEffect(() => {
-    if (!editingPeriod) return undefined;
-    const close = (e) => { if (!periodRef.current?.contains(e.target)) setEditingPeriod(false); };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [editingPeriod]);
-
-  useEffect(() => {
-    if (!peopleOpen) return undefined;
-    const close = (e) => { if (!peopleRef.current?.contains(e.target)) setPeopleOpen(false); };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [peopleOpen]);
-
   const tone = dueTone(task.days_left, task.status);
   const left = remainingText(task.days_left);
 
@@ -237,7 +218,25 @@ export default function TaskRow({
           {task.name}
         </button>
         {childCount > 0 && <span className="bd-subcount" title={`하위 할 일 ${childCount}개`}>{childCount}</span>}
-        {task.has_detail && <MessageSquare size={11} className="bd-hasnote" title="상세 내용 있음" />}
+
+        {/* Always here, filled once there is something written. The editor was
+            only reachable by clicking the name, which nothing said would open
+            it — so it read as a missing feature rather than a hidden one. */}
+        <button
+          type="button"
+          className={`bd-note ${task.has_detail ? 'has' : ''}`}
+          onClick={() => onOpen?.(task)}
+          title={task.has_detail ? '기록 열기' : '기록 남기기'}
+        >
+          <MessageSquare size={12} />
+        </button>
+
+        {canWrite && depth === 0 && onAddSub && (
+          <button type="button" className="bd-subadd" title="하위 할 일 추가" onClick={() => onAddSub(task)}>
+            <Plus size={12} />
+          </button>
+        )}
+
         {showBoardName && task.board?.name && <span className="bd-rowboard">{task.board.name}</span>}
       </div>
 
@@ -273,7 +272,7 @@ export default function TaskRow({
           )}
         </button>
         {peopleOpen && (
-          <div className="bd-people-pop">
+          <Popover anchorRef={peopleRef} onClose={() => setPeopleOpen(false)} align="right" className="bd-people-pop">
             {people.length === 0 && <div className="bd-pop-empty">지정할 수 있는 사람이 없습니다.</div>}
             {people.map((u) => {
               const on = task.assignees.some((a) => a.id === u.id);
@@ -285,7 +284,7 @@ export default function TaskRow({
                 </button>
               );
             })}
-          </div>
+          </Popover>
         )}
       </div>
 
@@ -304,14 +303,14 @@ export default function TaskRow({
             picking a start and an end is a question about where the days fall
             relative to each other, which a pair of text boxes cannot show. */}
         {editingPeriod && (
-          <div className="bd-period-pop">
+          <Popover anchorRef={periodRef} onClose={() => setEditingPeriod(false)} className="bd-period-pop">
             <DateRangePicker
               start={task.start_date}
               end={task.due_date}
               onChange={(from, to) => onPatch(task, { start_date: from, due_date: to })}
               onClose={() => setEditingPeriod(false)}
             />
-          </div>
+          </Popover>
         )}
       </div>
 
@@ -331,11 +330,6 @@ export default function TaskRow({
         {onOpenFolderWindow && (
           <button type="button" className="btn-icon" title="이 일정이 있는 폴더를 새 창에서 열기" onClick={() => onOpenFolderWindow(task)}>
             <FolderOpen size={13} />
-          </button>
-        )}
-        {canWrite && depth === 0 && onAddSub && (
-          <button type="button" className="btn-icon" title="하위 할 일 추가" onClick={() => onAddSub(task)}>
-            <Plus size={13} />
           </button>
         )}
         {canWrite && onDelete && (
