@@ -1150,35 +1150,6 @@ body {
   border-radius: var(--radius-sm) !important;
 }
 
-.badge-embedded {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.12);
-  border: 1px solid rgba(124, 58, 237, 0.25);
-  padding: 0.1rem 0.45rem;
-  border-radius: var(--radius-full);
-  letter-spacing: -0.2px;
-  height: 20px;
-  line-height: 1;
-  white-space: nowrap !important;
-  flex-shrink: 0 !important;
-  transition: all 0.2s ease;
-}
-
-[data-theme="dark"] .badge-embedded {
-  color: #a78bfa;
-  background: rgba(167, 139, 250, 0.16);
-  border: 1px solid rgba(167, 139, 250, 0.35);
-}
-
-.badge-embedded:hover {
-  background: rgba(124, 58, 237, 0.2);
-  transform: translateY(-1px);
-}
 
 .file-card-thumbnail {
   position: relative;
@@ -1510,7 +1481,7 @@ body {
 
 /* Prevent awkward word breaking across lines in Korean & Asian typography */
 h1, h2, h3, h4, h5, h6,
-.badge, .role-badge, .badge-embedded, .badge-days,
+.badge, .role-badge, .badge-days,
 .topbar-brand, .explorer-item-count, .sort-label,
 .dialog-title, .dialog-message, .modal-title, .modal-subtitle,
 .trash-notice-banner, .empty-state h3, .empty-state p,
@@ -1709,14 +1680,6 @@ h1, h2, h3, h4, h5, h6,
     white-space: nowrap !important;
   }
 
-  .badge-embedded {
-    font-size: 0.58rem !important;
-    padding: 0.08rem 0.35rem !important;
-    height: 17px !important;
-    gap: 2px !important;
-    flex-shrink: 0 !important;
-    margin-left: auto !important;
-  }
 
   .folder-card {
     padding: 0.65rem !important;
@@ -2892,27 +2855,6 @@ h1, h2, h3, h4, h5, h6,
   flex-shrink: 0;
 }
 
-.badge-embedded-tiny {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 0.62rem;
-  font-weight: 700;
-  color: #7c3aed;
-  background: rgba(124, 58, 237, 0.12);
-  border: 1px solid rgba(124, 58, 237, 0.25);
-  padding: 0 4px;
-  border-radius: 4px;
-  height: 16px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-[data-theme="dark"] .badge-embedded-tiny {
-  color: #a78bfa;
-  background: rgba(167, 139, 250, 0.16);
-  border-color: rgba(167, 139, 250, 0.35);
-}
 
 .window-header-actions {
   display: flex;

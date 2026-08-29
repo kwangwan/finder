@@ -18,7 +18,6 @@ import {
   Table, 
   Film,
   Eye,
-  Sparkles,
   MoreHorizontal,
   Home,
   ArrowUpDown,
@@ -945,15 +944,6 @@ export default function FolderExplorer({
                       <span>•</span>
                       <span>{formatDate(file.updated_at || file.created_at)}</span>
                     </div>
-                    {file.is_embedded && (
-                      <span 
-                        className="badge-embedded" 
-                        title="AI 지식 검색 연동 완료"
-                      >
-                        <Sparkles size={10} />
-                        <span>임베딩됨</span>
-                      </span>
-                    )}
                   </div>
                 </div>
               );

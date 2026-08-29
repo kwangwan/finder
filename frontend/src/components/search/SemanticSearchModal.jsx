@@ -15,7 +15,8 @@ import {
   Layers,
   Table,
   Image as ImageIcon,
-  Film
+  Film,
+  AlertCircle
 } from '../../utils/icons';
 import { searchDocuments } from '../../api';
 import Select from '../common/Select';
@@ -38,15 +39,24 @@ function flattenFolderTree(nodeList, depth = 0) {
   return result;
 }
 
+// `semanticSupported: false` marks a type whose contents are never embedded
+// — nothing is extracted from an image or a video, so there is nothing for
+// meaning-based matching to work against and only the file name can match.
+// The UI says so outright rather than letting the user assume an empty
+// result means "no such content exists".
 const FILE_TYPE_FILTERS = [
   { id: '', label: '모든 형식' },
   { id: 'note', label: '문서', icon: FileText },
   { id: 'pdf', label: 'PDF 문서', icon: FileText },
   { id: 'docx', label: '워드 (.docx)', icon: FileText },
   { id: 'xlsx', label: '엑셀 (.xlsx)', icon: Table },
-  { id: 'image', label: '이미지', icon: ImageIcon },
-  { id: 'video', label: '동영상', icon: Film },
+  { id: 'image', label: '이미지 (이름만 검색)', icon: ImageIcon, semanticSupported: false },
+  { id: 'video', label: '동영상 (이름만 검색)', icon: Film, semanticSupported: false },
 ];
+
+const NAME_ONLY_FILE_TYPES = FILE_TYPE_FILTERS
+  .filter(f => f.semanticSupported === false)
+  .map(f => f.id);
 
 const DATE_PRESETS = [
   { id: 'all', label: '전체 기간' },
@@ -255,6 +265,20 @@ export default function SemanticSearchModal({
                   onChange={(v) => handleFilterChange(folderId, v, datePreset, minSimilarity)}
                   options={FILE_TYPE_FILTERS.map(f => ({ value: f.id, label: f.label }))}
                 />
+                {NAME_ONLY_FILE_TYPES.includes(fileType) && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 5,
+                    marginTop: 6,
+                    fontSize: '0.72rem',
+                    lineHeight: 1.4,
+                    color: 'var(--accent-amber)'
+                  }}>
+                    <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                    <span>이 형식은 아직 의미 기반 검색을 지원하지 않습니다. 파일 이름으로만 찾을 수 있습니다.</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -408,21 +432,27 @@ export default function SemanticSearchModal({
                         fontWeight: 700,
                         padding: '0.1rem 0.4rem',
                         borderRadius: 'var(--radius-full)',
-                        backgroundColor: item.match_type === 'semantic' 
-                          ? 'rgba(139, 92, 246, 0.2)' 
+                        backgroundColor: item.match_type === 'semantic'
+                          ? 'rgba(139, 92, 246, 0.2)'
                           : item.match_type === 'hybrid'
                           ? 'rgba(59, 130, 246, 0.2)'
+                          : item.match_type === 'filename'
+                          ? 'rgba(245, 158, 11, 0.2)'
                           : 'rgba(16, 185, 129, 0.2)',
-                        color: item.match_type === 'semantic' 
-                          ? '#a78bfa' 
+                        color: item.match_type === 'semantic'
+                          ? '#a78bfa'
                           : item.match_type === 'hybrid'
                           ? '#60a5fa'
+                          : item.match_type === 'filename'
+                          ? '#fbbf24'
                           : '#34d399'
                       }}>
-                        {item.match_type === 'semantic' 
-                          ? `${simPercent}% 유사` 
+                        {item.match_type === 'semantic'
+                          ? `${simPercent}% 유사`
                           : item.match_type === 'hybrid'
                           ? `${simPercent}% 하이브리드`
+                          : item.match_type === 'filename'
+                          ? '파일 이름'
                           : '키워드'}
                       </span>
                     </div>

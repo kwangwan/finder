@@ -159,7 +159,127 @@ class SearchService:
             except Exception as e:
                 print(f"[Search Error] Semantic search failed: {e}")
 
-        # 4. Keyword / Text search supplement (Hybrid search)
+        # 4. File-name match.
+        #
+        # Runs against kb_files directly, with NO join to kb_document_chunks.
+        # The keyword step below already had `f.name ILIKE :kw` in its WHERE
+        # clause, but it selects `FROM kb_document_chunks c JOIN kb_files f`,
+        # so a file with no chunks could never be returned however well its
+        # name matched — which is every image and video (nothing is extracted
+        # or embedded for them) plus any document whose embedding hasn't run
+        # yet. Searching for a photo or a video by its filename therefore
+        # always came back empty.
+        #
+        # It also runs unconditionally, unlike the keyword step's
+        # `len(best_by_file) < req.limit` guard: a filename is the most
+        # literal thing a user can search for, so it must not be dropped just
+        # because semantic matching already filled the result pool.
+        if req.include_keyword_match:
+            name_term = f"%{req.query.strip()}%"
+            name_sql = """
+                SELECT
+                    f.id as file_id,
+                    f.name as file_name,
+                    f.workspace_id,
+                    f.folder_id,
+                    f.created_by,
+                    u.name as author_name,
+                    f.file_type,
+                    f.is_markdown,
+                    f.created_at,
+                    f.updated_at,
+                    fol.name as folder_name
+                FROM kb_files f
+                LEFT JOIN kb_folders fol ON f.folder_id = fol.id
+                LEFT JOIN kb_users u ON f.created_by = u.id
+                WHERE f.is_trashed = FALSE
+                  AND f.name ILIKE :kw
+            """
+            name_params = {"kw": name_term, "limit": candidate_limit}
+
+            if req.workspace_id:
+                name_sql += " AND f.workspace_id = :workspace_id"
+                name_params["workspace_id"] = req.workspace_id
+            elif user_ws_ids is not None:
+                if user_ws_ids:
+                    ws_params = {f"n_ws_{i}": wid for i, wid in enumerate(user_ws_ids)}
+                    ws_placeholders = ", ".join(f":n_ws_{i}" for i in range(len(user_ws_ids)))
+                    name_sql += f" AND (f.workspace_id IN ({ws_placeholders}) OR (f.workspace_id IS NULL AND f.created_by = :current_user_id))"
+                    name_params.update(ws_params)
+                    name_params["current_user_id"] = current_user.id
+                else:
+                    name_sql += " AND (f.workspace_id IS NULL AND f.created_by = :current_user_id)"
+                    name_params["current_user_id"] = current_user.id
+
+            if req.folder_id:
+                name_sql += " AND f.folder_id = :folder_id"
+                name_params["folder_id"] = req.folder_id
+            if req.file_type:
+                name_sql += " AND f.file_type = :file_type"
+                name_params["file_type"] = req.file_type
+            if req.author_id:
+                name_sql += " AND f.created_by = :author_id"
+                name_params["author_id"] = req.author_id
+            if req.start_date:
+                name_sql += " AND f.created_at >= :start_date"
+                name_params["start_date"] = req.start_date
+            if req.end_date:
+                name_sql += " AND f.created_at <= :end_date"
+                name_params["end_date"] = req.end_date
+
+            name_sql += " LIMIT :limit;"
+
+            try:
+                name_res = await db.execute(text(name_sql), name_params)
+                query_norm = req.query.strip().lower()
+
+                for row in name_res.fetchall():
+                    fid = row.file_id
+                    file_name_lower = (row.file_name or "").lower()
+                    # Rank an exact name hit above a mere substring, and both
+                    # above the 0.85 the chunk-content keyword match uses —
+                    # if someone types a filename, that file belongs at the
+                    # top rather than under a loosely-related document body.
+                    if file_name_lower == query_norm:
+                        name_score = 1.0
+                    elif file_name_lower.startswith(query_norm):
+                        name_score = 0.95
+                    else:
+                        name_score = 0.9
+
+                    if fid not in best_by_file:
+                        best_by_file[fid] = SearchResultItem(
+                            file_id=row.file_id,
+                            file_name=row.file_name,
+                            workspace_id=row.workspace_id,
+                            folder_id=row.folder_id,
+                            folder_name=row.folder_name,
+                            author_id=row.created_by,
+                            author_name=row.author_name,
+                            file_type=row.file_type,
+                            is_markdown=row.is_markdown,
+                            chunk_index=0,
+                            # No chunk backs a filename hit (an image or video
+                            # has no extracted text at all), so the name is
+                            # the only meaningful thing to show as the match.
+                            matched_snippet=row.file_name,
+                            similarity_score=name_score,
+                            match_type="filename",
+                            matched_chunks_count=0,
+                            created_at=row.created_at,
+                            updated_at=row.updated_at
+                        )
+                    else:
+                        # Already found by content — the name matching too
+                        # makes it a stronger hit, not a separate one.
+                        existing = best_by_file[fid]
+                        existing.match_type = "hybrid"
+                        if name_score > existing.similarity_score:
+                            existing.similarity_score = name_score
+            except Exception as e:
+                print(f"[Search Error] File name search failed: {e}")
+
+        # 5. Keyword / Text search supplement (Hybrid search)
         if req.include_keyword_match and len(best_by_file) < req.limit:
             keyword_term = f"%{req.query.strip()}%"
             kw_sql = """

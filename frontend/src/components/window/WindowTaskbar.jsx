@@ -12,7 +12,6 @@ import {
   Table, 
   Check,
   Maximize2,
-  Sparkles,
   Grid
 } from '../../utils/icons';
 
@@ -219,11 +218,6 @@ export default function WindowTaskbar({
                     {/* Card Footer */}
                     <div className="tab-card-footer">
                       <span>{formatFileSize(win.file.file_size || win.file.size)}</span>
-                      {win.file.is_embedded && (
-                        <span className="badge-embedded-tiny">
-                          <Sparkles size={8} /> AI
-                        </span>
-                      )}
                       <span className="tab-status-tag">
                         {win.isMinimized ? '최소화됨' : isActive ? '현재 보는 중' : '열림'}
                       </span>

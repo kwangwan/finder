@@ -15,7 +15,6 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  Sparkles,
   FileText,
   Film,
   Image as ImageIcon,
@@ -510,12 +509,6 @@ export default function PreviewWindow({
           {isMarkdown && noteEditor.isUploadingImage && (
             <span className="window-save-status" style={{ color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
               <Loader2 size={11} className="spin" /> 업로드 중
-            </span>
-          )}
-          {file.is_embedded && (
-            <span className="badge-embedded-tiny" title="AI 임베딩 완료">
-              <Sparkles size={9} />
-              <span>AI</span>
             </span>
           )}
         </div>
