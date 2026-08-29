@@ -61,22 +61,69 @@ async def _stream_s3_object(s3_key: str, chunk_size: int = 1024 * 1024):
         body.close()
 
 
+async def _stream_s3_range(s3_key: str, start: int, end: int, chunk_size: int = 512 * 1024):
+    """
+    Yield one inclusive byte range of an object, in pieces, so the client
+    starts receiving data immediately.
+
+    The ranged path used to call get_object_range, which does a single
+    Body.read() of the whole slice — nothing left the server until the entire
+    slice had been pulled from MinIO. That fixed dead time at the head of
+    every request is what made playback stutter early on, when the player has
+    no buffer yet to ride it out. Streaming removes it, and it is also what
+    makes the larger opening slice below affordable: a bigger range no longer
+    delays the first byte, it only keeps the pipe full for longer.
+    """
+    resp = await run_in_threadpool(
+        s3_service.client.get_object,
+        Bucket=s3_service.bucket_name,
+        Key=s3_key,
+        Range=f"bytes={start}-{end}",
+    )
+    body = resp["Body"]
+    try:
+        while True:
+            chunk = await run_in_threadpool(body.read, chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        # Media clients routinely abandon a range mid-flight (the player has
+        # buffered enough, or the viewer seeked elsewhere), so this has to
+        # release the connection on the cancelled path too, not just on a
+        # clean read-to-completion.
+        body.close()
+
+
 # The largest slice served for one ranged media request. Browsers open a
 # <video> with an OPEN-ENDED range (`Range: bytes=0-`, i.e. "from here to the
 # end of the file"), and passing that straight through to S3 makes a single
 # request return the entire object — a 350MB video was being sent as one
-# 350MB 206 response, fully buffered into RAM by get_object_range's .read()
-# before a single byte left the server. That is not streaming; it is a whole-
-# file download that merely happens to be labelled 206. Capping the slice
-# makes each request cheap and bounded, and the browser simply asks for the
-# next range as playback advances (and jumps straight to the range it needs
-# when the viewer seeks) — the normal way media servers behave.
+# 350MB 206 response before a single byte left the server. That is not
+# streaming; it is a whole-file download that merely happens to be labelled
+# 206. Capping the slice makes each request cheap and bounded, and the
+# browser simply asks for the next range as playback advances (and jumps
+# straight to the range it needs when the viewer seeks).
 MAX_MEDIA_RANGE_BYTES = 4 * 1024 * 1024
+
+# ...but the steady-state cap is too tight for the very start of playback.
+# A player begins with an empty buffer, so it must fetch, decode and start
+# rendering all at once, and every additional request in that window is
+# another round trip (over the Cloudflare Tunnel in production) taken while
+# there is no buffered video to play through it — which is exactly the early
+# stutter that remained after the whole-file fix. Serve a larger opening
+# slice while the requested offset is still inside the head of the file, so
+# the player banks a real buffer up front, then fall back to the smaller
+# steady-state slice once playback is established.
+MEDIA_HEAD_WINDOW_BYTES = 16 * 1024 * 1024
+MEDIA_HEAD_RANGE_BYTES = 16 * 1024 * 1024
 
 
 def _bounded_range(range_header: Optional[str], total_size: Optional[int]):
     """
-    Parse an HTTP Range header and clamp it to at most MAX_MEDIA_RANGE_BYTES.
+    Parse an HTTP Range header and clamp how much it may return: a larger
+    slice inside the head of the file (see MEDIA_HEAD_RANGE_BYTES), the
+    smaller steady-state slice after that.
 
     Returns (range_header_for_s3, start, end) with an inclusive end, or None
     when the header is absent/unparseable/unsatisfiable so the caller can fall
@@ -112,7 +159,8 @@ def _bounded_range(range_header: Optional[str], total_size: Optional[int]):
     end = min(end, total_size - 1)
     if end < start:
         return None
-    end = min(end, start + MAX_MEDIA_RANGE_BYTES - 1)
+    cap = MEDIA_HEAD_RANGE_BYTES if start < MEDIA_HEAD_WINDOW_BYTES else MAX_MEDIA_RANGE_BYTES
+    end = min(end, start + cap - 1)
     return f"bytes={start}-{end}", start, end
 
 @router.get("/config", response_model=StorageConfigResponse)
@@ -1082,21 +1130,35 @@ async def preview_file(
     # executes when rendered inline in the app's own origin. Never serve raw SVG
     # bytes inline — always sanitize first (small documents, so skip range-serving).
     if range and not is_svg:
-        bounded = _bounded_range(range, file_item.size_bytes)
-        # Serve at most MAX_MEDIA_RANGE_BYTES per request, so an open-ended
+        # Serve a bounded slice per request (larger at the head of the file,
+        # smaller once playback is established) so an open-ended
         # `Range: bytes=0-` from a <video> can't turn into a whole-file
-        # transfer. Content-Range is built from the clamped bounds rather
-        # than echoing S3's, so the browser is told exactly what it got.
-        range_for_s3 = bounded[0] if bounded else range
-        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range_for_s3)
+        # transfer, and stream that slice rather than buffering it — the
+        # client gets its first byte right away instead of waiting out a
+        # full read of the slice. Content-Range/Content-Length come from the
+        # clamped bounds, so the browser is told exactly what it will get.
+        bounded = _bounded_range(range, file_item.size_bytes)
+        if bounded:
+            _, start, end = bounded
+            return StreamingResponse(
+                _stream_s3_range(file_item.s3_key, start, end),
+                status_code=status.HTTP_206_PARTIAL_CONTENT,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_item.size_bytes}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(end - start + 1),
+                    "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
+                    "Cache-Control": "public, max-age=3600"
+                },
+                media_type=mime_type
+            )
+
+        # Unparseable/unsatisfiable Range (size unknown, malformed header) —
+        # keep the previous buffered behaviour as the fallback.
+        res = await run_in_threadpool(s3_service.get_object_range, file_item.s3_key, range)
         if res:
-            if bounded:
-                _, start, end = bounded
-                content_range = f"bytes {start}-{end}/{file_item.size_bytes}"
-            else:
-                content_range = res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}"
             headers = {
-                "Content-Range": content_range,
+                "Content-Range": res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}",
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(len(res["body"])),
                 "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
