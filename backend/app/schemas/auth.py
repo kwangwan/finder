@@ -35,6 +35,9 @@ class UserResponse(BaseModel):
     is_admin: bool
     is_approved: bool
     is_active: bool
+    # Write access to the shared workspace; managed instead of removing the
+    # user from it, since for some users it is the only space they have.
+    can_write_shared: bool = True
     storage_quota_bytes: int = 0  # 0B default (Admin assigns quota)
     storage_used_bytes: int = 0
     created_at: datetime

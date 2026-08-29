@@ -17,6 +17,15 @@ class User(Base):
     google_id = Column(String(255), nullable=True, index=True)
     hashed_password = Column(String(255), nullable=True)
     is_admin = Column(Boolean, default=False, nullable=False)
+    # Not a person. Holds the shared workspace's storage quota so that pool is
+    # separate from any real user's, and is hidden from the user list and from
+    # every account action.
+    is_system = Column(Boolean, default=False, nullable=False, index=True)
+    # Write access to the shared workspace. Revoking this leaves the user able
+    # to open and read everything there but not to change it — the shared space
+    # is the only one some users have, so removing them from it entirely would
+    # take away their whole account.
+    can_write_shared = Column(Boolean, default=True, nullable=False)
     is_approved = Column(Boolean, default=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     storage_quota_bytes = Column(BigInteger, default=DEFAULT_STORAGE_QUOTA, nullable=False)
@@ -51,6 +60,8 @@ class User(Base):
             "google_id": self.google_id,
             "has_password": bool(self.hashed_password),
             "is_admin": self.is_admin,
+            "is_system": self.is_system,
+            "can_write_shared": self.can_write_shared,
             "is_approved": self.is_approved,
             "is_active": self.is_active,
             "storage_quota_bytes": self.storage_quota_bytes,

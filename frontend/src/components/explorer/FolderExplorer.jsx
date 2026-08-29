@@ -92,6 +92,8 @@ export default function FolderExplorer({
   onOpenFolderWindow,
   onSelectAllInFolder,
   workspaceId = null,
+  isSharedWorkspace = false,
+  canWrite = true,
   allFolders = [],
   hasOpenWindows = false,
   hasNewFiles = false,
@@ -707,7 +709,7 @@ export default function FolderExplorer({
         {/* Action Buttons */}
         <div className="explorer-actions">
           {activeView === 'notes' ? (
-            <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote} title="새 문서 작성">
+            <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} title={canWrite ? '새 문서 작성' : '읽기 전용 계정입니다'}>
               {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
               <span>새 문서</span>
             </button>
@@ -735,15 +737,15 @@ export default function FolderExplorer({
                   <span className="hide-mobile">ZIP 다운로드</span>
                 </button>
               )}
-              <button className="btn-secondary explorer-btn" onClick={onOpenUpload} title="파일 및 폴더 업로드">
+              <button className="btn-secondary explorer-btn" onClick={onOpenUpload} disabled={!canWrite} title={canWrite ? '파일 및 폴더 업로드' : '읽기 전용 계정입니다'}>
                 <UploadCloud size={15} />
                 <span className="hide-mobile">업로드</span>
               </button>
-              <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} title="현재 경로에 새 폴더 생성">
+              <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} disabled={!canWrite} title={canWrite ? '현재 경로에 새 폴더 생성' : '읽기 전용 계정입니다'}>
                 <FolderPlus size={15} />
                 <span className="hide-mobile">새 폴더</span>
               </button>
-              <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote} title="새 문서 작성">
+              <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} title={canWrite ? '새 문서 작성' : '읽기 전용 계정입니다'}>
                 {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
                 <span className="hide-mobile">새 문서</span>
               </button>
@@ -753,6 +755,23 @@ export default function FolderExplorer({
       </div>
 
       {/* Explorer Secondary Toolbar: Sort & Count Controls */}
+      {isSharedWorkspace && (
+        <div className={`shared-ws-notice ${canWrite ? '' : 'is-readonly'}`}>
+          <Info size={15} />
+          <div>
+            <strong>공용 워크스페이스입니다.</strong>{' '}
+            여기에 올린 파일과 문서는 <strong>가입한 모든 이용자가 열람하고 내려받을 수 있으며</strong>,{' '}
+            <strong>관리자가 사전 통보 없이 삭제할 수 있습니다.</strong>{' '}
+            공개해도 괜찮은 자료만 올리고, 중요한 자료는 따로 보관해 주세요.
+            {!canWrite && (
+              <div style={{ marginTop: 4 }}>
+                현재 계정은 <strong>읽기 전용</strong>입니다. 올리기·수정·삭제가 제한되며, 문의는 관리자에게 해주세요.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           {files.length > 0 && (
@@ -1003,7 +1022,7 @@ export default function FolderExplorer({
               <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 1.5rem', lineHeight: 1.6 }}>
                 아이디어, 메모, 지식을 자유롭게 작성하고 AI 검색으로 빠르게 찾아보세요.
               </p>
-              <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
+              <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} style={{ padding: '0.6rem 1.35rem', margin: '0 auto' }}>
                 {isCreatingNote ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
                 <span>새 문서 작성</span>
               </button>
@@ -1076,7 +1095,7 @@ export default function FolderExplorer({
                 새 문서를 작성하거나 미디어 파일을 드래그하여 업로드하세요.
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-                <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote} style={{ padding: '0.6rem 1.25rem' }}>
+                <button className="btn-primary" onClick={handleCreateNote} disabled={isCreatingNote || !canWrite} style={{ padding: '0.6rem 1.25rem' }}>
                   {isCreatingNote ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
                   <span>새 문서 작성</span>
                 </button>

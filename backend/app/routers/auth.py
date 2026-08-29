@@ -24,49 +24,69 @@ from app.core.security import (
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 async def ensure_user_default_workspace(db: AsyncSession, user: User):
-    """Ensure user has at least one workspace. If not, create a default workspace and migrate legacy items."""
+    """
+    Make sure the user has somewhere to work.
+
+    A new account no longer gets a personal workspace of its own: everyone
+    belongs to the shared workspace, which is the space a user has before an
+    administrator grants them any storage of their own. Creating a private
+    workspace per signup would hand each new user an empty space backed by a
+    personal quota they do not have yet, which is the situation this replaces.
+
+    Administrators are the exception, and only for a specific reason: legacy
+    folders and files that predate workspaces have to be adopted somewhere, and
+    that has always been the first admin's own workspace.
+    """
     ws_res = await db.execute(
         select(WorkspaceMember).where(WorkspaceMember.user_id == user.id)
     )
-    if ws_res.first() is None:
-        user_display = user.name or user.email.split("@")[0]
-        ws_name = f"{user_display}의 워크스페이스"
-        slug_base = re.sub(r'[^\w\s-]', '', ws_name.lower().strip())
-        slug_base = re.sub(r'[\s_]+', '-', slug_base)[:50] or "workspace"
-        slug = f"{slug_base}-{str(user.id)[:8]}"
-        
-        ex = await db.execute(select(Workspace).where(Workspace.slug == slug))
-        if ex.scalar_one_or_none():
-            slug = f"{slug}-{uuid.uuid4().hex[:6]}"
-            
-        workspace = Workspace(
-            name=ws_name,
-            description="개인 기본 워크스페이스",
-            slug=slug,
-            owner_id=user.id,
-            icon="briefcase",
-            is_default=True
-        )
-        db.add(workspace)
-        await db.commit()
-        await db.refresh(workspace)
-        
-        member = WorkspaceMember(
-            workspace_id=workspace.id,
-            user_id=user.id,
-            role="owner"
-        )
-        db.add(member)
+    has_membership = ws_res.first() is not None
 
-        # If this is admin or first user, assign unassigned folders & files to this workspace
-        if user.is_admin:
-            await db.execute(
-                update(Folder).where(Folder.workspace_id.is_(None)).values(workspace_id=workspace.id, created_by=user.id)
-            )
-            await db.execute(
-                update(FileItem).where(FileItem.workspace_id.is_(None)).values(workspace_id=workspace.id, created_by=user.id)
-            )
-        await db.commit()
+    if not user.is_admin:
+        # Membership in the shared workspace is implicit (see AccessService),
+        # so nothing needs to be written here at all.
+        return
+
+    if has_membership:
+        return
+
+    user_display = user.name or user.email.split("@")[0]
+    ws_name = f"{user_display}의 워크스페이스"
+    slug_base = re.sub(r'[^\w\s-]', '', ws_name.lower().strip())
+    slug_base = re.sub(r'[\s_]+', '-', slug_base)[:50] or "workspace"
+    slug = f"{slug_base}-{str(user.id)[:8]}"
+
+    ex = await db.execute(select(Workspace).where(Workspace.slug == slug))
+    if ex.scalar_one_or_none():
+        slug = f"{slug}-{uuid.uuid4().hex[:6]}"
+
+    workspace = Workspace(
+        name=ws_name,
+        description="개인 기본 워크스페이스",
+        slug=slug,
+        owner_id=user.id,
+        icon="briefcase",
+        is_default=True
+    )
+    db.add(workspace)
+    await db.commit()
+    await db.refresh(workspace)
+
+    member = WorkspaceMember(
+        workspace_id=workspace.id,
+        user_id=user.id,
+        role="owner"
+    )
+    db.add(member)
+
+    # Adopt folders and files that predate workspaces entirely.
+    await db.execute(
+        update(Folder).where(Folder.workspace_id.is_(None)).values(workspace_id=workspace.id, created_by=user.id)
+    )
+    await db.execute(
+        update(FileItem).where(FileItem.workspace_id.is_(None)).values(workspace_id=workspace.id, created_by=user.id)
+    )
+    await db.commit()
 
 async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token: str | None = None):
     """If a valid invitation token is provided OR if there are pending invitations for this user's email,

@@ -1780,6 +1780,8 @@ export default function App() {
             onTransferItems={handleTransferItems}
             onOpenFolderWindow={(folder) => windowManager.openFolderWindow(folder, activeWorkspace?.id)}
             workspaceId={activeWorkspace?.id || null}
+            isSharedWorkspace={!!activeWorkspace?.is_shared}
+            canWrite={activeWorkspace?.can_write !== false}
             onSelectAllInFolder={async () => {
               const viewParams = buildFileViewParams();
               if (!viewParams) return [];

@@ -6,16 +6,33 @@ from app.models import User, Folder, FileItem, Workspace, WorkspaceMember
 
 
 class AccessService:
+    async def get_shared_workspace_ids(self, db: AsyncSession) -> Set[uuid.UUID]:
+        """
+        The organisation-wide workspace(s) every approved user may use.
+
+        Membership there is implicit — a row per user would have to be written
+        at signup and backfilled for everyone who joined earlier, and any miss
+        would silently lock someone out of the one space they are meant to
+        have. Deriving it from the flag cannot drift.
+        """
+        res = await db.execute(select(Workspace.id).where(Workspace.is_shared == True))  # noqa: E712
+        return {r[0] for r in res.fetchall()}
+
     async def get_user_workspace_ids(self, db: AsyncSession, user_id: uuid.UUID) -> Set[uuid.UUID]:
-        """Get all workspace IDs where the user is a member (any role)."""
+        """Get all workspace IDs the user can reach (membership + shared)."""
         res = await db.execute(
             select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user_id)
         )
-        return {r[0] for r in res.fetchall()}
+        ids = {r[0] for r in res.fetchall()}
+        ids |= await self.get_shared_workspace_ids(db)
+        return ids
 
     async def is_workspace_member(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> bool:
         """Check if user is a member of the workspace."""
         if user.is_admin:
+            return True
+        ws = await db.get(Workspace, workspace_id)
+        if ws is not None and ws.is_shared:
             return True
         res = await db.execute(
             select(WorkspaceMember.id).where(
@@ -36,7 +53,41 @@ class AccessService:
             )
         )
         row = res.first()
-        return row[0] if row else None
+        if row:
+            return row[0]
+        # Everyone is a plain member of the shared workspace — deliberately not
+        # an admin of it, so managing it stays with administrators.
+        ws = await db.get(Workspace, workspace_id)
+        if ws is not None and ws.is_shared:
+            return "member"
+        return None
+
+    async def can_write_workspace(self, db: AsyncSession, user: User, workspace_id: Optional[uuid.UUID]) -> bool:
+        """
+        Whether the user may change anything in this workspace.
+
+        Only the shared workspace distinguishes reading from writing. Access
+        there is managed by taking write away, not by removing the person:
+        for a user with no storage of their own it is the only space they
+        have, so ejecting them would take away their whole account.
+        """
+        if user.is_admin:
+            return True
+        if not workspace_id:
+            return True
+        ws = await db.get(Workspace, workspace_id)
+        if ws is not None and ws.is_shared:
+            return bool(getattr(user, "can_write_shared", True))
+        return True
+
+    async def require_write(self, db: AsyncSession, user: User, workspace_id: Optional[uuid.UUID]) -> None:
+        """Raise 403 when the user may read this workspace but not change it."""
+        if not await self.can_write_workspace(db, user, workspace_id):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=403,
+                detail="공용 워크스페이스에 대한 쓰기 권한이 없습니다. 관리자에게 문의하세요."
+            )
 
     async def is_workspace_admin_or_owner(self, db: AsyncSession, user: User, workspace_id: uuid.UUID) -> bool:
         """Check if user is a workspace owner or admin (or superadmin)."""

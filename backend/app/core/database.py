@@ -80,6 +80,12 @@ async def init_db():
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMP;",
             # Default (non-deletable, always-fallback) workspace per user
             "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;",
+            # The single organisation-wide workspace every approved user can use
+            "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_shared BOOLEAN NOT NULL DEFAULT FALSE;",
+            # Holder account for the shared workspace's own storage pool
+            "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;",
+            # Per-user write access to the shared workspace (read stays)
+            "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS can_write_shared BOOLEAN NOT NULL DEFAULT TRUE;",
             # Last editor (distinct from created_by/uploader) for markdown notes
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS last_edited_by UUID REFERENCES kb_users(id) ON DELETE SET NULL;",
             # Capture metadata read from the media file itself (photo EXIF /

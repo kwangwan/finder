@@ -253,6 +253,7 @@ async def create_folder(
         role = await access_service.get_workspace_role(db, current_user, workspace_id)
         if not role:
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+        await access_service.require_write(db, current_user, workspace_id)
 
     if req.parent_id:
         if not await access_service.can_access_folder(db, current_user, req.parent_id):
@@ -294,6 +295,7 @@ async def update_folder(
     folder = await db.get(Folder, folder_id)
     if not folder or folder.is_trashed:
         raise HTTPException(status_code=404, detail="Folder not found")
+    await access_service.require_write(db, current_user, folder.workspace_id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 수정할 권한이 없습니다.")
@@ -365,6 +367,7 @@ async def rename_folder(
     folder = await db.get(Folder, folder_id)
     if not folder or folder.is_trashed:
         raise HTTPException(status_code=404, detail="Folder not found")
+    await access_service.require_write(db, current_user, folder.workspace_id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더명을 변경할 권한이 없습니다.")
@@ -391,6 +394,7 @@ async def trash_folder(
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    await access_service.require_write(db, current_user, folder.workspace_id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
@@ -414,6 +418,7 @@ async def restore_folder(
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    await access_service.require_write(db, current_user, folder.workspace_id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 복구할 권한이 없습니다.")
@@ -446,6 +451,7 @@ async def delete_folder(
     folder = await db.get(Folder, folder_id)
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    await access_service.require_write(db, current_user, folder.workspace_id)
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
@@ -495,6 +501,7 @@ async def ensure_folder_path(
         raise HTTPException(status_code=403, detail="워크스페이스에 접근할 권한이 없습니다.")
 
     clean_path = req.relative_path.strip().replace('\\', '/')
+    await access_service.require_write(db, current_user, req.workspace_id)
     parts = [p.strip() for p in clean_path.split('/') if p.strip()]
 
     if not parts:

@@ -13,6 +13,7 @@ from app.services.media_metadata_service import backfill_media_metadata
 
 from app.services.deletion_service import deletion_service
 from app.services.copy_service import copy_service
+from app.services import shared_workspace_service
 
 async def _periodic_trash_cleanup():
     """Periodically purge trashed items older than 30 days, abandoned chunk
@@ -70,6 +71,10 @@ async def lifespan(app: FastAPI):
         print(f"[{settings.APP_NAME} Error] DB initialization error: {e}")
     
     # Start background deletion queue worker & periodic 30-day trash cleanup
+    # Everyone needs somewhere to work from the moment they are approved, so
+    # the shared workspace is ensured at startup rather than created on demand.
+    await shared_workspace_service.ensure_on_startup()
+
     deletion_service.start_worker()
     # A job left mid-flight by the previous shutdown is nobody's work now;
     # put it back on the queue before the worker starts draining.

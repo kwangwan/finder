@@ -130,8 +130,35 @@ async def list_my_workspaces(
     ).order_by(Workspace.name)
 
     res = await db.execute(stmt)
-    workspaces = res.scalars().unique().all()
-    return [ws.to_dict(current_user_id=current_user.id) for ws in workspaces]
+    workspaces = list(res.scalars().unique().all())
+
+    # Membership in the shared workspace is implicit, so the join above cannot
+    # see it — it is added here so everyone actually finds the one space they
+    # are all meant to have.
+    shared_res = await db.execute(
+        select(Workspace).options(
+            selectinload(Workspace.owner),
+            selectinload(Workspace.members)
+        ).where(Workspace.is_shared == True)  # noqa: E712
+    )
+    known = {w.id for w in workspaces}
+    for shared in shared_res.scalars().unique().all():
+        if shared.id not in known:
+            workspaces.append(shared)
+
+    workspaces.sort(key=lambda w: (not w.is_shared, w.name))
+    payload = []
+    for ws in workspaces:
+        d = ws.to_dict(current_user_id=current_user.id)
+        if ws.is_shared:
+            # Everyone reads it; only administrators manage it, and write can
+            # be withdrawn per user without removing them from it.
+            d["role"] = "admin" if current_user.is_admin else "member"
+            d["can_write"] = bool(current_user.is_admin or getattr(current_user, "can_write_shared", True))
+        else:
+            d["can_write"] = True
+        payload.append(d)
+    return payload
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -201,6 +228,12 @@ async def update_workspace(
     current_user: User = Depends(get_current_approved_user)
 ):
     """Update workspace settings (owner/admin only)."""
+    ws_probe = await db.get(Workspace, workspace_id)
+    if ws_probe is not None and ws_probe.is_shared and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="공용 워크스페이스는 관리자만 설정을 변경할 수 있습니다."
+        )
     workspace = await _get_workspace_with_member_check(
         db, workspace_id, current_user, require_role=["owner", "admin"]
     )
@@ -252,6 +285,14 @@ async def delete_workspace(
             detail="기본 워크스페이스는 삭제할 수 없습니다."
         )
 
+    # Deleting it would take the only space some users have, along with
+    # everything anyone had put in it.
+    if workspace.is_shared:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="공용 워크스페이스는 삭제할 수 없습니다."
+        )
+
     files_res = await db.execute(select(FileItem).where(FileItem.workspace_id == workspace_id))
     files_to_delete = files_res.scalars().all()
 
@@ -299,9 +340,17 @@ async def invite_member(
     current_user: User = Depends(get_current_approved_user)
 ):
     """Invite a registered user to the workspace by email (owner/admin only)."""
-    await _get_workspace_with_member_check(
+    workspace = await _get_workspace_with_member_check(
         db, workspace_id, current_user, require_role=["owner", "admin"]
     )
+
+    # Everyone already has access to the shared workspace, so there is nobody
+    # to invite; access there is managed by granting or withdrawing write.
+    if workspace.is_shared:
+        raise HTTPException(
+            status_code=400,
+            detail="공용 워크스페이스는 모든 이용자가 이미 사용할 수 있어 초대가 필요하지 않습니다."
+        )
 
     # Find user by email
     u_res = await db.execute(select(User).where(User.email == req.email.strip().lower()))

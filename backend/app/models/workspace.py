@@ -21,6 +21,12 @@ class Workspace(Base):
     # "no workspace selected" state — the frontend falls back to it whenever
     # the previously active workspace is missing or unset.
     is_default = Column(Boolean, default=False, nullable=False)
+    # The one workspace every approved user can use without being invited to
+    # it. Membership is implicit rather than stored, so a new signup can use it
+    # immediately and no backfill is needed when someone joins — see
+    # AccessService. Managing it (rename, settings, deletion) stays with
+    # administrators.
+    is_shared = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
@@ -48,6 +54,7 @@ class Workspace(Base):
             "owner_email": self.owner.email if self.owner else None,
             "icon": self.icon,
             "is_default": self.is_default,
+            "is_shared": self.is_shared,
             "member_count": len(self.members) if self.members else 0,
             "role": user_role,
             "created_at": self.created_at.isoformat() if self.created_at else None,

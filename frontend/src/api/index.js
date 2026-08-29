@@ -1111,6 +1111,35 @@ export async function cancelCopyJob(jobId) {
   return res.json();
 }
 
+/** The shared workspace and the storage pool behind it (admin only). */
+export async function getSharedWorkspaceInfo() {
+  const res = await fetch(`${API_BASE}/admin/shared-workspace`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('공용 워크스페이스 정보를 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function setSharedWorkspaceQuota(bytes) {
+  const res = await fetch(`${API_BASE}/admin/shared-workspace/quota`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ storage_quota_bytes: bytes }),
+  });
+  if (!res.ok) throw new Error('공용 워크스페이스 용량을 변경하지 못했습니다.');
+  return res.json();
+}
+
+/** Grant or withdraw a user's write access to the shared workspace. They keep
+ *  read access either way — it is the only space some users have. */
+export async function setUserSharedWrite(userId, canWrite) {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}/shared-write`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ can_write_shared: canWrite }),
+  });
+  if (!res.ok) throw new Error('쓰기 권한을 변경하지 못했습니다.');
+  return res.json();
+}
+
 export async function listAdminCopyJobs(limit = 100) {
   const res = await fetch(`${API_BASE}/admin/copy-jobs?limit=${limit}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('복사 작업 이력을 불러오지 못했습니다.');

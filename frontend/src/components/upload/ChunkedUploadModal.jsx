@@ -13,7 +13,8 @@ import {
   Square,
   Ban,
   Check,
-  Home
+  Home,
+  Info
 } from '../../utils/icons';
 
 import { extractFilesFromDataTransfer, openDirectoryPicker } from '../../utils/fileUploadUtils';
@@ -147,8 +148,22 @@ export default function ChunkedUploadModal({
 
         {/* Modal Body */}
         <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {/* Said at the moment something is actually being put in, not only on
+              the workspace page: this is the point of no return for a file the
+              uploader may not have meant to share. */}
+          {workspaces.find(w => w.id === activeWorkspaceId)?.is_shared && (
+            <div className="shared-ws-notice" style={{ margin: '0 0 0.85rem' }}>
+              <Info size={15} />
+              <div>
+                <strong>공용 워크스페이스에 업로드합니다.</strong>{' '}
+                가입한 모든 이용자가 열람·다운로드할 수 있으며, 관리자가 사전 통보 없이 삭제할 수 있습니다.
+              </div>
+            </div>
+          )}
+
           {/* Target Folder Selector */}
           <div>
+
             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
               업로드 대상 폴더
             </label>

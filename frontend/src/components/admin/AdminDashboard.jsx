@@ -19,9 +19,12 @@ import {
   Clock,
   Database,
   Copy,
-  ArrowRight
+  ArrowRight,
+  Users as UsersIcon,
+  Check,
+  X as XIcon
 } from '../../utils/icons';
-import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs } from '../../api';
+import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs, getSharedWorkspaceInfo, setSharedWorkspaceQuota, setUserSharedWrite } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 /** Format bytes to human-readable string */
@@ -52,20 +55,25 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
   const [editingQuotaUserId, setEditingQuotaUserId] = useState(null);
   const [quotaInputGb, setQuotaInputGb] = useState('');
   const [copyJobs, setCopyJobs] = useState([]);
+  const [sharedInfo, setSharedInfo] = useState(null);
+  const [sharedQuotaGb, setSharedQuotaGb] = useState('');
+  const [isEditingSharedQuota, setIsEditingSharedQuota] = useState(false);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [userList, sysStats, jobs] = await Promise.all([
+      const [userList, sysStats, jobs, shared] = await Promise.all([
         getAdminUsers(),
         getSystemStats(),
         // Best-effort: the history is supplementary, and failing to load it
         // must not take the whole dashboard down with it.
-        listAdminCopyJobs(100).catch(() => ({ jobs: [] }))
+        listAdminCopyJobs(100).catch(() => ({ jobs: [] })),
+        getSharedWorkspaceInfo().catch(() => null)
       ]);
       setUsers(userList);
       setStats(sysStats);
       setCopyJobs(jobs.jobs || []);
+      setSharedInfo(shared);
     } catch (err) {
       await showAlert({
         title: '데이터 조회 실패',
@@ -310,6 +318,95 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
         </div>
 
         {/* User Management Table Card */}
+        {/* The shared workspace's storage is its own pool, not any person's.
+            The whole point of that space is to serve users who have not been
+            granted personal storage, so charging it to an individual would
+            defeat it — it is held by a system account and sized here. */}
+        {sharedInfo && (
+          <div className="admin-table-card" style={{ marginBottom: '1.5rem' }}>
+            <div className="admin-table-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <UsersIcon size={18} color="var(--accent-primary)" />
+                <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {sharedInfo.workspace?.name || '공용 워크스페이스'}
+                </h2>
+                <span className="menu-badge" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>
+                  파일 {sharedInfo.file_count}개
+                </span>
+              </div>
+            </div>
+            <div style={{ padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 6 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>사용 중</span>
+                  <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
+                    {formatBytes(sharedInfo.storage_used_bytes)} / {formatBytes(sharedInfo.storage_quota_bytes)}
+                  </span>
+                </div>
+                <div style={{ height: 8, borderRadius: 4, background: 'var(--bg-tertiary)', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${Math.min(100, sharedInfo.storage_quota_bytes ? (sharedInfo.storage_used_bytes / sharedInfo.storage_quota_bytes) * 100 : 0)}%`,
+                    height: '100%',
+                    background: 'var(--accent-primary)'
+                  }} />
+                </div>
+                <div style={{ marginTop: 6, fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                  가입한 모든 이용자가 함께 사용합니다. 개인 용량과는 별개로 관리됩니다.
+                </div>
+              </div>
+
+              {isEditingSharedQuota ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <input
+                    className="input-field"
+                    type="number"
+                    min="0"
+                    value={sharedQuotaGb}
+                    onChange={(e) => setSharedQuotaGb(e.target.value)}
+                    style={{ width: 96, padding: '0.4rem 0.6rem', fontSize: '0.85rem' }}
+                    autoFocus
+                  />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>GB</span>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ padding: '0.4rem 0.7rem' }}
+                    onClick={async () => {
+                      const gb = Number(sharedQuotaGb);
+                      if (!Number.isFinite(gb) || gb < 0) return;
+                      try {
+                        await setSharedWorkspaceQuota(Math.round(gb * 1024 * 1024 * 1024));
+                        setIsEditingSharedQuota(false);
+                        await loadData();
+                      } catch (err) {
+                        await showAlert({ title: '변경 실패', message: err.message, type: 'error' });
+                      }
+                    }}
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button type="button" className="btn-secondary" style={{ padding: '0.4rem 0.7rem' }} onClick={() => setIsEditingSharedQuota(false)}>
+                    <XIcon size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ padding: '0.45rem 0.8rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 5 }}
+                  onClick={() => {
+                    setSharedQuotaGb(String(Math.round((sharedInfo.storage_quota_bytes / (1024 ** 3)) * 10) / 10));
+                    setIsEditingSharedQuota(true);
+                  }}
+                >
+                  <Edit3 size={14} />
+                  <span>용량 변경</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="admin-table-card">
           <div className="admin-table-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -353,6 +450,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                       <HardDrive size={13} /> 저장용량 할당
                     </div>
                   </th>
+                  <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>공용 쓰기</th>
                   <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>가입일시</th>
                   <th style={{ padding: '0.9rem 1.5rem', textAlign: 'right', fontWeight: 600, fontSize: '0.78rem' }}>계정 관리</th>
                 </tr>
@@ -360,7 +458,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={7} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                       <Users size={32} style={{ margin: '0 auto 0.6rem', display: 'block', opacity: 0.5 }} />
                       일치하는 사용자가 없습니다.
                     </td>
@@ -549,6 +647,55 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 }} />
                               </div>
                             </div>
+                          )}
+                        </td>
+
+                        {/* Shared workspace write access. Withdrawing it is how
+                            misuse is handled: the user keeps read access, because
+                            for someone without personal storage the shared space
+                            is their entire account. */}
+                        <td style={{ padding: '1rem 1rem' }}>
+                          {user.is_admin ? (
+                            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>관리자</span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              disabled={actionLoadingId === user.id}
+                              onClick={async () => {
+                                const next = !(user.can_write_shared !== false);
+                                if (!next) {
+                                  const confirmed = await showConfirm({
+                                    title: '공용 워크스페이스 쓰기 권한 회수',
+                                    message: `'${user.email}' 사용자의 쓰기 권한을 회수하시겠습니까?\n읽기는 계속 가능하며, 새로 올리거나 수정·삭제할 수 없게 됩니다.`,
+                                    confirmText: '회수',
+                                    danger: true,
+                                  });
+                                  if (!confirmed) return;
+                                }
+                                setActionLoadingId(user.id);
+                                try {
+                                  await setUserSharedWrite(user.id, next);
+                                  await loadData();
+                                } catch (err) {
+                                  await showAlert({ title: '변경 실패', message: err.message, type: 'error' });
+                                } finally {
+                                  setActionLoadingId(null);
+                                }
+                              }}
+                              style={{
+                                padding: '0.3rem 0.6rem',
+                                fontSize: '0.75rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                color: user.can_write_shared === false ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                              }}
+                              title={user.can_write_shared === false ? '쓰기 권한 부여' : '쓰기 권한 회수 (읽기는 유지)'}
+                            >
+                              {user.can_write_shared === false ? <XIcon size={13} /> : <Check size={13} />}
+                              <span>{user.can_write_shared === false ? '읽기 전용' : '쓰기 가능'}</span>
+                            </button>
                           )}
                         </td>
 
