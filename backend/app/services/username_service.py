@@ -25,10 +25,31 @@ MIN_LEN = 3
 MAX_LEN = 20
 
 RESERVED = {
-    "admin", "administrator", "root", "system", "shared", "support", "help",
-    "api", "null", "undefined", "me", "self", "owner", "staff", "official",
-    "finder", "projectrun", "project_run",
+    "root", "system", "shared", "help", "api", "null", "undefined",
+    "me", "self", "owner", "finder", "projectrun", "test", "guest",
 }
+
+# Words that make an account look like it speaks for the service. Matched
+# anywhere in the handle, not just as the whole of it: "admin_kim",
+# "the_admin" and "admin2" all read as official at a glance, which is the
+# entire point of claiming one.
+AUTHORITY_TOKENS = {
+    "admin", "administrator", "sysadmin", "webmaster", "moderator",
+    "operator", "supervisor", "manager", "official", "staff",
+    "helpdesk", "support", "security", "master", "owner", "system",
+    "관리자",  # cannot be typed in a handle, but kept so the intent is explicit
+}
+
+# Folded before the check so digits and symbols standing in for letters do not
+# get around it: "4dm1n", "@dmin" and "a_d_m_i_n" all reduce to "admin".
+_LEET = str.maketrans({
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
+    "@": "a", "$": "s", "_": "", "-": "", ".": "",
+})
+
+
+def _fold_for_reserved(username: str) -> str:
+    return (username or "").lower().translate(_LEET)
 
 # Characters that still look alike within plain ASCII. Two handles whose
 # skeletons match are treated as the same handle, so "b0b" cannot be
@@ -52,6 +73,12 @@ def validate(username: str) -> str:
         raise ValueError("아이디는 영문 소문자, 숫자, 밑줄(_)만 쓸 수 있고 밑줄로 시작하거나 끝날 수 없습니다.")
     if candidate in RESERVED:
         raise ValueError("사용할 수 없는 아이디입니다.")
+
+    folded = _fold_for_reserved(candidate)
+    for token in AUTHORITY_TOKENS:
+        if token in folded:
+            raise ValueError("관리자를 연상시키는 아이디는 사용할 수 없습니다.")
+
     return candidate
 
 
