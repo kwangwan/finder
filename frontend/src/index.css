@@ -2800,18 +2800,20 @@ h1, h2, h3, h4, h5, h6,
 
 /* Header & Controls */
 .os-window-header {
-  height: 38px;
+  /* Grows to a second row in a narrow window — see .window-title-box. */
   min-height: 38px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px 0 12px;
+  padding: 4px 8px 4px 12px;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-subtle);
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 4px;
 }
 
 .os-window-header:active {
@@ -2822,8 +2824,17 @@ h1, h2, h3, h4, h5, h6,
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  flex: 1;
+  flex: 1 1 0;
+  /* The floor that drives the header's second row. The action buttons never
+     shrink, so in a narrow window they used to take the whole row and squeeze
+     the title down to nothing — the file name was simply invisible. Once the
+     title can no longer get this much space, flex-wrap moves the buttons to
+     their own row and the title gets the full width instead.
+     Expressed as a minimum rather than a width breakpoint on purpose: the
+     button count varies by file type (a document carries history, export and
+     attachment controls a plain file does not), so each window wraps at the
+     width where its own header actually runs out of room. */
+  min-width: 180px;
 }
 
 .window-file-icon {
@@ -2874,7 +2885,20 @@ h1, h2, h3, h4, h5, h6,
   display: flex;
   align-items: center;
   gap: 3px;
-  flex-shrink: 0;
+  /* Shrinkable so the wrap below can actually engage; the buttons inside keep
+     their own size, so this squeezes the row rather than the controls. It only
+     ever engages once the header has already wrapped, because the title's
+     min-width forces the line break first. */
+  flex-shrink: 1;
+  min-width: 0;
+  /* Keeps the buttons right-aligned once they wrap onto a row of their own,
+     where justify-content: space-between has nothing left to push against. */
+  margin-left: auto;
+  /* At the smallest window size a document's full set of buttons is wider
+     than the window itself, and without this they overflow the header —
+     silently cutting off the last one, which is the close button. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .window-header-divider {
@@ -2886,6 +2910,7 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .window-action-btn {
+  flex-shrink: 0;
   height: 24px;
   border-radius: 6px;
   background: var(--bg-secondary);
