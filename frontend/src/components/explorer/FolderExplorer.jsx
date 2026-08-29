@@ -794,6 +794,7 @@ export default function FolderExplorer({
                 {...folderDropProps(sub.id)}
               >
                 <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
+                {isCut('folder', sub.id) && <span className="cut-badge"><Scissors size={10} />잘라내기</span>}
                 <span title={sub.name} style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sub.name}
                 </span>
@@ -1110,6 +1111,7 @@ export default function FolderExplorer({
                   )}
 
                   <div className="file-card-title" title={file.name}>
+                    {isCut('file', file.id) && <span className="cut-badge"><Scissors size={10} />잘라내기</span>}
                     {file.name}
                   </div>
 

@@ -1140,6 +1140,7 @@ async def batch_copy_items(
                 src_files.append(f)
 
     src_folders = []
+    cycles = 0
     for fid in req.folder_ids:
         folder = await db.get(Folder, fid)
         if not folder or folder.is_trashed or folder.workspace_id != req.workspace_id:
@@ -1147,13 +1148,21 @@ async def batch_copy_items(
         if not await access_service.can_access_folder(db, current_user, fid):
             continue
         # Copying a folder into its own subtree would recurse into the copies
-        # it is creating and never terminate.
+        # it is creating and never terminate. Skip just that folder rather than
+        # refusing the request: "select all, copy, paste into one of these
+        # folders" is an ordinary thing to do, and failing the other items over
+        # it would throw away work the user can perfectly well have.
         if req.folder_id and req.folder_id in await _descendant_folder_ids(db, fid):
-            raise HTTPException(status_code=400, detail="폴더를 자기 자신 또는 하위 폴더로 복사할 수 없습니다.")
+            cycles += 1
+            continue
         src_folders.append(folder)
 
     if not src_files and not src_folders:
-        return {"copied_files": 0, "copied_folders": 0, "skipped": 0, "folder_id": req.folder_id}
+        # Nothing survived. If the only reason is the cycle rule, say so —
+        # otherwise this returns a silent zero and looks like a no-op.
+        if cycles:
+            raise HTTPException(status_code=400, detail="폴더를 자기 자신 또는 하위 폴더로 복사할 수 없습니다.")
+        return {"copied_files": 0, "copied_folders": 0, "skipped": 0, "skipped_cycles": 0, "folder_id": req.folder_id}
 
     total_bytes = sum(f.size_bytes or 0 for f in src_files)
     for folder in src_folders:
@@ -1184,6 +1193,7 @@ async def batch_copy_items(
         "copied_files": counters["files"],
         "copied_folders": counters["folders"],
         "skipped": counters["skipped"],
+        "skipped_cycles": cycles,
         "folder_id": req.folder_id,
     }
 

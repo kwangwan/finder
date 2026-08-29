@@ -648,8 +648,14 @@ export default function App() {
       const parts = [];
       if (res.copied_files) parts.push(`파일 ${res.copied_files}개`);
       if (res.copied_folders) parts.push(`폴더 ${res.copied_folders}개`);
-      const skipped = res.skipped ? ` (${res.skipped}개는 원본을 읽을 수 없어 제외)` : '';
-      showToast(parts.length ? `${parts.join(', ')}를 붙여넣었습니다.${skipped}` : '붙여넣을 항목이 없습니다.', {
+      const notes = [];
+      if (res.skipped) notes.push(`${res.skipped}개는 원본을 읽을 수 없어 제외`);
+      // A folder cannot be pasted into itself, and a select-all can easily
+      // include the folder being pasted into — say which items were left out
+      // rather than letting the count quietly not add up.
+      if (res.skipped_cycles) notes.push(`폴더 ${res.skipped_cycles}개는 자기 자신 안으로 붙여넣을 수 없어 제외`);
+      const suffix = notes.length ? ` (${notes.join(', ')})` : '';
+      showToast(parts.length ? `${parts.join(', ')}를 붙여넣었습니다.${suffix}` : `붙여넣을 항목이 없습니다.${suffix}`, {
         type: parts.length ? 'success' : 'info',
       });
       // Copy stays on the clipboard so it can be pasted into several places,

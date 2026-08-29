@@ -4142,9 +4142,41 @@ select option {
   background: rgba(59, 130, 246, 0.08);
 }
 
-/* Cut items stay in place until the paste actually happens, faded to show the
-   move is pending rather than done — the same cue Explorer gives. */
+/* Cut items stay in place until the paste happens, so the pending move has to
+   read as *pending* rather than as disabled or still loading. Fading alone is
+   ambiguous, so it is paired with a dashed border and a label. */
 .file-card.is-cut,
 .folder-card.is-cut {
-  opacity: 0.45;
+  opacity: 0.6;
+  border-style: dashed;
+  border-color: var(--accent-primary);
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(59, 130, 246, 0.05) 0,
+    rgba(59, 130, 246, 0.05) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+/* Sits inline with the name rather than pinned over the card, so it can never
+   cover the action buttons or the folder's file count. */
+.cut-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.folder-card.is-cut {
+  position: relative;
 }
