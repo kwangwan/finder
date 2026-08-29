@@ -90,6 +90,7 @@ export default function FolderExplorer({
   onDirectMoveItems,
   onTransferItems,
   onOpenFolderWindow,
+  onSelectAllInFolder,
   workspaceId = null,
   allFolders = [],
   hasOpenWindows = false,
@@ -123,6 +124,17 @@ export default function FolderExplorer({
   // Where a shift-click measures its range from — the last item picked out
   // individually, as in Explorer.
   const anchorRef = useRef(null);
+  // 'page' — the selection covers only what is rendered, and is dropped when
+  // the page changes. 'folder' — the user explicitly asked for every file in
+  // this folder, so it deliberately spans pages and must survive paging.
+  const [selectionScope, setSelectionScope] = useState('page');
+  // Mirrored in a ref so the paging effect below can read the scope without
+  // depending on it — as a dependency, narrowing a folder-wide selection back
+  // to page scope would re-run the effect and wipe the very selection the user
+  // had just adjusted.
+  const selectionScopeRef = useRef('page');
+  useEffect(() => { selectionScopeRef.current = selectionScope; }, [selectionScope]);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
   const [infoFile, setInfoFile] = useState(null);
   const [removingIds, setRemovingIds] = useState(new Set());
   // Cards fading out are hidden from the grid as soon as the fade finishes,
@@ -221,8 +233,19 @@ export default function FolderExplorer({
   useEffect(() => {
     setSelectedFileIds([]);
     setSelectedFolderIds([]);
+    setSelectionScope('page');
     anchorRef.current = null;
-  }, [currentFolder?.id, activeView, currentPage, pageSize, sortBy, sortOrder]);
+  }, [currentFolder?.id, activeView]);
+
+  // Paging or re-sorting drops a per-page selection, whose ids would otherwise
+  // refer to cards no longer on screen. A folder-wide selection is exempt:
+  // spanning pages is the whole point of it, and its count says so.
+  useEffect(() => {
+    if (selectionScopeRef.current === 'folder') return;
+    setSelectedFileIds([]);
+    setSelectedFolderIds([]);
+    anchorRef.current = null;
+  }, [currentPage, pageSize, sortBy, sortOrder]);
 
   // Close breadcrumb dropdown on outside click
   useEffect(() => {
@@ -238,6 +261,7 @@ export default function FolderExplorer({
   const toggleFileSelection = (fileId, e) => {
     if (e) e.stopPropagation();
     anchorRef.current = { kind: 'file', id: fileId };
+    setSelectionScope('page');
     setSelectedFileIds(prev =>
       prev.includes(fileId) ? prev.filter(id => id !== fileId) : [...prev, fileId]
     );
@@ -246,6 +270,7 @@ export default function FolderExplorer({
   const toggleFolderSelection = (folderId, e) => {
     if (e) e.stopPropagation();
     anchorRef.current = { kind: 'folder', id: folderId };
+    setSelectionScope('page');
     setSelectedFolderIds(prev =>
       prev.includes(folderId) ? prev.filter(id => id !== folderId) : [...prev, folderId]
     );
@@ -254,8 +279,27 @@ export default function FolderExplorer({
   const clearSelection = useCallback(() => {
     setSelectedFileIds([]);
     setSelectedFolderIds([]);
+    setSelectionScope('page');
     anchorRef.current = null;
   }, []);
+
+  // Selects every file in this folder, not just the page on screen. The ids
+  // come from the server because the other pages are not loaded here.
+  const selectAllInFolder = async () => {
+    if (!onSelectAllInFolder || isSelectingAll) return;
+    setIsSelectingAll(true);
+    try {
+      const ids = await onSelectAllInFolder();
+      setSelectedFileIds(ids);
+      setSelectedFolderIds([]);
+      setSelectionScope(ids.length ? 'folder' : 'page');
+      anchorRef.current = null;
+    } catch (e) {
+      await showAlert({ title: '전체 선택 실패', message: e.message, type: 'error' });
+    } finally {
+      setIsSelectingAll(false);
+    }
+  };
 
   const visibleFileIds = files.filter(f => !hiddenIds.has(f.id)).map(f => f.id);
   const selectedCount = selectedFileIds.length + selectedFolderIds.length;
@@ -275,6 +319,7 @@ export default function FolderExplorer({
     containerRef: gridAreaRef,
     onClearSelection: clearSelection,
     onChange: useCallback((fileIds, folderIds, additive) => {
+      setSelectionScope('page');
       if (additive) {
         setSelectedFileIds(Array.from(new Set([...marqueeBaseRef.current.files, ...fileIds])));
         setSelectedFolderIds(Array.from(new Set([...marqueeBaseRef.current.folders, ...folderIds])));
@@ -448,6 +493,7 @@ export default function FolderExplorer({
   ];
 
   const selectRangeTo = (kind, id, additive) => {
+    setSelectionScope('page');
     const idx = orderedItems.findIndex(i => i.kind === kind && i.id === id);
     const anchor = anchorRef.current;
     const anchorIdx = anchor ? orderedItems.findIndex(i => i.kind === anchor.kind && i.id === anchor.id) : -1;
@@ -721,6 +767,26 @@ export default function FolderExplorer({
             >
               {selectedFileIds.length === files.length ? <CheckSquare size={14} color="var(--accent-primary)" /> : <Square size={14} />}
               <span>{selectedFileIds.length === files.length ? '전체 해제' : '다중 선택'}</span>
+            </button>
+          )}
+
+          {/* The list is paginated, so the toggle above can only ever reach the
+              page on screen. This selects the folder's files across every page
+              — offered only when there actually is more than one, where the
+              distinction matters. */}
+          {files.length > 0 && totalItemCount > files.length && (
+            <button
+              type="button"
+              className="btn-icon"
+              disabled={isSelectingAll}
+              style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '4px', color: selectionScope === 'folder' ? 'var(--accent-primary)' : 'var(--text-muted)', padding: '3px 8px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: `1px solid ${selectionScope === 'folder' ? 'var(--accent-primary)' : 'var(--border-subtle)'}` }}
+              onClick={() => (selectionScope === 'folder' ? clearSelection() : selectAllInFolder())}
+              title={`이 폴더의 파일 ${totalItemCount}개를 모두 선택합니다 (현재 페이지 밖 포함)`}
+            >
+              {isSelectingAll
+                ? <Loader2 size={14} className="spin" />
+                : selectionScope === 'folder' ? <CheckSquare size={14} color="var(--accent-primary)" /> : <Square size={14} />}
+              <span>{selectionScope === 'folder' ? '전체 선택 해제' : `폴더 전체 선택 (${totalItemCount}개)`}</span>
             </button>
           )}
         </div>
@@ -1233,11 +1299,13 @@ export default function FolderExplorer({
           <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
             <CheckSquare size={16} color="var(--accent-primary)" />
             <span>
-              {selectedFolderIds.length > 0 && selectedFileIds.length > 0
-                ? `폴더 ${selectedFolderIds.length}개, 파일 ${selectedFileIds.length}개 선택됨`
-                : selectedFolderIds.length > 0
-                  ? `폴더 ${selectedFolderIds.length}개 선택됨`
-                  : `${selectedFileIds.length}개 선택됨`}
+              {selectionScope === 'folder'
+                ? `이 폴더의 파일 ${selectedFileIds.length}개 전체 선택됨`
+                : selectedFolderIds.length > 0 && selectedFileIds.length > 0
+                  ? `폴더 ${selectedFolderIds.length}개, 파일 ${selectedFileIds.length}개 선택됨`
+                  : selectedFolderIds.length > 0
+                    ? `폴더 ${selectedFolderIds.length}개 선택됨`
+                    : `${selectedFileIds.length}개 선택됨`}
             </span>
           </div>
 

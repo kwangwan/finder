@@ -277,6 +277,56 @@ async def get_files_watermark(
     return {"watermark": max_updated.isoformat() if max_updated else None, "count": count}
 
 
+@router.get("/ids")
+async def list_file_ids(
+    workspace_id: Optional[uuid.UUID] = None,
+    folder_id: Optional[uuid.UUID] = None,
+    root_only: Optional[bool] = Query(False),
+    file_type: Optional[str] = None,
+    is_favorite: Optional[bool] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Every file id matching a view, ignoring pagination.
+
+    Exists so "select everything here" can mean the whole folder rather than
+    the page you happen to be looking at. Returns ids only — pulling full
+    records for a folder holding thousands of files just to select them would
+    cost far more than the selection is worth.
+
+    Takes the same filters as the listing so the two always agree on what
+    "here" is.
+    """
+    conditions = [FileItem.is_trashed == False]  # noqa: E712
+
+    if workspace_id:
+        if not await access_service.is_workspace_member(db, current_user, workspace_id):
+            raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+        conditions.append(FileItem.workspace_id == workspace_id)
+    else:
+        ws_ids = await access_service.get_user_workspace_ids(db, current_user.id)
+        if ws_ids:
+            conditions.append(or_(
+                FileItem.workspace_id.in_(list(ws_ids)),
+                and_(FileItem.workspace_id.is_(None), FileItem.created_by == current_user.id)
+            ))
+        else:
+            conditions.append(and_(FileItem.workspace_id.is_(None), FileItem.created_by == current_user.id))
+
+    if root_only:
+        conditions.append(FileItem.folder_id.is_(None))
+    elif folder_id is not None:
+        conditions.append(FileItem.folder_id == folder_id)
+    if file_type is not None:
+        conditions.append(FileItem.file_type == file_type)
+    if is_favorite is not None:
+        conditions.append(FileItem.is_favorite == is_favorite)
+
+    ids = (await db.execute(select(FileItem.id).where(and_(*conditions)))).scalars().all()
+    return {"file_ids": [str(i) for i in ids], "total": len(ids)}
+
+
 # Declared before the /{file_id} routes below. FastAPI matches in definition
 # order, so a literal path registered after a parameterised one on the same
 # prefix is never reached — /copy-jobs would be parsed as a file id and 422.

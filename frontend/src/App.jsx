@@ -69,7 +69,8 @@ import {
   downloadFolderAsZip,
   batchDownloadFiles,
   batchMoveFiles,
-  batchCopyItems
+  batchCopyItems,
+  listFileIds
 } from './api';
 import { useDialog } from './context/DialogContext';
 import { useToast } from './context/ToastContext';
@@ -1776,6 +1777,12 @@ export default function App() {
             onTransferItems={handleTransferItems}
             onOpenFolderWindow={(folder) => windowManager.openFolderWindow(folder, activeWorkspace?.id)}
             workspaceId={activeWorkspace?.id || null}
+            onSelectAllInFolder={async () => {
+              const viewParams = buildFileViewParams();
+              if (!viewParams) return [];
+              const res = await listFileIds(viewParams);
+              return res.file_ids || [];
+            }}
             allFolders={folders}
             hasOpenWindows={windowManager.windows.length > 0}
             hasNewFiles={hasNewFilesInView}

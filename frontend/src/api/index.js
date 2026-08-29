@@ -524,6 +524,23 @@ export async function listFolders({
   return res.json();
 }
 
+/** Every file id in a view, ignoring pagination — what "select all in this
+ *  folder" needs. Ids only: fetching full records for a folder holding
+ *  thousands of files just to select them would cost far more than the
+ *  selection is worth. Takes the same filters as listFiles. */
+export async function listFileIds({ workspace_id = null, folder_id = null, root_only = false, file_type = null, is_favorite = null } = {}) {
+  const params = new URLSearchParams();
+  if (workspace_id) params.append('workspace_id', workspace_id);
+  if (root_only) params.append('root_only', 'true');
+  else if (folder_id) params.append('folder_id', folder_id);
+  if (file_type) params.append('file_type', file_type);
+  if (is_favorite !== null && is_favorite !== undefined) params.append('is_favorite', is_favorite);
+
+  const res = await fetch(`${API_BASE}/files/ids?${params.toString()}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('파일 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
 /**
  * Files & Markdown Notes API
  */
