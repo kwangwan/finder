@@ -86,6 +86,10 @@ async def init_db():
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;",
             # Per-user write access to the shared workspace (read stays)
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS can_write_shared BOOLEAN NOT NULL DEFAULT TRUE;",
+            # Display names must be distinguishable: in a space everyone shares,
+            # two identical uploader names make attribution impossible and
+            # impersonation trivial. Created only if the existing rows allow it.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_lower_name ON kb_users (lower(name)) WHERE name IS NOT NULL;",
             # Last editor (distinct from created_by/uploader) for markdown notes
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS last_edited_by UUID REFERENCES kb_users(id) ON DELETE SET NULL;",
             # Capture metadata read from the media file itself (photo EXIF /

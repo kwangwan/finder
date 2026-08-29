@@ -4583,3 +4583,12 @@ select option {
 .shared-ws-notice.is-readonly svg {
   color: var(--accent-amber);
 }
+
+/* Who uploaded a file, shown inline in a shared space where that is the first
+   thing anyone needs to know about a file they did not put there. */
+.file-card-uploader {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 90px;
+}

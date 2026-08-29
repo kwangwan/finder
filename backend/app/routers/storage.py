@@ -32,6 +32,7 @@ from app.services.s3_service import s3_service, sanitize_filename, build_storage
 from app.services.document_service import document_service
 from app.services.thumbnail_service import thumbnail_service
 from app.services.access_service import access_service
+from app.services import shared_policy_service
 from app.services.quota_service import quota_service
 from app.services.svg_sanitizer import sanitize_svg
 from app.services import media_metadata_service
@@ -190,6 +191,7 @@ async def get_presigned_upload_url(
         if folder:
             workspace_id = folder.workspace_id
     await access_service.require_write(db, current_user, workspace_id)
+    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
@@ -292,6 +294,7 @@ async def initiate_multipart_upload(
         if folder:
             workspace_id = folder.workspace_id
     await access_service.require_write(db, current_user, workspace_id)
+    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
 
     file_uuid = uuid.uuid4()
@@ -649,6 +652,10 @@ async def init_chunk_upload(
     # Reserve the declared size up front rather than just checking it, so a
     # second large upload starting seconds later (possibly from another
     # browser/device) can't also pass the check before this one finishes and
+    # The shared workspace's own rules come before the quota reservation, so a
+    # refused upload never claims space it will not use.
+    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
+
     # updates storage_used_bytes — see quota_service.reserve_quota.
     owner = await quota_service.reserve_quota(db, workspace_id, current_user, req.size_bytes)
 
@@ -898,6 +905,7 @@ async def complete_chunk_upload(
     await quota_service.commit_reservation(
         db, meta.get("owner_id"), meta.get("reserved_bytes", req.size_bytes), actual_size
     )
+    await shared_policy_service.record_daily_usage(db, current_user.id, actual_size or 0)
 
     mime_type = req.mime_type or get_media_mime_type(req.filename)
 
@@ -1028,6 +1036,8 @@ async def direct_upload(
     # the same moment can't both pass the check against the same stale
     # storage_used_bytes and together exceed quota — same reasoning as the
     # chunked-upload path's quota_service.reserve_quota.
+    # Checked before the reservation, so a refused upload never claims space.
+    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, len(file_bytes), file.filename)
     owner = await quota_service.reserve_quota(db, workspace_id, current_user, len(file_bytes))
     file_uuid = uuid.uuid4()
     s3_key = build_storage_key("uploads", file_uuid, file.filename)
@@ -1111,6 +1121,7 @@ async def direct_upload(
 
     # Turn the reservation into real usage now that the FileItem row exists.
     await quota_service.commit_reservation(db, owner.id, len(file_bytes), len(file_bytes))
+    await shared_policy_service.record_daily_usage(db, current_user.id, len(file_bytes))
 
     try:
         await document_service.index_file_chunks(db, file_item, raw_bytes=file_bytes)

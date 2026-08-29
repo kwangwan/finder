@@ -25,6 +25,7 @@ from app.services.copy_service import (
 from app.services.s3_service import s3_service, build_storage_key
 from app.services.document_service import document_service
 from app.services.access_service import access_service
+from app.services import shared_policy_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
@@ -115,6 +116,7 @@ async def list_files(
     root_only: Optional[bool] = Query(False, description="Filter only files located directly in workspace root"),
     file_type: Optional[str] = None,
     is_favorite: Optional[bool] = None,
+    uploader_id: Optional[uuid.UUID] = None,
     tag: Optional[str] = None,
     search: Optional[str] = None,
     sort_by: Optional[str] = Query("updated_at", description="Sort field: name, file_type, updated_at, created_at, size_bytes"),
@@ -150,6 +152,10 @@ async def list_files(
         conditions.append(FileItem.file_type == file_type)
     if is_favorite is not None:
         conditions.append(FileItem.is_favorite == is_favorite)
+    # Who put a file here is the first question asked in a space everyone
+    # shares, so it is filterable rather than only visible per row.
+    if uploader_id is not None:
+        conditions.append(FileItem.created_by == uploader_id)
     if search:
         conditions.append(FileItem.name.ilike(f"%{search}%"))
 
@@ -494,6 +500,7 @@ async def create_markdown_note(
     name = req.name.strip()
     display_name = name
     content_bytes = len(req.content.encode("utf-8"))
+    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, content_bytes, name)
 
     # Quota check on workspace owner
     await quota_service.check_quota(db, workspace_id, current_user, content_bytes)
@@ -517,6 +524,7 @@ async def create_markdown_note(
 
     # Record storage added to workspace owner
     await quota_service.record_storage_added(db, workspace_id, current_user, file_item.size_bytes)
+    await shared_policy_service.record_daily_usage(db, current_user.id, file_item.size_bytes)
 
     try:
         s3_key = build_storage_key("notes", file_item.id, display_name)
@@ -597,6 +605,7 @@ async def update_markdown_note(
             size_delta = new_size - old_size
             if size_delta > 0:
                 await quota_service.check_quota(db, target_ws_id, current_user, size_delta)
+                await shared_policy_service.enforce_upload_rules(db, current_user, target_ws_id, size_delta, file_item.name)
             file_item.content = req.content
             file_item.size_bytes = new_size
             file_item.last_edited_by = current_user.id
@@ -621,6 +630,7 @@ async def update_markdown_note(
         size_delta = file_item.size_bytes - old_size
         if size_delta > 0:
             await quota_service.record_storage_added(db, target_ws_id, current_user, size_delta)
+            await shared_policy_service.record_daily_usage(db, current_user.id, size_delta)
         elif size_delta < 0:
             # record_storage_added ignores a negative delta, so deleting text
             # from a note used to keep charging for bytes that no longer
@@ -814,6 +824,7 @@ async def create_file_metadata(
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
     await access_service.require_write(db, current_user, workspace_id)
+    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.name)
 
     file_item = FileItem(
         folder_id=req.folder_id,
@@ -915,6 +926,9 @@ async def trash_file(
     file_item.trashed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(file_item)
+    # The notice says this can happen without warning, which is the honest
+    # rule — but saying nothing afterwards is what actually costs trust.
+    await shared_policy_service.notify_owner_of_removal(db, file_item, current_user)
     return _to_file_response(file_item)
 
 @router.put("/{file_id}/restore", response_model=FileResponse)

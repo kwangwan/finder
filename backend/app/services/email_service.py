@@ -35,6 +35,47 @@ class EmailService:
         secret = self.aws_secret_key
         return bool(key and secret and len(key.strip()) > 5 and len(secret.strip()) > 5 and key != "your_ses_key")
 
+    def send_notification(self, to_emails, subject: str, html_body: str, text_body: str = "") -> bool:
+        """
+        Send one notification to one or more recipients.
+
+        Used for operational mail (storage warnings, deletion notices) rather
+        than invitations. Falls back to logging when SES is not configured, so
+        a development environment still shows what would have been sent
+        instead of failing the action that triggered it.
+        """
+        recipients = [e for e in (to_emails if isinstance(to_emails, (list, tuple, set)) else [to_emails]) if e]
+        if not recipients:
+            return False
+
+        if self.is_ses_configured:
+            try:
+                client = boto3.client(
+                    "ses",
+                    region_name=self.aws_region,
+                    aws_access_key_id=self.aws_access_key,
+                    aws_secret_access_key=self.aws_secret_key,
+                )
+                source_formatted = f"Project Run : Finder <{self.source_email}>"
+                response = client.send_email(
+                    Source=source_formatted,
+                    Destination={"ToAddresses": recipients},
+                    Message={
+                        "Subject": {"Data": subject, "Charset": "UTF-8"},
+                        "Body": {
+                            "Html": {"Data": html_body, "Charset": "UTF-8"},
+                            "Text": {"Data": text_body or subject, "Charset": "UTF-8"},
+                        },
+                    },
+                )
+                print(f"[SES Success] Sent notification to {recipients}, MessageId: {response.get('MessageId')}")
+                return True
+            except Exception as e:
+                print(f"[SES Error] notification: {e}")
+
+        print(f"\n[NOTIFICATION MOCK] TO: {recipients}\nSUBJECT: {subject}\n{text_body or ''}\n")
+        return True
+
     def send_invitation_email(
         self,
         to_email: str,

@@ -1,5 +1,5 @@
 import uuid
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -260,3 +260,66 @@ async def set_user_shared_write(
     target.can_write_shared = req.can_write_shared
     await db.commit()
     return {"id": str(target.id), "can_write_shared": target.can_write_shared}
+
+
+@router.get("/shared-policy")
+async def get_shared_policy(
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """The shared workspace's rules, with today's usage for context."""
+    from app.services import shared_policy_service as policy
+    from app.models import SharedDailyUsage
+    from datetime import datetime, timezone
+
+    values = await policy.get_all_settings(db)
+    today = datetime.now(timezone.utc).date()
+    rows = (await db.execute(
+        select(SharedDailyUsage, User)
+        .join(User, User.id == SharedDailyUsage.user_id)
+        .where(SharedDailyUsage.usage_date == today)
+        .order_by(desc(SharedDailyUsage.bytes_used))
+        .limit(10)
+    )).all()
+    return {
+        "settings": values,
+        "today": [
+            {"user_name": u.name or u.email, "bytes_used": r.bytes_used}
+            for r, u in rows
+        ],
+    }
+
+
+class SharedPolicyRequest(BaseModel):
+    daily_limit_bytes: Optional[int] = Field(None, ge=0)
+    max_file_bytes: Optional[int] = Field(None, ge=0)
+    blocked_extensions: Optional[List[str]] = None
+    new_account_days: Optional[int] = Field(None, ge=0, le=365)
+    new_account_daily_limit_bytes: Optional[int] = Field(None, ge=0)
+    alert_threshold_percent: Optional[int] = Field(None, ge=1, le=100)
+
+
+@router.put("/shared-policy")
+async def update_shared_policy(
+    req: SharedPolicyRequest,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from app.services import shared_policy_service as policy
+    mapping = {
+        "shared.daily_limit_bytes": req.daily_limit_bytes,
+        "shared.max_file_bytes": req.max_file_bytes,
+        "shared.blocked_extensions": req.blocked_extensions,
+        "shared.new_account_days": req.new_account_days,
+        "shared.new_account_daily_limit_bytes": req.new_account_daily_limit_bytes,
+        "shared.alert_threshold_percent": req.alert_threshold_percent,
+    }
+    for key, value in mapping.items():
+        if value is not None:
+            if key == "shared.blocked_extensions":
+                value = sorted({str(v).strip().lower().lstrip(".") for v in value if str(v).strip()})
+            await policy.set_setting(db, key, value)
+    # Raising the threshold should let a pool that is already above the old one
+    # warn again, rather than staying silent because it once did.
+    await policy.set_setting(db, "shared.alert_last_level", 0)
+    return await policy.get_all_settings(db)

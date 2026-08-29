@@ -1288,6 +1288,14 @@ export default function FolderExplorer({
                       <span>{formatFileSize(file.size_bytes)}</span>
                       <span>•</span>
                       <span>{formatDate(file.updated_at || file.created_at)}</span>
+                      {isSharedWorkspace && file.creator_name && (
+                        <>
+                          <span>•</span>
+                          <span className="file-card-uploader" title={`올린 사람: ${file.creator_name}`}>
+                            {file.creator_name}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

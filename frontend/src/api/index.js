@@ -183,6 +183,42 @@ export async function getMe() {
   return res.json();
 }
 
+/** Change your own display name. Names are unique across the service: in a
+ *  shared space the uploader's name is the only thing identifying who put a
+ *  file there. */
+export async function updateMyName(name) {
+  const res = await fetch(`${API_BASE}/auth/me/name`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.detail || '이름을 변경하지 못했습니다.');
+  return body;
+}
+
+export async function checkNameAvailable(name) {
+  const res = await fetch(`${API_BASE}/auth/me/name-available?name=${encodeURIComponent(name)}`, { headers: authHeaders() });
+  if (!res.ok) return { available: false };
+  return res.json();
+}
+
+export async function getSharedPolicy() {
+  const res = await fetch(`${API_BASE}/admin/shared-policy`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('공용 워크스페이스 정책을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function updateSharedPolicy(patch) {
+  const res = await fetch(`${API_BASE}/admin/shared-policy`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('정책을 저장하지 못했습니다.');
+  return res.json();
+}
+
 export function logout() {
   setStoredToken(null);
 }

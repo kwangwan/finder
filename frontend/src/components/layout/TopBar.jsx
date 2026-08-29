@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { updateMyName } from '../../api';
 import {
   Search,
   ChevronsRight,
@@ -14,7 +15,10 @@ import {
   User as UserIcon,
   HardDrive,
   Palette,
-  Terminal
+  Terminal,
+  Edit3,
+  Check,
+  X
 } from '../../utils/icons';
 
 const formatBytes = (bytes) => {
@@ -39,9 +43,32 @@ export default function TopBar({
   onSetTheme,
   onNavigateHome,
   onOpenAdmin,
-  onLogout
+  onLogout,
+  onUserUpdated
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
+
+  const saveName = async () => {
+    const next = nameDraft.trim();
+    if (!next || next === (currentUser?.name || '')) { setIsEditingName(false); return; }
+    setIsSavingName(true);
+    setNameError('');
+    try {
+      const res = await updateMyName(next);
+      onUserUpdated?.({ ...currentUser, name: res.name });
+      setIsEditingName(false);
+    } catch (e) {
+      // Names are unique service-wide, so a clash is the expected failure and
+      // is shown in place rather than as a dialog over the menu.
+      setNameError(e.message);
+    } finally {
+      setIsSavingName(false);
+    }
+  };
   const menuRef = useRef(null);
 
   // Close dropdown on outside click
@@ -129,9 +156,43 @@ export default function TopBar({
                     </div>
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {currentUser?.name || currentUser?.email?.split('@')[0]}
-                    </div>
+                    {isEditingName ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          className="input-field"
+                          value={nameDraft}
+                          onChange={(e) => { setNameDraft(e.target.value); setNameError(''); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setIsEditingName(false); }}
+                          maxLength={60}
+                          autoFocus
+                          style={{ padding: '0.25rem 0.4rem', fontSize: '0.82rem', minWidth: 0, flex: 1 }}
+                        />
+                        <button type="button" className="btn-icon" onClick={saveName} disabled={isSavingName} title="저장">
+                          <Check size={14} />
+                        </button>
+                        <button type="button" className="btn-icon" onClick={() => setIsEditingName(false)} title="취소">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {currentUser?.name || currentUser?.email?.split('@')[0]}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          style={{ padding: 2, flexShrink: 0 }}
+                          title="이름 변경"
+                          onClick={() => { setNameDraft(currentUser?.name || ''); setNameError(''); setIsEditingName(true); }}
+                        >
+                          <Edit3 size={12} />
+                        </button>
+                      </div>
+                    )}
+                    {nameError && (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', marginTop: 2 }}>{nameError}</div>
+                    )}
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {currentUser?.email}
                     </div>

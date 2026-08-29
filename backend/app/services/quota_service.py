@@ -153,6 +153,17 @@ class QuotaService:
         owner.storage_used_bytes += bytes_added
         await db.commit()
 
+        # Every path that grows storage passes through here, which makes it the
+        # one place the shared pool's warning line can be checked without
+        # having to remember it at each call site.
+        try:
+            from app.services.shared_policy_service import is_shared_workspace, check_pool_threshold
+            if await is_shared_workspace(db, workspace_id):
+                await check_pool_threshold(db)
+        except Exception:
+            # Alerting must never fail the upload it was watching.
+            pass
+
     async def record_storage_freed(
         self,
         db: AsyncSession,

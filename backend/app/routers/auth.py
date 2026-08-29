@@ -4,6 +4,8 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -18,7 +20,8 @@ from app.schemas.auth import (
 )
 from app.core.security import (
     create_access_token, create_media_access_token, verify_google_token, get_current_user,
-    hash_password, verify_password
+    hash_password, verify_password,
+    get_current_approved_user
 )
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -370,3 +373,68 @@ async def issue_media_token(current_user: User = Depends(get_current_user)):
         "media_token": create_media_access_token(str(current_user.id)),
         "expires_in": MEDIA_TOKEN_EXPIRE_MINUTES * 60
     }
+
+
+class UpdateMyNameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+
+
+@router.put("/me/name")
+async def update_my_name(
+    req: UpdateMyNameRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Change your own display name.
+
+    Names must be distinguishable from one another. In a workspace everyone
+    shares, the uploader's name is the only thing identifying who put a file
+    there — two people showing the same name makes attribution impossible and
+    impersonation trivial. Compared case-insensitively so "Kim" and "kim" are
+    not treated as different people.
+    """
+    name = " ".join(req.name.split())          # collapse runs of whitespace
+    if not name:
+        raise HTTPException(status_code=400, detail="이름을 입력해 주세요.")
+
+    clash = (await db.execute(
+        select(User).where(
+            func.lower(User.name) == name.lower(),
+            User.id != current_user.id,
+        )
+    )).scalars().first()
+    if clash:
+        raise HTTPException(status_code=409, detail="이미 사용 중인 이름입니다. 다른 이름을 입력해 주세요.")
+
+    current_user.name = name
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two people submitting the same new name at once: the unique index is
+        # what actually decides, and the loser is told rather than silently
+        # ending up with a duplicate.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="이미 사용 중인 이름입니다. 다른 이름을 입력해 주세요.")
+
+    await db.refresh(current_user)
+    return {"id": str(current_user.id), "name": current_user.name}
+
+
+@router.get("/me/name-available")
+async def check_name_available(
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """Whether a name is free, so the form can say so before submitting."""
+    candidate = " ".join((name or "").split())
+    if not candidate:
+        return {"available": False, "reason": "empty"}
+    clash = (await db.execute(
+        select(User).where(
+            func.lower(User.name) == candidate.lower(),
+            User.id != current_user.id,
+        )
+    )).scalars().first()
+    return {"available": clash is None}

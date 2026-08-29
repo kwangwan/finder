@@ -24,7 +24,7 @@ import {
   Check,
   X as XIcon
 } from '../../utils/icons';
-import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs, getSharedWorkspaceInfo, setSharedWorkspaceQuota, setUserSharedWrite } from '../../api';
+import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs, getSharedWorkspaceInfo, setSharedWorkspaceQuota, setUserSharedWrite, getSharedPolicy, updateSharedPolicy } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 /** Format bytes to human-readable string */
@@ -58,22 +58,38 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
   const [sharedInfo, setSharedInfo] = useState(null);
   const [sharedQuotaGb, setSharedQuotaGb] = useState('');
   const [isEditingSharedQuota, setIsEditingSharedQuota] = useState(false);
+  const [policy, setPolicy] = useState(null);
+  const [policyDraft, setPolicyDraft] = useState(null);
+  const [todayUsage, setTodayUsage] = useState([]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [userList, sysStats, jobs, shared] = await Promise.all([
+      const [userList, sysStats, jobs, shared, pol] = await Promise.all([
         getAdminUsers(),
         getSystemStats(),
         // Best-effort: the history is supplementary, and failing to load it
         // must not take the whole dashboard down with it.
         listAdminCopyJobs(100).catch(() => ({ jobs: [] })),
-        getSharedWorkspaceInfo().catch(() => null)
+        getSharedWorkspaceInfo().catch(() => null),
+        getSharedPolicy().catch(() => null)
       ]);
       setUsers(userList);
       setStats(sysStats);
       setCopyJobs(jobs.jobs || []);
       setSharedInfo(shared);
+      if (pol) {
+        setPolicy(pol.settings);
+        setTodayUsage(pol.today || []);
+        setPolicyDraft({
+          daily_limit_mb: Math.round((pol.settings['shared.daily_limit_bytes'] || 0) / (1024 * 1024)),
+          max_file_mb: Math.round((pol.settings['shared.max_file_bytes'] || 0) / (1024 * 1024)),
+          new_account_days: pol.settings['shared.new_account_days'] ?? 7,
+          new_account_daily_limit_mb: Math.round((pol.settings['shared.new_account_daily_limit_bytes'] || 0) / (1024 * 1024)),
+          alert_threshold_percent: pol.settings['shared.alert_threshold_percent'] ?? 90,
+          blocked_extensions: (pol.settings['shared.blocked_extensions'] || []).join(', '),
+        });
+      }
     } catch (err) {
       await showAlert({
         title: '데이터 조회 실패',
@@ -402,6 +418,100 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                   <Edit3 size={14} />
                   <span>용량 변경</span>
                 </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Shared workspace rules. These bound what one ordinary account can do
+            to a space everyone depends on, and they are settings rather than
+            constants because the right numbers depend on how the service is
+            actually being used. */}
+        {policyDraft && (
+          <div className="admin-table-card" style={{ marginBottom: '1.5rem' }}>
+            <div className="admin-table-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Shield size={18} color="var(--accent-primary)" />
+                <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>공용 워크스페이스 이용 정책</h2>
+              </div>
+            </div>
+            <div style={{ padding: '1.1rem 1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '1rem' }}>
+              {[
+                ['daily_limit_mb', '1인당 하루 업로드 한도', 'MB', '한 사람이 하루에 올릴 수 있는 총량입니다.'],
+                ['max_file_mb', '파일 하나 최대 크기', 'MB', null],
+                ['new_account_days', '신규 계정 기간', '일', '가입 후 이 기간에는 아래 한도가 적용됩니다.'],
+                ['new_account_daily_limit_mb', '신규 계정 하루 한도', 'MB', '기간이 지나면 자동으로 정상 한도가 됩니다.'],
+                ['alert_threshold_percent', '용량 경고 기준', '%', '이 비율을 넘으면 모든 관리자에게 메일을 보냅니다.'],
+              ].map(([key, label, unit, hint]) => (
+                <div key={key}>
+                  <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {label}
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <input
+                      className="input-field"
+                      type="number"
+                      min="0"
+                      value={policyDraft[key]}
+                      onChange={(e) => setPolicyDraft(d => ({ ...d, [key]: e.target.value }))}
+                      style={{ width: '100%', padding: '0.4rem 0.55rem', fontSize: '0.85rem' }}
+                    />
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{unit}</span>
+                  </div>
+                  {hint && <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 4 }}>{hint}</div>}
+                </div>
+              ))}
+
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  차단할 확장자 (쉼표로 구분)
+                </label>
+                <input
+                  className="input-field"
+                  value={policyDraft.blocked_extensions}
+                  onChange={(e) => setPolicyDraft(d => ({ ...d, blocked_extensions: e.target.value }))}
+                  style={{ width: '100%', padding: '0.4rem 0.55rem', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                  onClick={async () => {
+                    try {
+                      await updateSharedPolicy({
+                        daily_limit_bytes: Math.max(0, Number(policyDraft.daily_limit_mb) || 0) * 1024 * 1024,
+                        max_file_bytes: Math.max(0, Number(policyDraft.max_file_mb) || 0) * 1024 * 1024,
+                        new_account_days: Math.max(0, Number(policyDraft.new_account_days) || 0),
+                        new_account_daily_limit_bytes: Math.max(0, Number(policyDraft.new_account_daily_limit_mb) || 0) * 1024 * 1024,
+                        alert_threshold_percent: Math.min(100, Math.max(1, Number(policyDraft.alert_threshold_percent) || 90)),
+                        blocked_extensions: policyDraft.blocked_extensions.split(',').map(x => x.trim()).filter(Boolean),
+                      });
+                      await loadData();
+                    } catch (err) {
+                      await showAlert({ title: '저장 실패', message: err.message, type: 'error' });
+                    }
+                  }}
+                >
+                  정책 저장
+                </button>
+              </div>
+
+              {todayUsage.length > 0 && (
+                <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.85rem' }}>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>
+                    오늘 업로드가 많은 이용자
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'flex-start' }}>
+                    {todayUsage.map((u, i) => (
+                      <span key={i} className="menu-badge" style={{ fontSize: '0.72rem' }}>
+                        {u.user_name} · {formatBytes(u.bytes_used)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>

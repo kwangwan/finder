@@ -8,6 +8,7 @@ from app.models.invitation import Invitation
 from app.models.deletion_queue import DeletionQueueItem
 from app.models.window_state import UserWindowState
 from app.models.copy_job import CopyJob
+from app.models.app_setting import AppSetting, SharedDailyUsage
 
 __all__ = [
     "Folder",
@@ -21,4 +22,6 @@ __all__ = [
     "DeletionQueueItem",
     "UserWindowState",
     "CopyJob",
+    "AppSetting",
+    "SharedDailyUsage",
 ]

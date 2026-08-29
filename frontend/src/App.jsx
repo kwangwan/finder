@@ -1634,6 +1634,7 @@ export default function App() {
           user={currentUser}
           onApproved={(user) => setCurrentUser(user)}
           onLogout={handleLogout}
+        onUserUpdated={setCurrentUser}
         />
       </ThemeProvider>
     );
