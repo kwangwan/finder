@@ -57,6 +57,14 @@ export default function CopyJobsBanner({ onJobsFinished, notifyPermissionTrigger
   const activeIdsRef = useRef(new Set());
   const retireTimersRef = useRef(new Map());
 
+  // Held in a ref so `poll` never changes identity. As a dependency it made
+  // the polling effect tear down and re-arm on every render of the app — and
+  // the effect opens by polling, so a burst of renders (which is what start-up
+  // is) turned into a burst of requests that had nothing to do with the
+  // interval: 11 in the first three seconds.
+  const onJobsFinishedRef = useRef(onJobsFinished);
+  useEffect(() => { onJobsFinishedRef.current = onJobsFinished; }, [onJobsFinished]);
+
   const poll = useCallback(async () => {
     try {
       const res = await listCopyJobs();
@@ -72,7 +80,7 @@ export default function CopyJobsBanner({ onJobsFinished, notifyPermissionTrigger
       const finished = [...activeIdsRef.current].filter((id) => !nowActive.has(id));
       activeIdsRef.current = nowActive;
       if (finished.length) {
-        onJobsFinished?.();
+        onJobsFinishedRef.current?.();
         // These run on the server and can outlast the page being looked at, so
         // a completion is worth surfacing outside the tab. Only when the tab
         // is actually hidden — a notification for something already on screen
@@ -86,7 +94,7 @@ export default function CopyJobsBanner({ onJobsFinished, notifyPermissionTrigger
         }
       }
     } catch (e) { /* best-effort: a failed poll just retries */ }
-  }, [onJobsFinished]);
+  }, []);
 
   // Retire finished rows on a timer rather than on the next poll, so one that
   // completes while the queue is idle still goes away promptly.
@@ -115,15 +123,34 @@ export default function CopyJobsBanner({ onJobsFinished, notifyPermissionTrigger
   }, [notifyPermissionTrigger]);
 
   useEffect(() => {
-    poll();
     let timer = null;
-    const tick = async () => {
-      if (document.visibilityState === 'visible') await poll();
+    let stopped = false;
+
+    const schedule = () => {
+      if (stopped) return;
+      clearTimeout(timer);
       const active = activeIdsRef.current.size > 0;
       timer = setTimeout(tick, active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
     };
-    timer = setTimeout(tick, ACTIVE_POLL_MS);
-    return () => clearTimeout(timer);
+    const tick = async () => {
+      // A hidden tab stops asking entirely rather than waking to do nothing;
+      // it catches up the moment it is looked at again.
+      if (document.visibilityState === 'visible') await poll();
+      else return;
+      schedule();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      tick();
+    };
+
+    poll().then(schedule);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [poll]);
 
   const visible = jobs.filter((j) => !dismissed.has(j.id)).slice(0, MAX_VISIBLE);

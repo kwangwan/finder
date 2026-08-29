@@ -25,6 +25,7 @@ from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
 from app.services import folder_limit_service
+from app.services import favorite_service
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/folders", tags=["Folders"])
@@ -360,7 +361,11 @@ async def update_folder(
             folder.parent_id = req.parent_id
     if req.icon is not None:
         folder.icon = req.icon
-    if req.color is not None:
+    # `color: null` means "no colour of its own, follow the theme" and is a
+    # state the picker offers, so it has to be distinguishable from the field
+    # not being sent at all — otherwise a colour could be given but never
+    # taken back, and every move (which sends no colour) would clobber one.
+    if "color" in req.model_fields_set:
         folder.color = req.color
 
     await db.commit()
@@ -527,6 +532,9 @@ async def delete_folder(
             creator_id=f.created_by,
             bytes_freed=f.size_bytes or 0
         )
+
+    await favorite_service.drop_favorites(db, favorite_service.FOLDER, subtree_ids)
+    await favorite_service.drop_favorites(db, favorite_service.FILE, [f.id for f in files_to_delete])
 
     # Deepest first, so no row is ever left pointing at a parent that is gone.
     for fid in reversed(subtree_ids):

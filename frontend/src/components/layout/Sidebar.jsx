@@ -17,6 +17,7 @@ import {
   ChevronsLeft,
   Flag
 } from '../../utils/icons';
+import { folderIconColor } from '../../utils/folderColors';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 
@@ -224,11 +225,10 @@ export default function Sidebar({
           ) : (
             <span style={{ width: 14 }} />
           )}
-          {/* Only a folder the user actually gave a colour keeps a literal one.
-              The default has to come from the theme: hardcoding blue and slate
-              left every uncoloured folder in the sidebar rendering in a palette
-              no theme selected — plainly wrong against matrix's green on black. */}
-          <FolderIcon size={16} color={folder.color || (isSelected ? 'var(--accent-primary)' : 'var(--text-muted)')} />
+          {/* One rule for every folder icon in the app. Dimming uncoloured
+              folders here made the same folder read as two colours depending
+              on whether you looked at the tree or at the listing. */}
+          <FolderIcon size={16} color={folderIconColor(folder)} />
           <span title={folder.name}>{folder.name}</span>
           {folder.file_count > 0 && (
             <span className="menu-badge" style={{ marginLeft: 0 }}>{folder.file_count}</span>

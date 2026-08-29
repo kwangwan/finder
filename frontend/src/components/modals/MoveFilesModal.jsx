@@ -8,6 +8,7 @@ import {
   Search,
   Loader2
 } from '../../utils/icons';
+import { folderIconColor } from '../../utils/folderColors';
 
 function flattenFolderTree(nodeList, depth = 0) {
   let result = [];
@@ -184,7 +185,7 @@ export default function MoveFilesModal({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                     <FolderIcon 
                       size={15} 
-                      color={isSelected ? 'var(--on-accent)' : folder.color || 'var(--accent-primary)'}
+                      color={isSelected ? 'var(--on-accent)' : folderIconColor(folder)}
                       style={{ flexShrink: 0 }} 
                     />
                     <span title={folder.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

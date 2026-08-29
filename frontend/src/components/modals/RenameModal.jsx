@@ -1,17 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Edit3, Palette, X, Check, Folder, FileText } from '../../utils/icons';
+import { Edit3, X, Folder, FileText } from '../../utils/icons';
+import FolderColorPicker from './FolderColorPicker';
 import { useDialog } from '../../context/DialogContext';
-
-const FOLDER_COLORS = [
-  { label: '파랑 (기본)', value: '#3b82f6' },
-  { label: '에메랄드', value: '#10b981' },
-  { label: '보라', value: '#8b5cf6' },
-  { label: '주황', value: '#f59e0b' },
-  { label: '로즈', value: '#f43f5e' },
-  { label: '사이언', value: '#06b6d4' },
-  { label: '핑크', value: '#ec4899' },
-  { label: '그레이', value: '#64748b' }
-];
 
 export default function RenameModal({
   isOpen,
@@ -21,14 +11,14 @@ export default function RenameModal({
 }) {
   const { showAlert } = useDialog();
   const [name, setName] = useState('');
-  const [color, setColor] = useState('#3b82f6');
+  const [color, setColor] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (isOpen && item) {
       setName(item.name || '');
-      setColor(item.color || '#3b82f6');
+      setColor(item.color || null);
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
@@ -153,46 +143,12 @@ export default function RenameModal({
           </div>
 
           {isFolder && (
-            <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.65rem' }}>
-                <Palette size={15} color="var(--accent-primary)" />
-                <span>폴더 테마 색상 선택</span>
-              </label>
-              <div style={{ 
-                display: 'flex', 
-                gap: '0.65rem', 
-                flexWrap: 'wrap',
-                background: 'var(--bg-tertiary)',
-                padding: '0.85rem 1rem',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-subtle)'
-              }}>
-                {FOLDER_COLORS.map(c => (
-                  <button
-                    key={c.value}
-                    type="button"
-                    onClick={() => setColor(c.value)}
-                    title={c.label}
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: '50%',
-                      backgroundColor: c.value,
-                      border: color === c.value ? '2px solid #ffffff' : '2px solid transparent',
-                      boxShadow: color === c.value ? `0 0 10px ${c.value}cc, 0 0 0 2px ${c.value}` : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      transform: color === c.value ? 'scale(1.1)' : 'scale(1)'
-                    }}
-                  >
-                    {color === c.value && <Check size={16} color="#fff" strokeWidth={3} />}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <FolderColorPicker
+              value={color}
+              onChange={setColor}
+              label="폴더 테마 색상 선택"
+              disabled={isSubmitting}
+            />
           )}
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', marginTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '1.25rem' }}>

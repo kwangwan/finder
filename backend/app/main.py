@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
-from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state, reports
+from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state, reports, favorites
 from app.routers.trash import _auto_purge_expired
 from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files, backfill_missing_thumbnails
 from app.routers.folders import reconcile_orphaned_trashed_files
@@ -111,6 +111,17 @@ async def lifespan(app: FastAPI):
 
     await shared_workspace_service.ensure_on_startup()
 
+    # Favourites used to be a flag on the file itself, which made one person's
+    # shortcut everybody's in the shared workspace. Runs once; the marker it
+    # writes keeps it from running again.
+    try:
+        from app.core.database import AsyncSessionLocal as _S2
+        from app.services import favorite_service
+        async with _S2() as _db:
+            await favorite_service.backfill_from_file_column(_db)
+    except Exception as e:
+        print(f"[{settings.APP_NAME}] Favorite backfill skipped: {e}")
+
     daily_alert_task = asyncio.create_task(_daily_storage_alert())
     deletion_service.start_worker()
     # A job left mid-flight by the previous shutdown is nobody's work now;
@@ -166,6 +177,7 @@ app.include_router(reports.router)
 app.include_router(search.router)
 app.include_router(system.router)
 app.include_router(window_state.router)
+app.include_router(favorites.router)
 
 @app.get("/")
 async def root():

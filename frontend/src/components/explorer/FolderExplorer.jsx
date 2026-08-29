@@ -40,7 +40,8 @@ import {
   GripVertical,
   Users
 } from '../../utils/icons';
-import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken, listRootFolders } from '../../api';
+import { folderIconColor } from '../../utils/folderColors';
+import { downloadFileChunked, getThumbnailUrl, clearMediaToken, ensureMediaToken, listRootFolders, listFavorites } from '../../api';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 import { extractFilesFromDataTransfer } from '../../utils/fileUploadUtils';
 import { useDialog } from '../../context/DialogContext';
@@ -85,6 +86,9 @@ export default function FolderExplorer({
   onFileContextMenu,
   onBackgroundContextMenu,
   onDownloadFolder,
+  favoriteFolderIds = new Set(),
+  onToggleFolderFavorite,
+  favoriteRefreshToken = 0,
   onDownloadFile,
   onOpenMoveModal,
   onBatchDownload,
@@ -455,10 +459,14 @@ export default function FolderExplorer({
   // inviting an action the server refuses.
   const isSharedRoot = isSharedWorkspace && !currentFolder?.id;
 
-  // The shared root holds one folder per person, so it is fetched a page at a
-  // time and searched on the server. Handing the whole list to the client and
-  // filtering it here would mean downloading every account's folder to show
-  // twenty of them.
+  // Favourites are the other list that grows without anyone tidying it, so it
+  // is fetched the same way as the shared root rather than rendered whole.
+  const isFavoritesView = activeView === 'favorites';
+
+  // Both are server-paged, server-searched folder lists. Handing the whole
+  // list to the client and filtering it here would mean downloading every
+  // account's folder — or every shortcut — to show twenty of them.
+  const isRemoteFolderList = isSharedRoot || isFavoritesView;
   const ROOT_PAGE_SIZE = 24;
   const [rootQuery, setRootQuery] = useState('');
   const [rootSearch, setRootSearch] = useState('');
@@ -473,22 +481,24 @@ export default function FolderExplorer({
   }, [rootQuery]);
 
   useEffect(() => {
-    if (!isSharedRoot || !workspaceId) return;
+    if (!isRemoteFolderList || !workspaceId) return;
     let cancelled = false;
     setIsRootLoading(true);
-    listRootFolders({ workspace_id: workspaceId, search: rootSearch, page: rootPage, page_size: ROOT_PAGE_SIZE })
-      .then((res) => {
-        if (cancelled) return;
-        setRootData({
+    const request = isFavoritesView
+      ? listFavorites({ workspaceId, kind: 'folder', q: rootSearch, page: rootPage, pageSize: ROOT_PAGE_SIZE })
+        .then((res) => ({ items: res.items || [], total_count: res.total ?? 0, total_pages: res.total_pages || 1 }))
+      : listRootFolders({ workspace_id: workspaceId, search: rootSearch, page: rootPage, page_size: ROOT_PAGE_SIZE })
+        .then((res) => ({
           items: res.items || [],
           total_count: res.total_count ?? (res.items || []).length,
           total_pages: res.total_pages || 1,
-        });
-      })
+        }));
+    request
+      .then((data) => { if (!cancelled) setRootData(data); })
       .catch(() => { if (!cancelled) setRootData({ items: [], total_count: 0, total_pages: 1 }); })
       .finally(() => { if (!cancelled) setIsRootLoading(false); });
     return () => { cancelled = true; };
-  }, [isSharedRoot, workspaceId, rootSearch, rootPage, hasNewFiles]);
+  }, [isRemoteFolderList, isFavoritesView, workspaceId, rootSearch, rootPage, hasNewFiles, favoriteRefreshToken]);
   const canWriteHere = canWrite && !isSharedRoot;
 
   // What an action triggered from `item` should apply to: the whole selection
@@ -877,7 +887,7 @@ export default function FolderExplorer({
                           onSelectFolder(f.id);
                         }}
                       >
-                        <FolderIcon size={14} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+                        <FolderIcon size={14} color={folderIconColor(f)} style={{ flexShrink: 0 }} />
                         <span className="breadcrumb-dropdown-item-name">{f.name}</span>
                       </div>
                     ))}
@@ -1127,21 +1137,21 @@ export default function FolderExplorer({
           className="explorer-grid-area"
         >
           {/* 1. Subfolders Section (Only in all/folder view) */}
-          {activeView !== 'notes' && activeView !== 'favorites' && (isSharedRoot || sortedSubfolders.length > 0) && (
+          {activeView !== 'notes' && (isRemoteFolderList || sortedSubfolders.length > 0) && (
             <div style={{ marginBottom: '2rem' }}>
               <div className="folder-section-head">
                 <span className="folder-section-title">
-                  폴더 ({isSharedRoot ? rootData.total_count : sortedSubfolders.length})
+                  {isFavoritesView ? '즐겨찾기한 폴더' : '폴더'} ({isRemoteFolderList ? rootData.total_count : sortedSubfolders.length})
                 </span>
 
-                {isSharedRoot && (
+                {isRemoteFolderList && (
                   <div className="folder-search-box">
                     <Search size={14} />
                     <input
                       type="text"
                       value={rootQuery}
                       onChange={(e) => setRootQuery(e.target.value)}
-                      placeholder="이용자 폴더 검색..."
+                      placeholder={isFavoritesView ? '즐겨찾기한 폴더 검색...' : '이용자 폴더 검색...'}
                       aria-label="폴더 검색"
                     />
                     {rootQuery && (
@@ -1154,7 +1164,7 @@ export default function FolderExplorer({
                 )}
               </div>
           <div className="grid-folders">
-            {(isSharedRoot ? rootData.items : sortedSubfolders).map(sub => (
+            {(isRemoteFolderList ? rootData.items : sortedSubfolders).map(sub => (
               <div 
                 key={sub.id} 
                 className={`folder-card ${selectedFolderIds.includes(sub.id) ? 'selected' : ''} ${isCut('folder', sub.id) ? 'is-cut' : ''}`}
@@ -1195,7 +1205,7 @@ export default function FolderExplorer({
                 }}
                 {...folderDropProps(sub.id)}
               >
-                <FolderIcon size={20} color={sub.color || 'var(--accent-primary)'} />
+                <FolderIcon size={20} color={folderIconColor(sub)} />
                 {isCut('folder', sub.id) && <span className="cut-badge"><Scissors size={10} />잘라내기</span>}
                 <span title={sub.name} style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sub.name}
@@ -1205,6 +1215,21 @@ export default function FolderExplorer({
                   {sub.file_count > 0 && (
                     <span className="menu-badge">{sub.file_count}</span>
                   )}
+                  <button
+                    className="btn-icon"
+                    style={{ padding: '3px', opacity: 0.7 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleFolderFavorite && onToggleFolderFavorite(sub);
+                    }}
+                    title={favoriteFolderIds.has(sub.id) ? '즐겨찾기 해제' : '즐겨찾기 등록'}
+                  >
+                    <Star
+                      size={14}
+                      color={favoriteFolderIds.has(sub.id) ? 'var(--accent-amber)' : 'var(--text-muted)'}
+                      fill={favoriteFolderIds.has(sub.id) ? 'var(--accent-amber)' : 'none'}
+                    />
+                  </button>
                   <button
                     className="btn-icon"
                     style={{ padding: '3px', opacity: 0.7 }}
@@ -1223,7 +1248,7 @@ export default function FolderExplorer({
 
           {/* Paging for the shared root. With one folder per account this list
               grows with the user base, so it is never rendered whole. */}
-          {isSharedRoot && rootData.total_pages > 1 && (
+          {isRemoteFolderList && rootData.total_pages > 1 && (
             <div className="folder-pager">
               <button
                 type="button"
@@ -1249,9 +1274,11 @@ export default function FolderExplorer({
             </div>
           )}
 
-          {isSharedRoot && !isRootLoading && rootData.items.length === 0 && (
+          {isRemoteFolderList && !isRootLoading && rootData.items.length === 0 && (
             <div className="folder-empty-hint">
-              {rootSearch ? `'${rootSearch}'와 일치하는 이용자 폴더가 없습니다.` : '아직 이용자 폴더가 없습니다.'}
+              {rootSearch
+                ? `'${rootSearch}'와 일치하는 폴더가 없습니다.`
+                : isFavoritesView ? '즐겨찾기한 폴더가 없습니다.' : '아직 이용자 폴더가 없습니다.'}
             </div>
           )}
         </div>

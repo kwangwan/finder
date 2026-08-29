@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models import Folder, FileItem, User, WorkspaceMember
 from app.core.security import get_current_approved_user
 from app.services.access_service import access_service
+from app.services import favorite_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
@@ -65,6 +66,7 @@ async def _purge_file(db: AsyncSession, file_item: FileItem):
         creator_id=file_item.created_by,
         bytes_freed=file_item.size_bytes or 0
     )
+    await favorite_service.drop_favorites(db, favorite_service.FILE, [file_item.id])
     await db.delete(file_item)
 
 

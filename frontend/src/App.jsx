@@ -59,6 +59,8 @@ import {
   updateMarkdownNote, 
   deleteFile, 
   createFolder, 
+  listFavoriteIds,
+  setFavorite,
   deleteFolder,
   updateFolder,
   getSystemStats,
@@ -670,6 +672,12 @@ export default function App() {
   // Bumped whenever something changes on disk, so every open folder window
   // reloads its listing. A window showing a folder someone else's drop just
   // changed would otherwise keep displaying the old contents.
+  // A favourite belongs to the person, not to the folder — two people sharing
+  // a workspace keep different shortcut lists, which matters most in the
+  // shared workspace where everyone sees the same space.
+  const [favoriteFolderIds, setFavoriteFolderIds] = useState(() => new Set());
+  const [favoriteRefreshToken, setFavoriteRefreshToken] = useState(0);
+
   const [windowRefreshToken, setWindowRefreshToken] = useState(0);
   const [queuedJobCount, setQueuedJobCount] = useState(0);
   const [reportFile, setReportFile] = useState(null);
@@ -679,6 +687,38 @@ export default function App() {
 
   // The badge is what tells an administrator there is anything to look at, so
   // it is refreshed on a slow interval rather than only on page load.
+  const refreshFavoriteFolders = useCallback(async () => {
+    if (!currentUser) { setFavoriteFolderIds(new Set()); return; }
+    try {
+      const res = await listFavoriteIds('folder');
+      setFavoriteFolderIds(new Set(res.ids || []));
+    } catch (e) { /* the stars just stay as they were */ }
+  }, [currentUser]);
+
+  useEffect(() => { refreshFavoriteFolders(); }, [refreshFavoriteFolders]);
+
+  const handleToggleFolderFavorite = useCallback(async (folder) => {
+    const on = !favoriteFolderIds.has(folder.id);
+    // Flipped first: the star is a direct response to a click, and waiting a
+    // round trip to fill it in reads as the click not registering.
+    setFavoriteFolderIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(folder.id); else next.delete(folder.id);
+      return next;
+    });
+    try {
+      await setFavorite('folder', folder.id, on);
+      setFavoriteRefreshToken((n) => n + 1);
+    } catch (err) {
+      setFavoriteFolderIds((prev) => {
+        const next = new Set(prev);
+        if (on) next.delete(folder.id); else next.add(folder.id);
+        return next;
+      });
+      showToast(err.message, { type: 'error' });
+    }
+  }, [favoriteFolderIds]);
+
   const refreshReportCount = useCallback(async () => {
     if (!currentUser?.is_admin) { setPendingReportCount(0); return; }
     try {
@@ -1253,6 +1293,14 @@ export default function App() {
     }
   }, [currentUser, isWorkspacesLoaded, activeWorkspace?.id, buildFileViewParams, sortBy, sortOrder, currentPage, pageSize]);
 
+  // Memoised: the copy-jobs banner keys its polling effect on this, so a fresh
+  // arrow per render restarted the poll (and fired a request) on every render.
+  const handleCopyJobsFinished = useCallback(() => {
+    refreshFiles();
+    refreshFoldersAndStats();
+    bumpWindowRefresh();
+  }, [refreshFiles, refreshFoldersAndStats, bumpWindowRefresh]);
+
   // Undo stack for operations that move or remove things.
   //
   // Each entry carries the inverse of what was just done, captured at the time
@@ -1569,6 +1617,11 @@ export default function App() {
           onClick: () => setShareFolder(folder),
         }] : []),
         {
+          label: favoriteFolderIds.has(folder.id) ? '즐겨찾기 해제' : '즐겨찾기 등록',
+          icon: Star,
+          onClick: () => handleToggleFolderFavorite(folder),
+        },
+        {
           label: '하위 폴더 생성',
           icon: FolderPlus,
           onClick: () => {
@@ -1723,12 +1776,18 @@ export default function App() {
   };
 
   const handleToggleFavorite = async (file) => {
+    const on = !file.is_favorite;
     try {
-      await updateMarkdownNote(file.id, { is_favorite: !file.is_favorite });
+      // Through the favourites endpoint, not the file-update one: a favourite
+      // is this reader's own bookmark, so it must not require permission to
+      // *change the file* — which in the shared workspace nobody has outside
+      // their own folder.
+      await setFavorite('file', file.id, on);
+      windowManager.updateWindowFile(file.id, { is_favorite: on });
+      setFavoriteRefreshToken((n) => n + 1);
       refreshFiles();
-      windowManager.updateWindowFile(file.id, { is_favorite: !file.is_favorite });
     } catch (err) {
-      console.error('Favorite toggle error:', err);
+      showToast(err.message || '즐겨찾기를 변경하지 못했습니다.', { type: 'error' });
     }
   };
 
@@ -1906,6 +1965,9 @@ export default function App() {
           />
         ) : (
           <FolderExplorer
+            favoriteFolderIds={favoriteFolderIds}
+            onToggleFolderFavorite={handleToggleFolderFavorite}
+            favoriteRefreshToken={favoriteRefreshToken}
             workspaceName={activeWorkspace?.name || ''}
             theme={theme}
             isLoading={isLoading || !isWorkspacesLoaded || isAuthLoading}
@@ -2068,11 +2130,7 @@ export default function App() {
           able to pick up jobs this browser session did not start. */}
       <CopyJobsBanner
         notifyPermissionTrigger={queuedJobCount}
-        onJobsFinished={() => {
-          refreshFiles();
-          refreshFoldersAndStats();
-          bumpWindowRefresh();
-        }}
+        onJobsFinished={handleCopyJobsFinished}
       />
 
       <WindowManager

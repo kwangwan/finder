@@ -26,6 +26,7 @@ from app.services.s3_service import s3_service, build_storage_key
 from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services import shared_policy_service
+from app.services import favorite_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
@@ -97,17 +98,23 @@ async def _batch_user_names(db: AsyncSession, files: List[FileItem]) -> dict:
     res = await db.execute(select(User).where(User.id.in_(user_ids)))
     return {u.id: _display_name(u) for u in res.scalars().all()}
 
-def _to_file_response(f: FileItem, users_by_id: Optional[dict] = None) -> FileResponse:
+def _to_file_response(f: FileItem, users_by_id: Optional[dict] = None, favorite_ids: Optional[set] = None) -> FileResponse:
     resp = FileResponse.model_validate(f)
     if f.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{f.id}"
     if users_by_id is not None:
         resp.creator_name = users_by_id.get(f.created_by)
         resp.last_editor_name = users_by_id.get(f.last_edited_by)
+    # The stored column is the pre-per-user leftover; what this reader sees is
+    # their own list. Passing None leaves whatever the model held.
+    if favorite_ids is not None:
+        resp.is_favorite = f.id in favorite_ids
     return resp
 
-def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None) -> FileDetailResponse:
+def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None, is_favorite: Optional[bool] = None) -> FileDetailResponse:
     resp = FileDetailResponse.model_validate(f)
+    if is_favorite is not None:
+        resp.is_favorite = is_favorite
     if f.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{f.id}"
     resp.folder_name = folder_name
@@ -157,8 +164,10 @@ async def list_files(
         conditions.append(FileItem.folder_id == folder_id)
     if file_type is not None:
         conditions.append(FileItem.file_type == file_type)
+    # Favourites are per person, so the filter asks this user's list rather
+    # than a flag on the file — which in the shared workspace was everybody's.
     if is_favorite is not None:
-        conditions.append(FileItem.is_favorite == is_favorite)
+        conditions.append(favorite_service.file_favorite_condition(current_user.id, is_favorite))
     # Who put a file here is the first question asked in a space everyone
     # shares, so it is filterable rather than only visible per row.
     if uploader_id is not None:
@@ -222,8 +231,9 @@ async def list_files(
 
         total_pages = math.ceil(total_count / current_size) if current_size > 0 else 1
         users_by_id = await _batch_user_names(db, files)
+        fav_ids = await favorite_service.favorite_ids(db, current_user.id, favorite_service.FILE, [f.id for f in files])
         return PagedFileResponse(
-            items=[_to_file_response(f, users_by_id) for f in files],
+            items=[_to_file_response(f, users_by_id, fav_ids) for f in files],
             total_count=total_count,
             page=current_page,
             page_size=current_size,
@@ -237,7 +247,8 @@ async def list_files(
         if tag:
             files = [f for f in files if tag in (f.tags or [])]
         users_by_id = await _batch_user_names(db, files)
-        return [_to_file_response(f, users_by_id) for f in files]
+        fav_ids = await favorite_service.favorite_ids(db, current_user.id, favorite_service.FILE, [f.id for f in files])
+        return [_to_file_response(f, users_by_id, fav_ids) for f in files]
 
 
 @router.get("/watermark")
@@ -280,8 +291,10 @@ async def get_files_watermark(
         conditions.append(FileItem.folder_id == folder_id)
     if file_type is not None:
         conditions.append(FileItem.file_type == file_type)
+    # Favourites are per person, so the filter asks this user's list rather
+    # than a flag on the file — which in the shared workspace was everybody's.
     if is_favorite is not None:
-        conditions.append(FileItem.is_favorite == is_favorite)
+        conditions.append(favorite_service.file_favorite_condition(current_user.id, is_favorite))
 
     res = await db.execute(
         select(func.max(FileItem.updated_at), func.count(FileItem.id)).where(and_(*conditions))
@@ -333,8 +346,10 @@ async def list_file_ids(
         conditions.append(FileItem.folder_id == folder_id)
     if file_type is not None:
         conditions.append(FileItem.file_type == file_type)
+    # Favourites are per person, so the filter asks this user's list rather
+    # than a flag on the file — which in the shared workspace was everybody's.
     if is_favorite is not None:
-        conditions.append(FileItem.is_favorite == is_favorite)
+        conditions.append(favorite_service.file_favorite_condition(current_user.id, is_favorite))
 
     ids = (await db.execute(select(FileItem.id).where(and_(*conditions)))).scalars().all()
     return {"file_ids": [str(i) for i in ids], "total": len(ids)}
@@ -477,7 +492,8 @@ async def get_file_detail(
 
     return _to_file_detail_response(
         file_item, folder_name=folder_name, download_url=download_url,
-        creator_name=creator_name, last_editor_name=last_editor_name
+        creator_name=creator_name, last_editor_name=last_editor_name,
+        is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
     )
 
 @router.post("/notes", response_model=FileDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -548,7 +564,7 @@ async def create_markdown_note(
         print(f"[Embedding Warning] Indexing failed for note {file_item.id}: {e}")
 
     creator_name = _display_name(current_user)
-    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=creator_name)
+    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=creator_name, is_favorite=False)
 
 @router.put("/notes/{file_id}", response_model=FileDetailResponse)
 async def update_markdown_note(
@@ -619,7 +635,15 @@ async def update_markdown_note(
         if req.tags is not None:
             file_item.tags = req.tags
         if req.is_favorite is not None:
-            file_item.is_favorite = req.is_favorite
+            # Recorded against this user, not on the file.
+            await favorite_service.set_favorite(
+                db,
+                user_id=current_user.id,
+                target_type=favorite_service.FILE,
+                target_id=file_item.id,
+                workspace_id=file_item.workspace_id,
+                on=req.is_favorite,
+            )
 
         if content_changed:
             await _roll_open_version(db, file_item, old_content, old_name, old_last_edited_by)
@@ -663,7 +687,10 @@ async def update_markdown_note(
     last_editor_name = creator_name
     if file_item.last_edited_by and file_item.last_edited_by != file_item.created_by:
         last_editor_name = _display_name(await db.get(User, file_item.last_edited_by))
-    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=last_editor_name)
+    return _to_file_detail_response(
+        file_item, creator_name=creator_name, last_editor_name=last_editor_name,
+        is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
+    )
 
 def _to_version_response(version: FileVersion, editor_name: Optional[str], include_content: bool) -> dict:
     data = {
@@ -805,7 +832,10 @@ async def restore_file_version(
 
     creator_name = _display_name(await db.get(User, file_item.created_by)) if file_item.created_by else None
     last_editor_name = _display_name(current_user)
-    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=last_editor_name)
+    return _to_file_detail_response(
+        file_item, creator_name=creator_name, last_editor_name=last_editor_name,
+        is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
+    )
 
 @router.post("/metadata", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
 async def create_file_metadata(
@@ -994,6 +1024,7 @@ async def delete_file(
         bytes_freed=file_item.size_bytes or 0
     )
 
+    await favorite_service.drop_favorites(db, favorite_service.FILE, [file_item.id])
     await db.delete(file_item)
     await db.commit()
     return None

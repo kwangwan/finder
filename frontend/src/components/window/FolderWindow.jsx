@@ -11,6 +11,7 @@ import {
   UploadCloud,
   ArrowUpDown,
 } from '../../utils/icons';
+import { folderIconColor } from '../../utils/folderColors';
 import { listFolders, listFiles } from '../../api';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 import { useMarqueeSelection } from '../../hooks/useMarqueeSelection';
@@ -519,7 +520,7 @@ export default function FolderWindow({
               >
                 <span className="fw-row-icon">
                   {kind === 'folder'
-                    ? <FolderIcon size={15} color={item.color || 'var(--accent-primary)'} />
+                    ? <FolderIcon size={15} color={folderIconColor(item)} />
                     : <span className="fw-file-dot" />}
                 </span>
                 <span className="fw-row-name" title={item.name}>{item.name}</span>

@@ -10,6 +10,7 @@ from app.models.window_state import UserWindowState
 from app.models.copy_job import CopyJob
 from app.models.app_setting import AppSetting, SharedDailyUsage
 from app.models.sharing import FolderWriteGrant, ContentReport
+from app.models.favorite import Favorite
 
 __all__ = [
     "Folder",
@@ -27,4 +28,5 @@ __all__ = [
     "SharedDailyUsage",
     "FolderWriteGrant",
     "ContentReport",
+    "Favorite",
 ]

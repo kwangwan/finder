@@ -20,6 +20,7 @@ import {
   Eye,
   Loader2
 } from '../../utils/icons';
+import { folderIconColor } from '../../utils/folderColors';
 import { 
   listTrash, 
   deletePermanentFile, 
@@ -411,7 +412,7 @@ export default function TrashExplorer({
                 <div key={folder.id} className="trash-list-item">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
                     <div style={{ width: 36, height: 36, borderRadius: 'var(--radius-sm)', background: 'var(--bg-tertiary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <FolderIcon size={20} color={folder.color || 'var(--accent-primary)'} />
+                      <FolderIcon size={20} color={folderIconColor(folder)} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div title={folder.name} style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

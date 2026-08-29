@@ -1237,6 +1237,43 @@ export async function cancelCopyJob(jobId) {
   return res.json();
 }
 
+/**
+ * Favourites — one person's shortcuts, never a property of the item itself.
+ * A workspace-level flag would mean one person's list is everybody's, which
+ * in the shared workspace is every registered user.
+ */
+export async function listFavorites({ workspaceId = null, kind = 'all', q = '', page = 1, pageSize = 24 } = {}) {
+  const params = new URLSearchParams({ kind, page: String(page), page_size: String(pageSize) });
+  if (workspaceId) params.set('workspace_id', workspaceId);
+  if (q && q.trim()) params.set('q', q.trim());
+  const res = await fetch(`${API_BASE}/favorites?${params}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const d = await res.json().catch(() => null);
+    throw new Error(d?.detail || '즐겨찾기를 불러오지 못했습니다.');
+  }
+  return res.json();
+}
+
+export async function setFavorite(targetType, targetId, isFavorite) {
+  const res = await fetch(`${API_BASE}/favorites`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ target_type: targetType, target_id: targetId, is_favorite: isFavorite }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => null);
+    throw new Error(d?.detail || '즐겨찾기를 변경하지 못했습니다.');
+  }
+  return res.json();
+}
+
+/** Every favourited id of one kind, so a listing can draw its stars in one go. */
+export async function listFavoriteIds(kind = 'folder') {
+  const res = await fetch(`${API_BASE}/favorites/ids?kind=${kind}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('즐겨찾기 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
 /** The shared workspace and the storage pool behind it (admin only). */
 export async function getSharedWorkspaceInfo() {
   const res = await fetch(`${API_BASE}/admin/shared-workspace`, { headers: authHeaders() });

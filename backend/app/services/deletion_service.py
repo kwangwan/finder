@@ -8,6 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select, and_, delete, inspect as sql_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal
+from app.services import favorite_service
 from app.models import DeletionQueueItem, FileItem, Folder
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
@@ -104,6 +105,7 @@ class DeletionService:
                 creator_id=f.created_by,
                 bytes_freed=f.size_bytes or 0
             )
+            await favorite_service.drop_favorites(db, favorite_service.FILE, [f.id])
             await db.delete(f)
 
         # 2. Recurse into subfolders
