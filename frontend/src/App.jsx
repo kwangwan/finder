@@ -1229,7 +1229,20 @@ export default function App() {
       <ThemeProvider theme={theme}>
         <AdminDashboard
           currentUser={currentUser}
-          onBackToApp={() => setActiveView('all')}
+          // Coming back from the full-screen admin view has to restore a
+          // view that is CONSISTENT with activeFolderId, which is
+          // deliberately left untouched while admin is open. Unconditionally
+          // setting 'all' here desynced the two: buildFileViewParams would
+          // then fetch with root_only (because activeView === 'all') while
+          // currentFolder/the breadcrumb still resolved to the folder the
+          // user came from — so that folder's header sat above root's file
+          // list, and any folder whose root happened to hold no files of its
+          // own rendered as "폴더가 비어 있습니다" despite being full.
+          onBackToApp={() => {
+            const restoredView = activeFolderId ? 'folder' : 'all';
+            setActiveView(restoredView);
+            updateUrlParams({ folderId: activeFolderId, view: restoredView });
+          }}
         />
       </ThemeProvider>
     );
