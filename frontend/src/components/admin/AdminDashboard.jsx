@@ -17,9 +17,11 @@ import {
   Shield,
   User as UserIcon,
   Clock,
-  Database
+  Database,
+  Copy,
+  ArrowRight
 } from '../../utils/icons';
-import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota } from '../../api';
+import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 /** Format bytes to human-readable string */
@@ -49,16 +51,21 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
   // quota editing
   const [editingQuotaUserId, setEditingQuotaUserId] = useState(null);
   const [quotaInputGb, setQuotaInputGb] = useState('');
+  const [copyJobs, setCopyJobs] = useState([]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [userList, sysStats] = await Promise.all([
+      const [userList, sysStats, jobs] = await Promise.all([
         getAdminUsers(),
-        getSystemStats()
+        getSystemStats(),
+        // Best-effort: the history is supplementary, and failing to load it
+        // must not take the whole dashboard down with it.
+        listAdminCopyJobs(100).catch(() => ({ jobs: [] }))
       ]);
       setUsers(userList);
       setStats(sysStats);
+      setCopyJobs(jobs.jobs || []);
     } catch (err) {
       await showAlert({
         title: '데이터 조회 실패',
@@ -620,6 +627,88 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Copy / move history.
+            The per-user banner only surfaces what is running or just finished,
+            which is the right scope while working but no help afterwards —
+            after a large migration between workspaces someone has to be able
+            to confirm what actually ran, by whom, and whether any of it
+            failed. */}
+        <div className="admin-table-card" style={{ marginTop: '1.5rem' }}>
+          <div className="admin-table-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <Copy size={18} color="var(--accent-primary)" />
+              <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                복사 · 이동 작업 이력
+              </h2>
+              <span className="menu-badge" style={{ fontSize: '0.72rem', padding: '2px 7px' }}>
+                {copyJobs.length}건
+              </span>
+            </div>
+          </div>
+
+          {copyJobs.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              아직 실행된 복사 작업이 없습니다.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
+                    {['대상', '요청자', '경로', '결과', '시각'].map((h, i) => (
+                      <th key={h} style={{ padding: i === 0 ? '0.9rem 1.5rem' : '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {copyJobs.map((j) => {
+                    const tone = j.status === 'failed' ? 'var(--accent-rose)'
+                      : j.status === 'cancelled' ? 'var(--text-muted)'
+                      : j.status === 'done' ? 'var(--accent-emerald)'
+                      : 'var(--accent-amber)';
+                    const label = { done: '완료', failed: '실패', cancelled: '취소됨', running: '진행 중', pending: '대기 중', cancelling: '취소하는 중' }[j.status] || j.status;
+                    return (
+                      <tr key={j.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ padding: '0.8rem 1.5rem' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{j.summary || '-'}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {j.is_move ? '이동' : '복사'}{j.cross_workspace ? ' · 워크스페이스 간' : ''}
+                          </div>
+                        </td>
+                        <td style={{ padding: '0.8rem 1rem', fontSize: '0.8rem' }}>{j.user_name || j.user_email || '-'}</td>
+                        <td style={{ padding: '0.8rem 1rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                            {j.source_workspace || '-'}
+                            <ArrowRight size={11} />
+                            {j.target_workspace || '-'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.8rem 1rem', fontSize: '0.78rem' }}>
+                          <span style={{ color: tone, fontWeight: 700 }}>{label}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {' · '}파일 {j.copied_files}/{j.total_files}
+                            {j.copied_folders ? `, 폴더 ${j.copied_folders}` : ''}
+                            {j.skipped ? `, 제외 ${j.skipped}` : ''}
+                            {j.trashed_files ? `, 원본 휴지통 ${j.trashed_files}` : ''}
+                          </span>
+                          {j.error_message && (
+                            <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)' }} title={j.error_message}>
+                              {j.error_message.slice(0, 80)}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.8rem 1rem', fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          {j.created_at ? new Date(j.created_at).toLocaleString('ko-KR') : '-'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

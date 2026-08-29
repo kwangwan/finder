@@ -1097,6 +1097,26 @@ export async function listCopyJobs() {
   return res.json();
 }
 
+/** Stop a queued or in-progress copy. A running one stops at the next file
+ *  boundary; what it already copied stays. */
+export async function cancelCopyJob(jobId) {
+  const res = await fetch(`${API_BASE}/files/copy-jobs/${jobId}/cancel`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => null);
+    throw new Error(d?.detail || '작업을 취소하지 못했습니다.');
+  }
+  return res.json();
+}
+
+export async function listAdminCopyJobs(limit = 100) {
+  const res = await fetch(`${API_BASE}/admin/copy-jobs?limit=${limit}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('복사 작업 이력을 불러오지 못했습니다.');
+  return res.json();
+}
+
 export async function dismissCopyJob(jobId) {
   const res = await fetch(`${API_BASE}/files/copy-jobs/${jobId}`, {
     method: 'DELETE',

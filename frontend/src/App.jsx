@@ -630,6 +630,7 @@ export default function App() {
   // reloads its listing. A window showing a folder someone else's drop just
   // changed would otherwise keep displaying the old contents.
   const [windowRefreshToken, setWindowRefreshToken] = useState(0);
+  const [queuedJobCount, setQueuedJobCount] = useState(0);
   const bumpWindowRefresh = useCallback(() => setWindowRefreshToken((n) => n + 1), []);
 
   /**
@@ -676,6 +677,7 @@ export default function App() {
       // accepted; the background banner follows it from here and refreshes
       // the views when it lands — including if the browser was closed and
       // reopened in between.
+      setQueuedJobCount((n) => n + 1);
       const notes = res.skipped_cycles ? ` (폴더 ${res.skipped_cycles}개는 자기 자신 안으로 넣을 수 없어 제외)` : '';
       showToast(
         `${mode === 'move' ? '이동' : '복사'} 작업을 예약했습니다. 파일 ${res.total_files}개를 백그라운드에서 처리합니다.${notes}`,
@@ -771,6 +773,7 @@ export default function App() {
       }
       // Queued on the server: the copy keeps going if this tab is closed, and
       // the background banner reports progress and completion.
+      setQueuedJobCount((n) => n + 1);
       const notes = res.skipped_cycles
         ? ` (폴더 ${res.skipped_cycles}개는 자기 자신 안으로 붙여넣을 수 없어 제외)`
         : '';
@@ -1896,6 +1899,7 @@ export default function App() {
       {/* Background copy queue — visible whenever the server is working, and
           able to pick up jobs this browser session did not start. */}
       <CopyJobsBanner
+        notifyPermissionTrigger={queuedJobCount}
         onJobsFinished={() => {
           refreshFiles();
           refreshFoldersAndStats();
@@ -1918,6 +1922,12 @@ export default function App() {
         onClipboardCopy={handleClipboardCopy}
         onClipboardPaste={handleClipboardPaste}
         onTransferItems={handleTransferItems}
+        onUploadFiles={(picked, folderId, workspaceId) => {
+          // Reuses the existing upload queue, but targeted at the window's own
+          // folder and workspace rather than whatever the app is showing.
+          uploadManager.checkAndQueueFiles(picked, folderId, workspaceId);
+          setIsUploadOpen(true);
+        }}
         externalRefreshToken={windowRefreshToken}
       />
 

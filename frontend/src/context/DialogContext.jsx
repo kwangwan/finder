@@ -236,7 +236,11 @@ export function DialogProvider({ children }) {
             }}
           >
             <div style={{ padding: '1.75rem 1.75rem 1.25rem' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1.1rem' }}>
+              {/* The icon sits beside the title only. It used to head a column
+                  that also contained the message, the item card and the notes,
+                  which indented every one of them by the icon's width and left
+                  a wide empty gutter down the left of the dialog. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1.1rem' }}>
                 <div style={{
                   width: 44,
                   height: 44,
@@ -256,28 +260,30 @@ export function DialogProvider({ children }) {
                   {getIcon()}
                 </div>
 
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                    <h3 style={{ 
-                      fontSize: '1.15rem', 
-                      fontWeight: 700, 
-                      color: 'var(--text-primary)',
-                      margin: 0
-                    }}>
-                      {dialogState.title}
-                    </h3>
-                    <button 
-                      className="btn-icon" 
-                      onClick={handleCancel}
-                      style={{ padding: '0.25rem', color: 'var(--text-muted)' }}
-                      title="닫기 (ESC)"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
+                <h3 style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: '1.15rem',
+                  fontWeight: 700,
+                  color: 'var(--text-primary)',
+                  margin: 0
+                }}>
+                  {dialogState.title}
+                </h3>
+                <button
+                  className="btn-icon"
+                  onClick={handleCancel}
+                  style={{ padding: '0.25rem', color: 'var(--text-muted)', flexShrink: 0, alignSelf: 'flex-start' }}
+                  title="닫기 (ESC)"
+                >
+                  <X size={16} />
+                </button>
+              </div>
 
-                  {renderMessageContent(dialogState.message)}
-                </div>
+              {/* Full width, so the message and the item name get the whole
+                  dialog rather than what is left beside the icon. */}
+              <div style={{ marginTop: '0.9rem' }}>
+                {renderMessageContent(dialogState.message)}
               </div>
             </div>
 

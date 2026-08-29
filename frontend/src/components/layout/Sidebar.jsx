@@ -17,7 +17,7 @@ import {
   ChevronsLeft
 } from '../../utils/icons';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
-import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent } from '../../utils/fileDragDrop';
+import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 
 export default function Sidebar({
   workspaces = [],
@@ -58,7 +58,10 @@ export default function Sidebar({
       onDragOver: (e) => {
         if (!isItemDrag(e)) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+        // Crossing workspaces duplicates rather than moves, so the cursor
+        // says so — the browser draws the copy badge for 'copy'. Without
+        // this every drop looks like a move right up until it isn't.
+        e.dataTransfer.dropEffect = dropIntent(getDragWorkspaceHint(e), activeWorkspace?.id || null).mode === 'copy' ? 'copy' : 'move';
         if (dropTargetId !== key) setDropTargetId(key);
       },
       onDragEnter: () => {

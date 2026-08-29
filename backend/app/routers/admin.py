@@ -3,10 +3,11 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_
 
 from app.core.database import get_db
 from app.models.user import User
+from app.models import CopyJob
 from app.schemas.auth import UserResponse, UserApproveRequest, UserAdminRequest, UserQuotaRequest
 from app.core.security import get_current_admin_user
 
@@ -120,3 +121,55 @@ async def update_user_storage_quota(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+@router.get("/copy-jobs")
+async def list_all_copy_jobs(
+    limit: int = 100,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Every user's copy/move jobs, newest first.
+
+    The per-user banner only surfaces what is running or just finished, which
+    is the right scope while working but no help afterwards — after a large
+    migration between workspaces someone has to be able to confirm what
+    actually ran, by whom, and whether any of it failed.
+    """
+    limit = max(1, min(limit, 500))
+    jobs = (await db.execute(
+        select(CopyJob).order_by(desc(CopyJob.created_at)).limit(limit)
+    )).scalars().all()
+
+    user_ids = {j.user_id for j in jobs if j.user_id}
+    ws_ids = {j.source_workspace_id for j in jobs} | {j.target_workspace_id for j in jobs}
+    ws_ids.discard(None)
+
+    users = {u.id: u for u in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()} if user_ids else {}
+    spaces = {w.id: w.name for w in (await db.execute(select(Workspace).where(Workspace.id.in_(ws_ids)))).scalars().all()} if ws_ids else {}
+
+    def row(j):
+        u = users.get(j.user_id)
+        return {
+            "id": str(j.id),
+            "status": j.status,
+            "summary": j.summary,
+            "is_move": bool(j.trash_source),
+            "user_email": u.email if u else None,
+            "user_name": (u.name or u.email.split("@")[0]) if u else None,
+            "source_workspace": spaces.get(j.source_workspace_id),
+            "target_workspace": spaces.get(j.target_workspace_id),
+            "cross_workspace": j.source_workspace_id != j.target_workspace_id,
+            "total_files": j.total_files,
+            "copied_files": j.copied_files,
+            "copied_folders": j.copied_folders,
+            "copied_bytes": j.copied_bytes,
+            "skipped": j.skipped,
+            "trashed_files": j.trashed_files,
+            "error_message": j.error_message,
+            "created_at": j.created_at,
+            "finished_at": j.finished_at,
+        }
+
+    return {"jobs": [row(j) for j in jobs]}

@@ -4447,3 +4447,26 @@ select option {
 @media (max-width: 768px) {
   .copy-jobs-banner { right: 10px; left: 10px; width: auto; bottom: 116px; }
 }
+
+/* Tells the user a cross-workspace drop will copy, since the browser's own
+   copy cursor is a small badge that is easy to miss. */
+.fw-drop-hint {
+  position: sticky;
+  bottom: 6px;
+  margin: 6px auto 0;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.fw-body[data-drop-copy="true"] {
+  box-shadow: inset 0 0 0 2px var(--accent-primary);
+}

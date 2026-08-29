@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, X, Check, AlertCircle, Loader2 } from '../../utils/icons';
-import { listCopyJobs, dismissCopyJob } from '../../api';
+import { Copy, X, Check, AlertCircle, Loader2, Ban } from '../../utils/icons';
+import { listCopyJobs, dismissCopyJob, cancelCopyJob } from '../../api';
 
 // Fast enough to feel live while something is copying; the idle poll is slow
 // because an empty queue is the normal state and there is nothing to watch.
@@ -13,6 +13,29 @@ const IDLE_POLL_MS = 20000;
 const DONE_LINGER_MS = 8000;
 // Never let the stack grow past this, however many finished at once.
 const MAX_VISIBLE = 3;
+
+// Asked for once, the first time a job is actually queued — never on load,
+// which would be a permission prompt out of nowhere.
+function requestNotifyPermission() {
+  try {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  } catch (e) { /* unsupported or blocked; the banner still works */ }
+}
+
+function notify(job) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const done = job.status === 'done';
+    const title = done
+      ? `${job.is_move ? '이동' : '복사'}이 완료되었습니다`
+      : job.status === 'cancelled' ? '작업이 취소되었습니다' : '작업이 실패했습니다';
+    new Notification(title, {
+      body: `${job.summary} · 파일 ${job.copied_files}개`,
+      tag: `copy-job-${job.id}`,
+    });
+  } catch (e) { /* never let a notification break the poll */ }
+}
 
 function pct(job) {
   if (!job.total_files) return job.status === 'done' ? 100 : 0;
@@ -28,7 +51,7 @@ function pct(job) {
  * reopening the app mid-copy still shows the progress, and a job that finished
  * while away is still reported instead of vanishing silently.
  */
-export default function CopyJobsBanner({ onJobsFinished }) {
+export default function CopyJobsBanner({ onJobsFinished, notifyPermissionTrigger = 0 }) {
   const [jobs, setJobs] = useState([]);
   const [dismissed, setDismissed] = useState(() => new Set());
   const activeIdsRef = useRef(new Set());
@@ -43,10 +66,25 @@ export default function CopyJobsBanner({ onJobsFinished }) {
       // Tell the app when work actually finished, so the file list and any
       // open folder windows reload — the copies landed on the server without
       // this client doing anything.
-      const nowActive = new Set(list.filter((j) => j.status === 'pending' || j.status === 'running').map((j) => j.id));
+      const nowActive = new Set(
+        list.filter((j) => ['pending', 'running', 'cancelling'].includes(j.status)).map((j) => j.id)
+      );
       const finished = [...activeIdsRef.current].filter((id) => !nowActive.has(id));
       activeIdsRef.current = nowActive;
-      if (finished.length) onJobsFinished?.();
+      if (finished.length) {
+        onJobsFinished?.();
+        // These run on the server and can outlast the page being looked at, so
+        // a completion is worth surfacing outside the tab. Only when the tab
+        // is actually hidden — a notification for something already on screen
+        // is noise — and only with permission the user granted themselves.
+        if (document.visibilityState !== 'visible') {
+          finished.forEach((id) => {
+            const job = list.find((j) => j.id === id);
+            if (!job) return;
+            notify(job);
+          });
+        }
+      }
     } catch (e) { /* best-effort: a failed poll just retries */ }
   }, [onJobsFinished]);
 
@@ -55,7 +93,7 @@ export default function CopyJobsBanner({ onJobsFinished }) {
   useEffect(() => {
     const timers = retireTimersRef.current;
     jobs.forEach((job) => {
-      const finished = job.status === 'done' || job.status === 'failed';
+      const finished = ['done', 'failed', 'cancelled'].includes(job.status);
       // Failures stay until acknowledged: they are the one outcome the user
       // has to actually read.
       if (!finished || job.status === 'failed' || timers.has(job.id) || dismissed.has(job.id)) return;
@@ -70,6 +108,11 @@ export default function CopyJobsBanner({ onJobsFinished }) {
     retireTimersRef.current.forEach((t) => clearTimeout(t));
     retireTimersRef.current.clear();
   }, []);
+
+  // Ask only once something has actually been queued.
+  useEffect(() => {
+    if (notifyPermissionTrigger > 0) requestNotifyPermission();
+  }, [notifyPermissionTrigger]);
 
   useEffect(() => {
     poll();
@@ -86,9 +129,16 @@ export default function CopyJobsBanner({ onJobsFinished }) {
   const visible = jobs.filter((j) => !dismissed.has(j.id)).slice(0, MAX_VISIBLE);
   if (visible.length === 0) return null;
 
+  const cancel = async (job) => {
+    try {
+      await cancelCopyJob(job.id);
+      await poll();
+    } catch (e) { /* it likely finished between render and click */ }
+  };
+
   const hide = async (job) => {
     setDismissed((prev) => new Set([...prev, job.id]));
-    if (job.status !== 'pending' && job.status !== 'running') {
+    if (!['pending', 'running', 'cancelling'].includes(job.status)) {
       try { await dismissCopyJob(job.id); } catch (e) { /* the row expires on its own anyway */ }
     }
   };
@@ -99,10 +149,14 @@ export default function CopyJobsBanner({ onJobsFinished }) {
         const running = job.status === 'running';
         const pending = job.status === 'pending';
         const failed = job.status === 'failed';
+        const cancelling = job.status === 'cancelling';
+        const cancelled = job.status === 'cancelled';
+        const active = running || pending || cancelling;
         return (
           <div key={job.id} className={`copy-job-row ${job.status}`}>
             <span className="copy-job-icon">
               {failed ? <AlertCircle size={14} color="var(--accent-rose)" />
+                : cancelled ? <Ban size={14} color="var(--text-muted)" />
                 : job.status === 'done' ? <Check size={14} color="var(--accent-emerald)" />
                 : <Loader2 size={14} className="spin" color="var(--accent-primary)" />}
             </span>
@@ -112,12 +166,14 @@ export default function CopyJobsBanner({ onJobsFinished }) {
                 <span className="copy-job-name" title={job.summary}>{job.summary}</span>
                 <span className="copy-job-state">
                   {pending ? '대기 중'
+                    : cancelling ? '취소하는 중'
                     : running ? `${job.copied_files}/${job.total_files}`
                     : failed ? '실패'
+                    : cancelled ? `취소됨 · ${job.copied_files}개 완료`
                     : job.is_move ? '이동 완료' : '복사 완료'}
                 </span>
               </div>
-              {(running || pending) && (
+              {active && (
                 <div className="copy-job-bar">
                   <div className="copy-job-bar-fill" style={{ width: `${pct(job)}%` }} />
                 </div>
@@ -126,9 +182,14 @@ export default function CopyJobsBanner({ onJobsFinished }) {
                 <div className="copy-job-error" title={job.error_message}>{job.error_message}</div>
               )}
             </div>
-            {/* Only finished jobs can be cleared away — hiding a running one
-                would suggest it had been cancelled, which it has not. */}
-            {!running && !pending && (
+            {/* A running job offers cancel; a finished one offers dismiss.
+                Hiding a running job would read as cancelling it, which it is
+                not — so that button is never the one shown. */}
+            {running || pending ? (
+              <button type="button" className="copy-job-close" onClick={() => cancel(job)} title="작업 취소">
+                <Ban size={13} />
+              </button>
+            ) : cancelling ? null : (
               <button type="button" className="copy-job-close" onClick={() => hide(job)} title="지우기">
                 <X size={13} />
               </button>

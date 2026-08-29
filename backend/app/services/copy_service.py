@@ -359,8 +359,13 @@ class CopyService:
                     if folder and not folder.is_trashed and folder.workspace_id == job.source_workspace_id:
                         src_folders.append(folder)
 
+                cancelled = False
                 processed = 0
                 for f in src_files:
+                    await db.refresh(job, ["status"])
+                    if job.status == "cancelling":
+                        cancelled = True
+                        break
                     ok = await _copy_one_file(db, f, job.target_folder_id, job.target_workspace_id, user, rename=True)
                     if ok:
                         counters["files"] += 1
@@ -378,6 +383,12 @@ class CopyService:
                         await asyncio.sleep(COPY_YIELD_SECONDS)
 
                 for folder in src_folders:
+                    if not cancelled:
+                        await db.refresh(job, ["status"])
+                        if job.status == "cancelling":
+                            cancelled = True
+                    if cancelled:
+                        break
                     await _copy_folder_recursive(db, folder, job.target_folder_id, job.target_workspace_id, user, True, 0, counters)
                     job.copied_files = counters["files"]
                     job.copied_folders = counters["folders"]
@@ -386,6 +397,16 @@ class CopyService:
                     await db.commit()
 
                 await quota_service.record_storage_added(db, job.target_workspace_id, user, counters["bytes"])
+
+                # A cancelled move must NOT trash the originals: only part of
+                # the selection reached the destination, so removing the
+                # sources would lose whatever had not been copied yet.
+                if cancelled:
+                    job.status = "cancelled"
+                    job.finished_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    logger.info(f"[CopyWorker] job {job_id} cancelled after {counters['files']} file(s)")
+                    return
 
                 # The move half, only once the copy has committed: if it failed
                 # the originals must still be there.
@@ -435,10 +456,18 @@ class CopyService:
         """A job left 'running' by a restart is nobody's work any more — put it
         back so it is retried rather than sitting there forever."""
         async with AsyncSessionLocal() as db:
-            stale = (await db.execute(select(CopyJob).where(CopyJob.status == "running"))).scalars().all()
+            stale = (await db.execute(
+                select(CopyJob).where(CopyJob.status.in_(("running", "cancelling")))
+            )).scalars().all()
             for job in stale:
-                job.status = "pending"
-                job.started_at = None
+                # A job the user had asked to stop must not be resurrected by a
+                # restart — honour the cancellation instead of re-running it.
+                if job.status == "cancelling":
+                    job.status = "cancelled"
+                    job.finished_at = datetime.now(timezone.utc)
+                else:
+                    job.status = "pending"
+                    job.started_at = None
             if stale:
                 await db.commit()
                 logger.info(f"[CopyWorker] requeued {len(stale)} interrupted job(s)")

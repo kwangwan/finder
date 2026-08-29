@@ -8,9 +8,11 @@ import {
   X,
   RefreshCw,
   Loader2,
+  UploadCloud,
+  ArrowUpDown,
 } from '../../utils/icons';
 import { listFolders, listFiles } from '../../api';
-import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent } from '../../utils/fileDragDrop';
+import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
 import { useMarqueeSelection } from '../../hooks/useMarqueeSelection';
 import { useWindowChrome, RESIZE_DIRECTIONS } from '../../hooks/useWindowChrome';
 
@@ -50,6 +52,7 @@ export default function FolderWindow({
   onClipboardCopy,
   onClipboardPaste,
   onTransferItems,
+  onUploadFiles,
   externalRefreshToken = 0,
 }) {
   const { id, folderId, workspaceId, position, size, isMinimized, isMaximized, zIndex } = windowState;
@@ -61,7 +64,17 @@ export default function FolderWindow({
   const [selectedFileIds, setSelectedFileIds] = useState([]);
   const [selectedFolderIds, setSelectedFolderIds] = useState([]);
   const [dropTargetKey, setDropTargetKey] = useState(null);
+  // Whether the drag currently hovering would copy rather than move. The
+  // native copy cursor is easy to miss, so the target says so in the UI too.
+  const [dropIsCopy, setDropIsCopy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // Sorting is per window: two windows onto different folders are usually open
+  // for different reasons, and forcing them to share one order would make the
+  // second one useless the moment the first is changed.
+  const [sortBy, setSortBy] = useState('name');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const bodyRef = useRef(null);
   const marqueeBaseRef = useRef({ files: [], folders: [] });
@@ -107,10 +120,23 @@ export default function FolderWindow({
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
+  const compare = useCallback((a, b) => {
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    if (sortBy === 'size') return dir * ((a.size_bytes || 0) - (b.size_bytes || 0));
+    if (sortBy === 'updated') return dir * (new Date(a.updated_at || 0) - new Date(b.updated_at || 0));
+    return dir * String(a.name || '').localeCompare(String(b.name || ''));
+  }, [sortBy, sortOrder]);
+
   const subfolders = useMemo(
-    () => folders.filter((f) => (f.parent_id || null) === (folderId || null)).slice(0, MAX_ROWS),
-    [folders, folderId]
+    () => folders
+      .filter((f) => (f.parent_id || null) === (folderId || null))
+      .slice()
+      .sort(compare)
+      .slice(0, MAX_ROWS),
+    [folders, folderId, compare]
   );
+
+  const sortedFiles = useMemo(() => files.slice().sort(compare), [files, compare]);
 
   const folderById = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
   const currentFolder = folderId ? folderById.get(folderId) : null;
@@ -166,8 +192,8 @@ export default function FolderWindow({
 
   const orderedItems = useMemo(() => [
     ...subfolders.map((f) => ({ kind: 'folder', id: f.id })),
-    ...files.map((f) => ({ kind: 'file', id: f.id })),
-  ], [subfolders, files]);
+    ...sortedFiles.map((f) => ({ kind: 'file', id: f.id })),
+  ], [subfolders, sortedFiles]);
 
   const selectRangeTo = (kind, itemId, additive) => {
     const idx = orderedItems.findIndex((i) => i.kind === kind && i.id === itemId);
@@ -269,8 +295,13 @@ export default function FolderWindow({
       if (!isItemDrag(e)) return;
       e.preventDefault();
       e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
+      // Crossing workspaces duplicates rather than moves, so the cursor says
+      // so — the browser draws the copy badge for 'copy'. Without this every
+      // drop looks like a move right up until it isn't.
+      const crossing = dropIntent(getDragWorkspaceHint(e), workspaceId).mode === 'copy';
+      e.dataTransfer.dropEffect = crossing ? 'copy' : 'move';
       if (dropTargetKey !== key) setDropTargetKey(key);
+      if (dropIsCopy !== crossing) setDropIsCopy(crossing);
     },
     onDragLeave: (e) => {
       if (e.currentTarget.contains(e.relatedTarget)) return;
@@ -296,6 +327,7 @@ export default function FolderWindow({
       refresh();
     },
     'data-drop-active': dropTargetKey === key ? 'true' : undefined,
+    'data-drop-copy': dropTargetKey === key && dropIsCopy ? 'true' : undefined,
   });
 
   const startItemDrag = (e, item, kind) => {
@@ -314,7 +346,7 @@ export default function FolderWindow({
 
   const rows = [
     ...subfolders.map((f) => ({ kind: 'folder', item: f })),
-    ...files.map((f) => ({ kind: 'file', item: f })),
+    ...sortedFiles.map((f) => ({ kind: 'file', item: f })),
   ];
 
   return (
@@ -346,6 +378,33 @@ export default function FolderWindow({
           )}
         </div>
         <div className="window-header-actions">
+          <button
+            type="button"
+            className="window-action-btn icon-only"
+            title={`정렬: ${sortBy === 'name' ? '이름' : sortBy === 'size' ? '크기' : '수정일'} ${sortOrder === 'asc' ? '오름차순' : '내림차순'} (클릭하여 변경)`}
+            onClick={(e) => {
+              e.stopPropagation();
+              // One control cycling name → size → updated, flipping direction
+              // on the way round. A window header has no room for a select,
+              // and this keeps every order reachable in at most six clicks.
+              if (sortOrder === 'asc') setSortOrder('desc');
+              else {
+                setSortOrder('asc');
+                setSortBy((prev) => (prev === 'name' ? 'size' : prev === 'size' ? 'updated' : 'name'));
+              }
+            }}
+          >
+            <ArrowUpDown size={13} />
+          </button>
+          <button
+            type="button"
+            className="window-action-btn icon-only"
+            title="이 폴더에 파일 업로드"
+            disabled={isUploading}
+            onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+          >
+            {isUploading ? <Loader2 size={13} className="spin" /> : <UploadCloud size={13} />}
+          </button>
           <button type="button" className="window-action-btn icon-only" title="새로고침" onClick={(e) => { e.stopPropagation(); refresh(); }}>
             <RefreshCw size={13} />
           </button>
@@ -366,6 +425,28 @@ export default function FolderWindow({
 
       {/* Breadcrumb — each segment is a drop target, so items can be moved to
           an ancestor without navigating there first. */}
+      {/* Uploads land in the folder this window is showing, which may be in a
+          different workspace than the app is switched to — so the window does
+          its own upload rather than borrowing the main explorer's. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const picked = Array.from(e.target.files || []);
+          e.target.value = '';
+          if (!picked.length || !onUploadFiles) return;
+          setIsUploading(true);
+          try {
+            await onUploadFiles(picked, folderId, workspaceId);
+            refresh();
+          } finally {
+            setIsUploading(false);
+          }
+        }}
+      />
+
       <div className="fw-breadcrumb">
         <button
           type="button"
@@ -452,6 +533,13 @@ export default function FolderWindow({
           })
         )}
 
+        {/* Says what the drop will do while it can still be reconsidered.
+            Crossing workspaces duplicates rather than moves, and the native
+            copy cursor is a small badge that is easy to miss. */}
+        {dropTargetKey && dropIsCopy && (
+          <div className="fw-drop-hint">다른 워크스페이스로 복사됩니다</div>
+        )}
+
         {marqueeRect && (
           <div
             className="selection-marquee"
@@ -466,7 +554,12 @@ export default function FolderWindow({
       </div>
 
       <div className="os-window-footer fw-footer">
-        <span>{subfolders.length}개 폴더 · {files.length}개 파일</span>
+        <span>
+          {subfolders.length}개 폴더 · {files.length}개 파일
+          {' · '}
+          {sortBy === 'name' ? '이름순' : sortBy === 'size' ? '크기순' : '수정일순'}
+          {sortOrder === 'asc' ? ' ↑' : ' ↓'}
+        </span>
         {selectedCount > 0 && <span>{selectedCount}개 선택됨</span>}
       </div>
 

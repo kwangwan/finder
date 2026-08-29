@@ -10,12 +10,20 @@
 const MIME = 'application/json';
 const PAYLOAD_TYPE = 'kb_items';
 
+// The source workspace is additionally encoded as its own MIME type, because
+// dragover cannot read the payload — the spec exposes only the type list
+// there, and getData() returns "" until drop. Putting the id in the type name
+// is what lets a target decide during the drag whether this will be a move or
+// a copy, and show the right cursor for it.
+const WS_TYPE_PREFIX = 'application/x-kb-ws-';
+
 export function setItemDragData(e, { fileIds = [], folderIds = [], label, count, workspaceId = null } = {}) {
   // workspaceId travels with the payload because a drop target can belong to a
   // different workspace than the drag started in (a folder window can show
   // any workspace). The target compares the two to decide whether the drop is
   // a move within one workspace or a copy across two.
   e.dataTransfer.setData(MIME, JSON.stringify({ type: PAYLOAD_TYPE, fileIds, folderIds, workspaceId }));
+  e.dataTransfer.setData(`${WS_TYPE_PREFIX}${workspaceId || 'none'}`, '1');
   e.dataTransfer.effectAllowed = 'copyMove';
   if (label) setDragLabel(e, label, count ?? (fileIds.length + folderIds.length));
 }
@@ -127,6 +135,18 @@ export function canDropOnFolder({ folderIds = [], workspaceId = null } = {}, tar
     if (collectFolderSubtreeIds(folders, draggedId).has(targetFolderId)) return false; // into own subtree
   }
   return true;
+}
+
+/**
+ * The dragged items' source workspace, readable mid-drag (see WS_TYPE_PREFIX).
+ * Shaped like a payload so it can be handed straight to dropIntent.
+ */
+export function getDragWorkspaceHint(e) {
+  const types = Array.from(e.dataTransfer?.types || []);
+  const hit = types.find((t) => t.startsWith(WS_TYPE_PREFIX));
+  if (!hit) return { workspaceId: null };
+  const id = hit.slice(WS_TYPE_PREFIX.length);
+  return { workspaceId: id === 'none' ? null : id };
 }
 
 /**

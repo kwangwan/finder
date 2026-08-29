@@ -219,6 +219,77 @@ function createAndroidBeforeInputEnterFix() {
 // workaround if a future BlockNote version fixes htmlToMarkdown.ts's `<br>`
 // case to check for a table-cell ancestor itself.
 const TABLE_BR_PLACEHOLDER = '\uE000BR\uE000';
+
+// An empty paragraph is real content in the editor — it is the blank line the
+// user deliberately left between two paragraphs — but it does not survive a
+// markdown round-trip on its own. Export writes it as nothing, so a run of
+// them becomes a run of blank lines, and blank lines are not content in
+// markdown: every parser collapses them. Reopening a document therefore
+// silently dropped every blank line the user had typed.
+//
+// The information is not lost on the way out — the saved markdown does hold
+// those blank lines — so the repair belongs on the way back in. Each surplus
+// blank line is turned into a line holding one zero-width space, which IS
+// content and does parse to a paragraph, and that paragraph is emptied again
+// once parsed (restoreBlankParagraphs). Same shape as the table <br>
+// workaround above, and the markdown on disk stays untouched and valid.
+// Zero-width space, not a non-breaking space: BlockNote's markdown parser
+// treats a line holding only an nbsp as blank and drops it, which is exactly
+// the behaviour being worked around. Verified against the parser rather than
+// assumed. Nothing ever sees this character — the paragraph is emptied the
+// moment it is parsed — so its only requirement is to survive that step.
+const BLANK_PARAGRAPH_CHAR = '\u200B';
+
+/**
+ * Re-materialise the empty paragraphs that a run of blank lines stands for.
+ *
+ * BlockNote separates blocks with one blank line, so a run of B blank lines
+ * carries (B - 1) / 2 empty paragraphs between its neighbours. Fenced code
+ * blocks are skipped: blank lines are literal content there, and rewriting
+ * them would corrupt the code.
+ */
+export function expandBlankParagraphs(markdown) {
+  if (!markdown || !markdown.includes('\n\n\n')) return markdown;
+
+  const lines = markdown.split('\n');
+  const out = [];
+  let inFence = false;
+  let run = 0;
+
+  const flushRun = () => {
+    if (run === 0) return;
+    const paragraphs = inFence ? 0 : Math.floor((run - 1) / 2);
+    out.push('');
+    for (let i = 0; i < paragraphs; i++) {
+      out.push(BLANK_PARAGRAPH_CHAR);
+      out.push('');
+    }
+    // Anything not accounted for by a paragraph pair is ordinary spacing and
+    // is dropped, exactly as a markdown parser would drop it.
+    run = 0;
+  };
+
+  for (const line of lines) {
+    const isFence = /^\s*(```|~~~)/.test(line);
+    if (isFence) {
+      if (run) { for (let i = 0; i < run; i++) out.push(''); run = 0; }
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    if (line.trim() === '') { run += 1; continue; }
+    flushRun();
+    out.push(line);
+  }
+  if (run) { out.push(''); }
+
+  return out.join('\n');
+}
+
 export function blocksToMarkdownTableSafe(editor, blocks) {
   const html = editor.blocksToHTMLLossy(blocks);
   const container = document.createElement('div');
@@ -228,6 +299,26 @@ export function blocksToMarkdownTableSafe(editor, blocks) {
   });
   const markdown = cleanHTMLToMarkdown(container.innerHTML);
   return markdown.split(TABLE_BR_PLACEHOLDER).join('<br>');
+}
+
+/**
+ * Turn the encoded blank lines back into empty paragraphs on load.
+ *
+ * Runs on parsed blocks rather than on the markdown text so it can only ever
+ * affect a paragraph whose entire content is the marker — a non-breaking
+ * space the user typed inside a real sentence is untouched.
+ */
+export function restoreBlankParagraphs(blocks) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? restoreBlankParagraphs(block.children) : block.children;
+    if (block.type === 'paragraph' && block.content?.length === 1) {
+      const node = block.content[0];
+      if (node?.type === 'text' && node.text === BLANK_PARAGRAPH_CHAR) {
+        return { ...block, content: [], children };
+      }
+    }
+    return children === block.children ? block : { ...block, children };
+  });
 }
 
 /**
@@ -356,7 +447,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
         try {
           if (newYdoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
             const processed = await refreshImageTokensInMarkdown(fileRef.current?.content || '');
-            const blocks = upgradeVideoLinks(editorRef.current.tryParseMarkdownToBlocks(processed || ' '));
+            const blocks = restoreBlankParagraphs(upgradeVideoLinks(editorRef.current.tryParseMarkdownToBlocks(expandBlankParagraphs(processed) || ' ')));
             editorRef.current.replaceBlocks(editorRef.current.document, blocks);
           }
         } finally {
@@ -542,7 +633,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
 
   const handleVersionRestored = async (updatedFile) => {
     const processed = await refreshImageTokensInMarkdown(updatedFile.content || '');
-    const blocks = upgradeVideoLinks(editor.tryParseMarkdownToBlocks(processed || ' '));
+    const blocks = restoreBlankParagraphs(upgradeVideoLinks(editor.tryParseMarkdownToBlocks(expandBlankParagraphs(processed) || ' ')));
     editor.replaceBlocks(editor.document, blocks);
     onFileUpdatedRef.current?.(updatedFile);
   };

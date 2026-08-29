@@ -18,6 +18,7 @@ export default function WindowManager({
   onClipboardCopy,
   onClipboardPaste,
   onTransferItems,
+  onUploadFiles,
   externalRefreshToken = 0
 }) {
   const {
@@ -63,6 +64,7 @@ export default function WindowManager({
           onClipboardCopy={onClipboardCopy}
           onClipboardPaste={onClipboardPaste}
           onTransferItems={onTransferItems}
+          onUploadFiles={onUploadFiles}
           externalRefreshToken={externalRefreshToken}
         />
       ) : (

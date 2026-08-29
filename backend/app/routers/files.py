@@ -368,13 +368,42 @@ async def list_copy_jobs(
     jobs = (await db.execute(
         select(CopyJob).where(
             CopyJob.user_id == current_user.id,
-            or_(CopyJob.status.in_(("pending", "running")), CopyJob.created_at >= cutoff),
+            or_(CopyJob.status.in_(("pending", "running", "cancelling")), CopyJob.created_at >= cutoff),
         ).order_by(CopyJob.created_at.desc()).limit(20)
     )).scalars().all()
     return {
         "jobs": [_job_to_dict(j) for j in jobs],
-        "active": sum(1 for j in jobs if j.status in ("pending", "running")),
+        "active": sum(1 for j in jobs if j.status in ("pending", "running", "cancelling")),
     }
+
+
+@router.post("/copy-jobs/{job_id}/cancel")
+async def cancel_copy_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user)
+):
+    """
+    Stop a queued or in-progress copy.
+
+    A pending job simply never starts. A running one stops at the next file
+    boundary rather than being torn down mid-write, so whatever it had already
+    copied stays valid and complete — those files are left in place rather
+    than rolled back, since a half-copied folder the user can see and clean up
+    beats silently undoing work they may have wanted. The count is reported so
+    it is clear how far it got.
+    """
+    job = await db.get(CopyJob, job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+    if job.status not in ("pending", "running"):
+        raise HTTPException(status_code=409, detail="이미 끝난 작업은 취소할 수 없습니다.")
+
+    job.status = "cancelling" if job.status == "running" else "cancelled"
+    if job.status == "cancelled":
+        job.finished_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"ok": True, "status": job.status, "copied_files": job.copied_files}
 
 
 @router.delete("/copy-jobs/{job_id}")
@@ -389,7 +418,7 @@ async def dismiss_copy_job(
     job = await db.get(CopyJob, job_id)
     if not job or job.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    if job.status in ("pending", "running"):
+    if job.status in ("pending", "running", "cancelling"):
         raise HTTPException(status_code=409, detail="진행 중인 작업은 지울 수 없습니다.")
     await db.delete(job)
     await db.commit()
