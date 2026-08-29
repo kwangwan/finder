@@ -98,7 +98,7 @@ export default function WorkspaceSwitcher({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#fff',
+            color: 'var(--on-accent)',
             flexShrink: 0
           }}>
             <ActiveIcon size={16} />
@@ -116,7 +116,10 @@ export default function WorkspaceSwitcher({
             </div>
             {activeWorkspace && (
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.2 }}>
-                멤버 {activeWorkspace.member_count || 1}명
+                {/* The shared workspace has no membership rows — everyone
+                    belongs to it implicitly — so a count read from them says
+                    "1명" no matter how many people actually use it. */}
+                {activeWorkspace.is_shared ? '멤버 · 모든 이용자' : `멤버 ${activeWorkspace.member_count || 1}명`}
               </div>
             )}
           </div>

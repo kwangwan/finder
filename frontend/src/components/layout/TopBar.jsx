@@ -278,7 +278,7 @@ export default function TopBar({
                           height: 34,
                           padding: '0 0.25rem',
                           background: isActive ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                          color: isActive ? '#ffffff' : 'var(--text-secondary)',
+                          color: isActive ? 'var(--on-accent)' : 'var(--text-secondary)',
                           border: isActive ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
                           borderRadius: 'var(--radius-md)',
                           fontSize: '0.72rem',

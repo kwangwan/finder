@@ -21,6 +21,10 @@
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
   
+  /* Text drawn on an accent-coloured surface. White reads correctly on the
+     default blue; the matrix theme overrides it, because white is the one
+     colour that palette does not contain. */
+  --on-accent: #ffffff;
   --accent-primary: #3b82f6;
   --accent-primary-hover: #2563eb;
   --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
@@ -85,6 +89,7 @@
   --text-secondary: #22c55e;
   --text-muted: #15803d;
   
+  --on-accent: #04120a;
   --accent-primary: #22c55e;
   --accent-primary-hover: #16a34a;
   --accent-gradient: linear-gradient(135deg, #22c55e 0%, #10b981 100%);
@@ -231,7 +236,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--on-accent);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
 }
 
@@ -249,7 +254,7 @@ body {
   gap: 0.5rem;
   padding: 0.55rem 0.85rem;
   background: var(--accent-gradient);
-  color: #ffffff !important;
+  color: var(--on-accent) !important;
   border: none;
   border-radius: var(--radius-md);
   font-size: 0.875rem;
@@ -626,7 +631,7 @@ body {
   height: 24px;
   border-radius: 50%;
   background: var(--accent-gradient);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.75rem;
   font-weight: 700;
   display: flex;
@@ -1041,7 +1046,7 @@ body {
 
 .btn-pagination-page.active {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent-primary);
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
 }
@@ -2983,7 +2988,7 @@ h1, h2, h3, h4, h5, h6,
 
 .window-action-btn.edit-btn:hover {
   background: var(--accent-primary);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 /* Modern OS Controls (Minimize, Maximize, Close) */
@@ -3372,7 +3377,7 @@ h1, h2, h3, h4, h5, h6,
   top: -4px;
   right: -4px;
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.62rem;
   font-weight: 800;
   width: 15px;
@@ -3929,7 +3934,7 @@ h1, h2, h3, h4, h5, h6,
 
 .upload-banner-btn-view:hover {
   background: var(--accent-primary);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .upload-banner-btn-close {
@@ -4205,7 +4210,7 @@ select option {
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.65rem;
   font-weight: 700;
   white-space: nowrap;
@@ -4494,7 +4499,7 @@ select option {
   padding: 4px 10px;
   border-radius: 999px;
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 0.7rem;
   font-weight: 700;
   white-space: nowrap;
@@ -5152,3 +5157,42 @@ button.file-card-uploader {
 }
 
 button.file-card-uploader:hover { color: var(--accent-primary); }
+
+/* ==========================================================================
+   BlockNote table colours
+   ========================================================================== */
+
+/* BlockNote hardcodes its table colours instead of deriving them from the
+   colour variables its theme object controls — cell borders are a literal
+   `1px solid #ddd`, and the resize handle, drop cursor and selected-cell wash
+   are all a fixed light blue. Nothing passed through `theme` can reach them,
+   so a table drew near-white gridlines on a dark background; in the matrix
+   theme, where everything else is green on black, they read as plain white
+   boxes.
+   
+   index.css is imported before @blocknote/mantine/style.css (main.jsx loads it
+   first, BlockNote's arrives later via PreviewWindow), so an equal-specificity
+   override would lose. Scoping to .editor-pane-blocknote adds a class and wins
+   on specificity instead of resorting to !important.
+   
+   Pointed at the app's own tokens, so every theme — including any added later
+   — gets a table that matches it. */
+.editor-pane-blocknote .bn-editor [data-content-type="table"] th,
+.editor-pane-blocknote .bn-editor [data-content-type="table"] td {
+  border: 1px solid var(--border-medium);
+}
+
+/* The header row reads as a header rather than relying on weight alone, which
+   is easy to miss once the gridlines are low-contrast. */
+.editor-pane-blocknote .bn-editor [data-content-type="table"] th {
+  background: var(--bg-tertiary);
+}
+
+.editor-pane-blocknote .bn-editor .column-resize-handle,
+.editor-pane-blocknote .bn-editor .bn-table-drop-cursor {
+  background-color: var(--accent-primary);
+}
+
+.editor-pane-blocknote .bn-editor .selectedCell:after {
+  background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+}

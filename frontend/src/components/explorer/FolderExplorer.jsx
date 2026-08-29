@@ -940,6 +940,7 @@ export default function FolderExplorer({
           )}
         </div>
 
+        {!isSharedRoot && (
         <div className="explorer-toolbar-right">
           <div className="sort-control-group">
             <span className="sort-label hide-mobile">
@@ -969,6 +970,7 @@ export default function FolderExplorer({
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {/* A file in this folder was added, edited, or removed elsewhere (e.g.
