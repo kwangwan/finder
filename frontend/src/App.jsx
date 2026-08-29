@@ -69,6 +69,50 @@ import { useDialog } from './context/DialogContext';
 import { useToast } from './context/ToastContext';
 import { ThemeProvider } from './context/ThemeContext';
 
+// Sort/pagination defaults — also the fallback whenever a URL carries a
+// value outside these sets (hand-edited link, stale bookmark from an older
+// build, a truncated share). An unrecognised value is never passed through
+// to the API; the view silently falls back to newest-first, page 1.
+const SORT_BY_VALUES = ['name', 'file_type', 'updated_at', 'created_at', 'size_bytes'];
+const SORT_ORDER_VALUES = ['asc', 'desc'];
+const PAGE_SIZE_VALUES = [10, 20, 50, 100];
+const DEFAULT_SORT_BY = 'updated_at';
+const DEFAULT_SORT_ORDER = 'desc';
+const DEFAULT_PAGE_SIZE = 20;
+
+function readUrlParam(name) {
+  try {
+    return new URLSearchParams(window.location.search).get(name);
+  } catch (e) {
+    return null;
+  }
+}
+
+function readSortByFromUrl() {
+  const v = readUrlParam('sort');
+  return SORT_BY_VALUES.includes(v) ? v : DEFAULT_SORT_BY;
+}
+
+function readSortOrderFromUrl() {
+  const v = readUrlParam('order');
+  return SORT_ORDER_VALUES.includes(v) ? v : DEFAULT_SORT_ORDER;
+}
+
+function readPageSizeFromUrl() {
+  const v = Number(readUrlParam('size'));
+  return PAGE_SIZE_VALUES.includes(v) ? v : DEFAULT_PAGE_SIZE;
+}
+
+function readPageFromUrl() {
+  // Only a positive integer is meaningful. A page beyond the last one can't
+  // be validated here (the total isn't known until the list loads) — the
+  // clamp for that lives with paginationMeta instead.
+  const raw = readUrlParam('page');
+  if (raw === null || !/^\d+$/.test(raw)) return 1;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= 1 ? n : 1;
+}
+
 // Helper to find folder and build breadcrumb path
 function findFolderById(nodeList, id) {
   if (!nodeList || !id) return null;
@@ -125,7 +169,7 @@ export default function App() {
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isCreateWorkspaceMode, setIsCreateWorkspaceMode] = useState(false);
 
-  const updateUrlParams = useCallback(({ wsId, folderId, view }) => {
+  const updateUrlParams = useCallback(({ wsId, folderId, view, sortBy, sortOrder, page, pageSize }) => {
     try {
       const url = new URL(window.location.href);
       if (wsId !== undefined) {
@@ -139,6 +183,25 @@ export default function App() {
       if (view !== undefined) {
         if (view && view !== 'all' && view !== 'folder') url.searchParams.set('view', view);
         else url.searchParams.delete('view');
+      }
+      // Sort/pagination params are omitted from the URL whenever they equal
+      // the default, so an untouched view keeps the clean URL it has today
+      // and only a deliberately changed sort/page shows up.
+      if (sortBy !== undefined) {
+        if (sortBy && sortBy !== DEFAULT_SORT_BY) url.searchParams.set('sort', sortBy);
+        else url.searchParams.delete('sort');
+      }
+      if (sortOrder !== undefined) {
+        if (sortOrder && sortOrder !== DEFAULT_SORT_ORDER) url.searchParams.set('order', sortOrder);
+        else url.searchParams.delete('order');
+      }
+      if (page !== undefined) {
+        if (page && page > 1) url.searchParams.set('page', String(page));
+        else url.searchParams.delete('page');
+      }
+      if (pageSize !== undefined) {
+        if (pageSize && pageSize !== DEFAULT_PAGE_SIZE) url.searchParams.set('size', String(pageSize));
+        else url.searchParams.delete('size');
       }
       window.history.replaceState(null, '', url.toString());
     } catch (e) {}
@@ -205,16 +268,24 @@ export default function App() {
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Sorting & Pagination State
-  const [sortBy, setSortBy] = useState('updated_at'); // 'name' | 'file_type' | 'updated_at' | 'created_at' | 'size_bytes'
-  const [sortOrder, setSortOrder] = useState('desc'); // 'asc' | 'desc'
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  // Sorting & Pagination State — restored from the URL so a refresh (or a
+  // shared/bookmarked link) lands on the same sort and page instead of
+  // snapping back to newest-first page 1. Anything unrecognised in the URL
+  // falls back to the defaults; see the read*FromUrl helpers above.
+  const [sortBy, setSortBy] = useState(readSortByFromUrl); // 'name' | 'file_type' | 'updated_at' | 'created_at' | 'size_bytes'
+  const [sortOrder, setSortOrder] = useState(readSortOrderFromUrl); // 'asc' | 'desc'
+  const [currentPage, setCurrentPage] = useState(readPageFromUrl);
+  const [pageSize, setPageSize] = useState(readPageSizeFromUrl);
   const [paginationMeta, setPaginationMeta] = useState({
     total_count: 0,
-    total_pages: 1,
+    // null = "no server response yet", distinct from a real result that
+    // genuinely has one page. The out-of-range page clamp below must not
+    // fire against this placeholder: on a reload of, say, ?page=3 it would
+    // see total_pages 1 and reset to page 1 before the first response ever
+    // arrived, silently undoing the page the URL asked to restore.
+    total_pages: null,
     page: 1,
-    page_size: 20
+    page_size: DEFAULT_PAGE_SIZE
   });
 
   // Modals & Popups
@@ -706,11 +777,40 @@ export default function App() {
         setActiveFolderId(null);
         setActiveView('all');
       }
+
+      // Sort/page live in the URL too, so a back/forward that lands on an
+      // entry carrying them has to restore those as well — otherwise the
+      // list would render with the previous entry's sort while the URL
+      // advertised a different one.
+      setSortBy(readSortByFromUrl());
+      setSortOrder(readSortOrderFromUrl());
+      setPageSize(readPageSizeFromUrl());
+      setCurrentPage(readPageFromUrl());
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [activeWorkspace?.id, workspaces]);
+
+  // Mirror the live sort/page into the URL so a refresh restores exactly
+  // this view. Running on mount also normalises a bad incoming URL: an
+  // invalid value was already replaced by its default when state was
+  // initialised, and this writes that correction back out, so a hand-edited
+  // or stale link visibly becomes the newest-first, page-1 URL it fell back
+  // to rather than keeping parameters the app is not actually honouring.
+  useEffect(() => {
+    updateUrlParams({ sortBy, sortOrder, page: currentPage, pageSize });
+  }, [sortBy, sortOrder, currentPage, pageSize, updateUrlParams]);
+
+  // A page number can be valid-looking yet past the end of the result set
+  // (a bookmark from when the folder had more files, or files deleted since)
+  // — that can only be judged once the server reports total_pages, so the
+  // clamp lives here rather than in the URL parsing.
+  useEffect(() => {
+    const totalPages = paginationMeta?.total_pages;
+    if (!totalPages) return; // no server response yet — nothing to clamp against
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [paginationMeta, currentPage]);
 
   // Fetch Files for active workspace with sorting and pagination
   const refreshFilesRequestIdRef = useRef(0);
@@ -742,7 +842,10 @@ export default function App() {
       setFiles([]);
       setPaginationMeta({
         total_count: 0,
-        total_pages: 1,
+        // Still "unknown", not a real one-page result — no workspace means
+        // no listing was fetched, so this must not trigger the page clamp
+        // (nothing is rendered in this state anyway).
+        total_pages: null,
         page: 1,
         page_size: pageSize
       });
