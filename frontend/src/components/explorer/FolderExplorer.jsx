@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Folder as FolderIcon, 
+  CalendarCheck,
   FolderPlus, 
   FileText, 
   FileCode, 
@@ -86,6 +87,7 @@ export default function FolderExplorer({
   onFileContextMenu,
   onBackgroundContextMenu,
   onDownloadFolder,
+  onNewBoard,
   favoriteFolderIds = new Set(),
   onToggleFolderFavorite,
   favoriteRefreshToken = 0,
@@ -573,6 +575,7 @@ export default function FolderExplorer({
   };
 
   const getFileIcon = (file) => {
+    if (file.file_type === 'board') return <CalendarCheck size={16} color="var(--accent-amber)" />;
     if (file.is_markdown || file.name.endsWith('.md')) return <FileText size={16} color="var(--accent-primary)" />;
     if (file.file_type === 'pdf' || file.name.endsWith('.pdf')) return <FileText size={16} color="var(--accent-rose)" />;
     if (file.file_type === 'docx' || file.name.endsWith('.docx') || file.name.endsWith('.doc')) return <FileText size={16} color="#2563eb" />;
@@ -969,6 +972,10 @@ export default function FolderExplorer({
               <button className="btn-secondary explorer-btn" onClick={() => onNewFolder && onNewFolder(currentFolder?.id)} disabled={!canWriteHere} title={canWriteHere ? '현재 경로에 새 폴더 생성' : isSharedRoot ? '홈에는 폴더를 만들 수 없습니다' : '읽기 전용 계정입니다'}>
                 <FolderPlus size={15} />
                 <span className="hide-mobile">새 폴더</span>
+              </button>
+              <button className="btn-secondary explorer-btn" onClick={() => onNewBoard && onNewBoard(currentFolder?.id ?? null)} disabled={!canWriteHere} title={canWriteHere ? '현재 경로에 새 일정 만들기' : isSharedRoot ? '본인 폴더 안에서만 만들 수 있습니다' : '읽기 전용 계정입니다'}>
+                <CalendarCheck size={15} />
+                <span className="hide-mobile">새 일정</span>
               </button>
               <button className="btn-primary explorer-btn" onClick={handleCreateNote} disabled={isCreatingNote || !canWriteHere} title={canWriteHere ? '새 문서 작성' : isSharedRoot ? '본인 폴더 안에서만 만들 수 있습니다' : '읽기 전용 계정입니다'}>
                 {isCreatingNote ? <Loader2 size={15} className="spin" /> : <Plus size={15} />}
@@ -1589,7 +1596,12 @@ export default function FolderExplorer({
                       ) : (
                         <div className="doc-preview-placeholder">
                           <FileText size={22} style={{ opacity: 0.35 }} />
-                          <span>{file.is_markdown || !file.file_type ? '문서' : `${file.file_type.toUpperCase()} 문서`}</span>
+                          <span>{
+                            // A board is its own kind of thing, not a "BOARD 문서".
+                            file.file_type === 'board' ? '일정'
+                              : (file.is_markdown || !file.file_type) ? '문서'
+                                : `${file.file_type.toUpperCase()} 문서`
+                          }</span>
                         </div>
                       )}
                     </div>

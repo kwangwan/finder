@@ -14,6 +14,7 @@ import MediaPreviewModal from './components/modals/MediaPreviewModal';
 import InvitationManagerModal from './components/admin/InvitationManagerModal';
 import TrashExplorer from './components/trash/TrashExplorer';
 import ReportsExplorer from './components/admin/ReportsExplorer';
+import ScheduleExplorer from './components/board/ScheduleExplorer';
 import ReportModal from './components/modals/ReportModal';
 import FolderShareModal from './components/modals/FolderShareModal';
 import ContextMenu from './components/common/ContextMenu';
@@ -28,6 +29,7 @@ import { useUploadManager } from './hooks/useUploadManager';
 import { 
   Folder as FolderIcon,
   FolderPlus,
+  CalendarCheck,
   FileText,
   Plus,
   UploadCloud,
@@ -61,6 +63,8 @@ import {
   createFolder, 
   listFavoriteIds,
   setFavorite,
+  createBoard,
+  listWorkspaceTasks,
   deleteFolder,
   updateFolder,
   getSystemStats,
@@ -719,6 +723,10 @@ export default function App() {
   const [shareFolder, setShareFolder] = useState(null);
   const [uploaderFilter, setUploaderFilter] = useState(null);
   const [pendingReportCount, setPendingReportCount] = useState(0);
+  // Bumped whenever a board changes, so the 일정 tab reflects it without the
+  // user having to ask — the same rule the rest of the app follows.
+  const [scheduleRefreshToken, setScheduleRefreshToken] = useState(0);
+  const [dueSoonCount, setDueSoonCount] = useState(0);
 
   // The badge is what tells an administrator there is anything to look at, so
   // it is refreshed on a slow interval rather than only on page load.
@@ -774,6 +782,19 @@ export default function App() {
       setPendingReportCount(res.pending || 0);
     } catch (e) { /* best-effort */ }
   }, [currentUser?.is_admin, activeWorkspace?.is_shared]);
+
+  // What is already late or due within three days. A number on the tab is only
+  // worth showing if it means "look at this now", so it deliberately is not a
+  // count of everything outstanding.
+  const refreshDueSoonCount = useCallback(async () => {
+    if (!activeWorkspace?.id) { setDueSoonCount(0); return; }
+    try {
+      const res = await listWorkspaceTasks({ workspaceId: activeWorkspace.id, pageSize: 100 });
+      setDueSoonCount((res.items || []).filter((t) => t.days_left !== null && t.days_left <= 3).length);
+    } catch (e) { /* the tab simply shows no badge */ }
+  }, [activeWorkspace?.id]);
+
+  useEffect(() => { refreshDueSoonCount(); }, [refreshDueSoonCount, scheduleRefreshToken]);
 
   useEffect(() => {
     refreshReportCount();
@@ -1761,6 +1782,11 @@ export default function App() {
           },
         },
         {
+          label: '새 일정',
+          icon: CalendarCheck,
+          onClick: () => handleCreateBoard(folder.id),
+        },
+        {
           label: '폴더를 ZIP으로 다운로드',
           icon: FileArchive,
           onClick: () => startDownloadFolder(folder),
@@ -1862,6 +1888,11 @@ export default function App() {
           onClick: handleNewNote,
         },
         {
+          label: '새 일정',
+          icon: CalendarCheck,
+          onClick: () => handleCreateBoard(ctx?.folderId !== undefined ? ctx.folderId : activeFolderId),
+        },
+        {
           label: '새 폴더 생성',
           icon: FolderPlus,
           onClick: () => {
@@ -1904,6 +1935,26 @@ export default function App() {
       showToast(err.message || '즐겨찾기를 변경하지 못했습니다.', { type: 'error' });
     }
   };
+
+  // A board is created where files are created, so it lands in the folder the
+  // action was invoked from and inherits that folder's rules.
+  const handleCreateBoard = useCallback(async (folderId = undefined) => {
+    const targetFolderId = folderId !== undefined ? folderId : activeFolderId;
+    try {
+      const board = await createBoard({
+        name: '제목 없는 일정',
+        workspaceId: activeWorkspace?.id || null,
+        folderId: targetFolderId ?? null,
+      });
+      await refreshFiles();
+      refreshFoldersAndStats();
+      bumpWindowRefresh();
+      setScheduleRefreshToken((n) => n + 1);
+      windowManager.openWindow({ ...board, is_markdown: false });
+    } catch (err) {
+      await showAlert({ title: '일정을 만들지 못했습니다', message: err.message, type: 'error' });
+    }
+  }, [activeWorkspace?.id, activeFolderId, refreshFiles, refreshFoldersAndStats, bumpWindowRefresh, windowManager, showAlert]);
 
   const handleCreateFolder = async ({ name, parent_id, color }) => {
     await createFolder({ 
@@ -2030,6 +2081,7 @@ export default function App() {
           setIsNewFolderOpen(true);
         }}
         onOpenUpload={() => setIsUploadOpen(true)}
+        dueSoonCount={dueSoonCount}
         onFolderContextMenu={handleFolderContextMenu}
         onDirectMoveItems={handleDirectMoveItems}
         onTransferItems={handleTransferItems}
@@ -2059,7 +2111,14 @@ export default function App() {
           onLogout={handleLogout}
         />
 
-        {activeView === 'reports' ? (
+        {activeView === 'schedule' ? (
+          <ScheduleExplorer
+            workspaceId={activeWorkspace?.id}
+            currentUser={currentUser}
+            refreshToken={scheduleRefreshToken}
+            onOpenBoard={(boardFile) => windowManager.openWindow(boardFile)}
+          />
+        ) : activeView === 'reports' ? (
           <ReportsExplorer
             onOpenFile={handleOpenReportedFile}
             onResolved={() => {
@@ -2080,6 +2139,7 @@ export default function App() {
           />
         ) : (
           <FolderExplorer
+            onNewBoard={handleCreateBoard}
             favoriteFolderIds={favoriteFolderIds}
             onToggleFolderFavorite={handleToggleFolderFavorite}
             favoriteRefreshToken={favoriteRefreshToken}

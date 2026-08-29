@@ -4,6 +4,7 @@ import { SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blockn
 import { filterSuggestionItems } from '@blocknote/core';
 import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { BlockNoteView } from '@blocknote/mantine';
+import BoardPane from '../board/BoardPane';
 import '@blocknote/mantine/style.css';
 import {
   X,
@@ -162,7 +163,8 @@ export default function PreviewWindow({
   const isPdf = resolvedFile.file_type === 'pdf' || fileNameLower.endsWith('.pdf');
   const isExcel = resolvedFile.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i);
   const isDocx = resolvedFile.file_type === 'docx' || fileNameLower.match(/\.(docx|doc)$/i);
-  const isMarkdown = resolvedFile.is_markdown || fileNameLower.endsWith('.md') || fileNameLower.endsWith('.markdown');
+  const isBoard = resolvedFile.file_type === 'board';
+  const isMarkdown = !isBoard && (resolvedFile.is_markdown || fileNameLower.endsWith('.md') || fileNameLower.endsWith('.markdown'));
   const isTextOrCode = resolvedFile.file_type === 'text' || resolvedFile.file_type === 'code' || isMarkdown ||
                        fileNameLower.match(/\.(txt|json|py|js|html|css|yaml|yml|ts|jsx|tsx|sh|sql|xml|env)$/i);
 
@@ -548,6 +550,10 @@ export default function PreviewWindow({
             <RefreshCw size={24} className="spin-anim" color="var(--accent-primary)" />
             <span>내용을 불러오는 중...</span>
           </div>
+        ) : isBoard ? (
+          // A board is a file like any other, so it opens the same way a
+          // document does — moved, copied, trashed and found identically.
+          <BoardPane file={resolvedFile} onDirty={() => onUpdateWindowFile(id, { updated_at: new Date().toISOString() })} />
         ) : isImage ? (
           <div 
             className="os-image-viewport"

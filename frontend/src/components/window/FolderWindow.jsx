@@ -10,6 +10,7 @@ import {
   Loader2,
   UploadCloud,
   ArrowUpDown,
+  CalendarCheck,
   Check,
   Grid,
   List,
@@ -443,6 +444,7 @@ export default function FolderWindow({
     return t === 'video' || /\.(mp4|webm|ogg|mov)$/i.test(f.name || '');
   };
   const fileGlyph = (f, size) => {
+    if (f.file_type === 'board') return <CalendarCheck size={size} color="var(--accent-amber)" />;
     if (isImage(f)) return <ImageIcon size={size} color="var(--accent-cyan)" />;
     if (isVideo(f)) return <Film size={size} color="var(--accent-primary)" />;
     if (/\.(zip|tar|gz|7z|rar)$/i.test(f.name || '')) return <FileArchive size={size} color="var(--accent-amber)" />;

@@ -19,6 +19,8 @@ import {
   BookOpen as LuBookOpen,
   Briefcase as LuBriefcase,
   Calendar as LuCalendar,
+  CalendarCheck as LuCalendarCheck,
+  CalendarClock as LuCalendarClock,
   Check as LuCheck,
   CheckCircle as LuCheckCircle,
   CheckCircle2 as LuCheckCircle2,
@@ -252,6 +254,10 @@ export const Bold = makeIcon(LuBold, null);
 export const BookOpen = makeIcon(LuBookOpen, PxBookOpen);
 export const Briefcase = makeIcon(LuBriefcase, PxBriefcase);
 export const Calendar = makeIcon(LuCalendar, PxCalendar);
+// pixelarticons has no dated-checkmark variant, so both fall back to its
+// plain calendar in the matrix theme rather than to a mismatched glyph.
+export const CalendarCheck = makeIcon(LuCalendarCheck, PxCalendar);
+export const CalendarClock = makeIcon(LuCalendarClock, PxCalendar);
 export const Check = makeIcon(LuCheck, PxCheck);
 export const CheckCircle = makeIcon(LuCheckCircle, PxCheck);
 export const CheckCircle2 = makeIcon(LuCheckCircle2, PxCheck);

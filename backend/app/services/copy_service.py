@@ -13,6 +13,8 @@ from app.models import CopyJob, DocumentChunk, FileItem, Folder, User
 from app.services.s3_service import s3_service, build_storage_key
 from app.services.quota_service import quota_service
 from app.services import folder_limit_service
+from app.services import board_service
+from app.models.board import BOARD_FILE_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +149,11 @@ async def _copy_one_file(
             ))
         copy.is_embedded = True
         copy.embedded_chunks_count = len(chunks)
+
+    # A board's rows are not in the file record, so a copy would otherwise
+    # arrive as an empty board.
+    if src.file_type == BOARD_FILE_TYPE:
+        await board_service.copy_tasks(db, src.id, copy.id, user)
 
     return copy
 

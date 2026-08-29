@@ -14,6 +14,7 @@ import {
   Layers,
   Settings,
   Trash2,
+  CalendarCheck,
   ChevronsLeft,
   Flag
 } from '../../utils/icons';
@@ -36,6 +37,7 @@ export default function Sidebar({
   onSelectView,
   currentUser,
   pendingReportCount = 0,
+  dueSoonCount = 0,
   onNewNote,
   onNewFolder,
   onOpenUpload,
@@ -336,6 +338,16 @@ export default function Sidebar({
           <FileText size={16} />
           <span>문서</span>
           {!isFoldersLoading && stats?.note_count > 0 && <span className="menu-badge">{stats.note_count}</span>}
+        </li>
+        {/* Sits next to 문서 because it is the same kind of thing: a board is
+            a file in a folder, and this is the view that gathers them. */}
+        <li
+          className={`menu-item ${activeView === 'schedule' ? 'active' : ''}`}
+          onClick={() => onSelectView('schedule')}
+        >
+          <CalendarCheck size={16} />
+          <span>일정</span>
+          {dueSoonCount > 0 && <span className="menu-badge menu-badge-due">{dueSoonCount}</span>}
         </li>
         <li 
           className={`menu-item ${activeView === 'favorites' ? 'active' : ''}`}

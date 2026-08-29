@@ -1299,6 +1299,107 @@ export async function listFavoriteIds(kind = 'folder') {
   return res.json();
 }
 
+/* --------------------------------------------------------------------------
+ * Boards ("일정")
+ *
+ * A board is a file, so it is created, moved, copied and trashed through the
+ * file endpoints. Only its rows have an API of their own.
+ * ----------------------------------------------------------------------- */
+
+export async function getBoardMeta() {
+  const res = await fetch(`${API_BASE}/boards/meta`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('일정 설정을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function createBoard({ name, workspaceId = null, folderId = null }) {
+  const res = await fetch(`${API_BASE}/boards`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ name, workspace_id: workspaceId, folder_id: folderId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `일정을 만들지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getBoard(fileId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `일정을 불러오지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getBoardTask(fileId, taskId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('작업을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function createBoardTask(fileId, payload) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `작업을 만들지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function updateBoardTask(fileId, taskId, payload) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `작업을 저장하지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteBoardTask(fileId, taskId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `작업을 삭제하지 못했습니다. (${res.status})`);
+  }
+}
+
+/** Every task in a workspace, soonest deadline first then most important. */
+export async function listWorkspaceTasks({
+  workspaceId, q = '', includeDone = false, assigneeId = null,
+  status = null, priority = null, page = 1, pageSize = 30,
+} = {}) {
+  const params = new URLSearchParams({
+    workspace_id: workspaceId,
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (q && q.trim()) params.set('q', q.trim());
+  if (includeDone) params.set('include_done', 'true');
+  if (assigneeId) params.set('assignee_id', assigneeId);
+  if (status) params.set('status', status);
+  if (priority) params.set('priority', priority);
+  const res = await fetch(`${API_BASE}/boards/tasks?${params}`, { headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `일정을 불러오지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
 /** The shared workspace and the storage pool behind it (admin only). */
 export async function getSharedWorkspaceInfo() {
   const res = await fetch(`${API_BASE}/admin/shared-workspace`, { headers: authHeaders() });
