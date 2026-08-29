@@ -3148,6 +3148,47 @@ h1, h2, h3, h4, h5, h6,
   opacity: 0.6;
 }
 
+/* The other 7 resize handles (4 edges + 3 corners — the 4th corner, SE,
+   reuses .os-window-resize-handle above for its existing visible tick mark).
+   Invisible hit-areas only. Kept fully INSIDE the window's own box (no
+   negative offsets) because .os-preview-window is `overflow: hidden` (for
+   its rounded corners) — anything positioned outside that box would be
+   clipped and silently stop receiving pointer events entirely. */
+.os-resize-edge {
+  position: absolute;
+  z-index: 20;
+}
+
+.os-resize-edge.edge-n,
+.os-resize-edge.edge-s {
+  left: 14px;
+  right: 14px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.os-resize-edge.edge-n { top: 0; }
+.os-resize-edge.edge-s { bottom: 0; }
+
+.os-resize-edge.edge-e,
+.os-resize-edge.edge-w {
+  top: 14px;
+  bottom: 14px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.os-resize-edge.edge-e { right: 0; }
+.os-resize-edge.edge-w { left: 0; }
+
+.os-resize-edge.edge-nw,
+.os-resize-edge.edge-ne,
+.os-resize-edge.edge-sw {
+  width: 16px;
+  height: 16px;
+}
+.os-resize-edge.edge-nw { top: 0; left: 0; cursor: nwse-resize; }
+.os-resize-edge.edge-ne { top: 0; right: 0; cursor: nesw-resize; }
+.os-resize-edge.edge-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
 /* ==========================================================================
    Bottom Taskbar Dock
    ========================================================================== */

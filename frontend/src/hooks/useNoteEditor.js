@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core';
+import { BlockNoteSchema, defaultBlockSpecs, cleanHTMLToMarkdown } from '@blocknote/core';
 import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { Extension } from '@tiptap/core';
@@ -191,49 +191,43 @@ function createAndroidBeforeInputEnterFix() {
 }
 
 // GFM markdown table syntax has no way to represent a literal newline inside
-// a cell (one row = one line) — a soft line break (Shift+Enter, or an
-// Android keyboard's beforeinput insertLineBreak) typed into a table cell
-// exports as a hard-break escape followed by a real "\n", which then
+// a cell (one row = one line), and BlockNote's own markdown exporter doesn't
+// special-case that: htmlToMarkdown.ts's `case "br": result += "\\\n"` fires
+// for a <br> anywhere, table cell or not — so a soft line break (Shift+Enter,
+// or an Android keyboard's beforeinput insertLineBreak) typed into a cell
+// exports as a hard-break escape followed by a REAL "\n", which then
 // re-parses as an extra, misaligned table row the next time the note is
 // reopened (Hocuspocus re-seeds from the stored markdown once its last
 // client disconnects — see the Yjs-room-unload note elsewhere in this
-// codebase). Block it at the source instead of trying to encode/decode it
-// losslessly through markdown.
-function createTableCellNoLineBreakFix() {
-  const insideTableCell = (state) => {
-    const { $from } = state.selection;
-    for (let d = $from.depth; d > 0; d--) {
-      const typeName = $from.node(d).type.name;
-      if (typeName === 'tableCell' || typeName === 'tableHeader') return true;
-    }
-    return false;
-  };
-
-  return Extension.create({
-    name: 'finderTableCellNoLineBreak',
-    addProseMirrorPlugins() {
-      return [
-        new Plugin({
-          props: {
-            handleKeyDown(view, event) {
-              if (event.key !== 'Enter' || !event.shiftKey) return false;
-              if (!insideTableCell(view.state)) return false;
-              event.preventDefault();
-              return true;
-            },
-            handleDOMEvents: {
-              beforeinput(view, event) {
-                if (event.inputType !== 'insertLineBreak') return false;
-                if (!insideTableCell(view.state)) return false;
-                event.preventDefault();
-                return true;
-              }
-            }
-          }
-        })
-      ];
-    }
+// codebase).
+//
+// Worked around at the export step, using only BlockNote's own public API,
+// rather than blocking the keystroke — `editor.blocksToHTMLLossy()` produces
+// the exact same intermediate HTML that `blocksToMarkdownLossy()` would feed
+// into that broken table-unaware step internally (both call the identical
+// `createExternalHTMLExporter(...).exportBlocks(...)`, confirmed by reading
+// ExportManager.ts/markdownExporter.ts). So: get that HTML ourselves, swap
+// every <br> that's a descendant of a <table> for a plain private-use-area
+// placeholder text node (immune to every markdown-escaping rule since it's
+// just text), convert with the same public `cleanHTMLToMarkdown` BlockNote
+// uses internally, then turn the placeholder back into a literal `<br>` in
+// the final markdown text. A literal `<br>` sitting on one line already
+// round-trips correctly on load with ZERO changes needed on the parse side —
+// BlockNote's markdown parser (`tryInlineHtml` in markdownToHtml.ts) already
+// passes raw inline HTML tags straight through into a real hard break inside
+// a cell; only the export side was missing the table-aware case. Remove this
+// workaround if a future BlockNote version fixes htmlToMarkdown.ts's `<br>`
+// case to check for a table-cell ancestor itself.
+const TABLE_BR_PLACEHOLDER = '\uE000BR\uE000';
+export function blocksToMarkdownTableSafe(editor, blocks) {
+  const html = editor.blocksToHTMLLossy(blocks);
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  container.querySelectorAll('table br').forEach((br) => {
+    br.replaceWith(document.createTextNode(TABLE_BR_PLACEHOLDER));
   });
+  const markdown = cleanHTMLToMarkdown(container.innerHTML);
+  return markdown.split(TABLE_BR_PLACEHOLDER).join('<br>');
 }
 
 /**
@@ -297,7 +291,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   const doSave = useCallback(async (newTitle, newTags) => {
     setSaveStatus('saving');
     try {
-      const markdown = editorRef.current.blocksToMarkdownLossy(editorRef.current.document);
+      const markdown = blocksToMarkdownTableSafe(editorRef.current, editorRef.current.document);
       const updated = await updateMarkdownNote(fileRef.current.id, { name: newTitle, content: markdown, tags: newTags });
       setSaveStatus('saved');
       setSaveError(null);
@@ -403,15 +397,13 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
 
   const androidBeforeInputEnterFixRef = useRef(null);
   if (!androidBeforeInputEnterFixRef.current) androidBeforeInputEnterFixRef.current = createAndroidBeforeInputEnterFix();
-  const tableCellNoLineBreakFixRef = useRef(null);
-  if (!tableCellNoLineBreakFixRef.current) tableCellNoLineBreakFixRef.current = createTableCellNoLineBreakFix();
 
   const editor = useCreateBlockNote(
     collab
       ? withCollaboration({
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
-          _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current, tableCellNoLineBreakFixRef.current] },
+          _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current] },
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
             try {
@@ -430,7 +422,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
             provider: { awareness: collab.provider.awareness }
           }
         })
-      : { schema: blockNoteSchema, dictionary: blockNoteKo, _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current, tableCellNoLineBreakFixRef.current] } },
+      : { schema: blockNoteSchema, dictionary: blockNoteKo, _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current] } },
     [file?.id, syncUrl, collab]
   );
 
@@ -556,7 +548,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   };
 
   const handleExportMarkdown = () => {
-    const markdown = editor.blocksToMarkdownLossy(editor.document);
+    const markdown = blocksToMarkdownTableSafe(editor, editor.document);
     const blob = new Blob([markdown], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -570,7 +562,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     if (isExportingPdf) return;
     setIsExportingPdf(true);
     try {
-      const markdown = editor.blocksToMarkdownLossy(editor.document);
+      const markdown = blocksToMarkdownTableSafe(editor, editor.document);
       await exportMarkdownToPdf(title, markdown);
     } catch (err) {
       await showAlert({

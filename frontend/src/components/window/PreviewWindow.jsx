@@ -36,7 +36,7 @@ import {
   Paperclip
 } from '../../utils/icons';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
-import { useNoteEditor, BN_THEME } from '../../hooks/useNoteEditor';
+import { useNoteEditor, BN_THEME, blocksToMarkdownTableSafe } from '../../hooks/useNoteEditor';
 import AttachExistingFileModal from '../editor/AttachExistingFileModal';
 import VersionHistoryModal from '../editor/VersionHistoryModal';
 import VideoPlayer from '../common/VideoPlayer';
@@ -154,7 +154,7 @@ export default function PreviewWindow({
   // last-saved snapshot.
   const handleCopyContent = () => {
     const content = isMarkdown && noteEditor.editor
-      ? noteEditor.editor.blocksToMarkdownLossy(noteEditor.editor.document)
+      ? blocksToMarkdownTableSafe(noteEditor.editor, noteEditor.editor.document)
       : displayContent;
     if (!content) return;
     navigator.clipboard.writeText(content);
@@ -194,7 +194,11 @@ export default function PreviewWindow({
   const handleDragStart = (e) => {
     if (isMaximized) return;
     if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Fixed on mobile
-    if (e.target.closest('.window-action-btn') || e.target.closest('.window-os-controls') || e.target.closest('.window-header-actions') || e.target.closest('.window-title-input')) return;
+    if (e.target.closest('.window-action-btn') || e.target.closest('.window-os-controls') || e.target.closest('.window-header-actions')) return;
+    // The title input already has its own mousedown handler (handleTitleMouseDown)
+    // that decides between dragging and editing — if it let this bubble up here
+    // (i.e. the input was already focused, mid-edit), don't also start a drag.
+    if (e.target.closest('.window-title-input') && document.activeElement === e.target) return;
 
     onFocus(id);
     isDraggingRef.current = true;
@@ -243,15 +247,45 @@ export default function PreviewWindow({
     window.removeEventListener('touchend', handleDragEnd);
   }, [handleDragMove]);
 
+  // The editable title input spans most of the header's width, leaving too
+  // little bare header area to grab for dragging. Mirror how a real OS
+  // title-bar rename field behaves: mousedown on the (not-yet-focused) input
+  // starts a drag like anywhere else on the header, and only actually
+  // focuses the input for editing if the pointer never really moved (a
+  // plain click, not a drag). Once the input IS focused, this is skipped
+  // entirely — normal text-editing clicks just place the caret.
+  const handleTitleMouseDown = (e) => {
+    const input = e.currentTarget;
+    if (document.activeElement === input) return; // already editing — normal caret click
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // let mobile just focus normally
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    handleDragStart(e);
+    const onUp = (upEvent) => {
+      window.removeEventListener('mouseup', onUp);
+      if (Math.abs(upEvent.clientX - startX) < 4 && Math.abs(upEvent.clientY - startY) < 4) {
+        input.focus();
+      }
+    };
+    window.addEventListener('mouseup', onUp);
+  };
+
   // ==========================================
-  // Mouse & Touch Resizing
+  // Mouse & Touch Resizing (all 4 edges + all 4 corners)
   // ==========================================
-  const handleResizeStart = (e) => {
+  const RESIZE_MIN_WIDTH = 320;
+  const RESIZE_MIN_HEIGHT = 240;
+  const resizeDirRef = useRef('se');
+
+  const handleResizeStart = (dir) => (e) => {
     if (isMaximized) return;
     if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Disabled on mobile
     e.stopPropagation();
     onFocus(id);
     isResizingRef.current = true;
+    resizeDirRef.current = dir;
     setIsInteracting(true);
 
     const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
@@ -261,7 +295,9 @@ export default function PreviewWindow({
       mouseX: clientX,
       mouseY: clientY,
       width: size.width,
-      height: size.height
+      height: size.height,
+      posX: position.x,
+      posY: position.y
     };
 
     window.addEventListener('mousemove', handleResizeMove);
@@ -279,17 +315,52 @@ export default function PreviewWindow({
 
     const deltaX = clientX - resizeStartRef.current.mouseX;
     const deltaY = clientY - resizeStartRef.current.mouseY;
+    const dir = resizeDirRef.current;
+    const start = resizeStartRef.current;
 
-    const minW = 320;
-    const minH = 240;
-    const maxW = window.innerWidth - position.x - 10;
-    const maxH = window.innerHeight - position.y - 10;
+    let newW = start.width;
+    let newH = start.height;
+    let newX = start.posX;
+    let newY = start.posY;
 
-    const newW = Math.max(minW, Math.min(maxW, resizeStartRef.current.width + deltaX));
-    const newH = Math.max(minH, Math.min(maxH, resizeStartRef.current.height + deltaY));
+    if (dir.includes('e')) {
+      const maxW = window.innerWidth - start.posX - 10;
+      newW = Math.max(RESIZE_MIN_WIDTH, Math.min(maxW, start.width + deltaX));
+    }
+    if (dir.includes('s')) {
+      const maxH = window.innerHeight - start.posY - 10;
+      newH = Math.max(RESIZE_MIN_HEIGHT, Math.min(maxH, start.height + deltaY));
+    }
+    if (dir.includes('w')) {
+      // Right edge stays fixed — only the left edge (position.x) and width move.
+      const rightEdge = start.posX + start.width;
+      let proposedX = Math.max(0, start.posX + deltaX);
+      let proposedW = rightEdge - proposedX;
+      if (proposedW < RESIZE_MIN_WIDTH) {
+        proposedW = RESIZE_MIN_WIDTH;
+        proposedX = rightEdge - RESIZE_MIN_WIDTH;
+      }
+      newX = proposedX;
+      newW = proposedW;
+    }
+    if (dir.includes('n')) {
+      // Bottom edge stays fixed — only the top edge (position.y) and height move.
+      const bottomEdge = start.posY + start.height;
+      let proposedY = Math.max(48, start.posY + deltaY);
+      let proposedH = bottomEdge - proposedY;
+      if (proposedH < RESIZE_MIN_HEIGHT) {
+        proposedH = RESIZE_MIN_HEIGHT;
+        proposedY = bottomEdge - RESIZE_MIN_HEIGHT;
+      }
+      newY = proposedY;
+      newH = proposedH;
+    }
 
     onSizeChange(id, { width: newW, height: newH });
-  }, [id, position.x, position.y, onSizeChange]);
+    if (dir.includes('w') || dir.includes('n')) {
+      onPositionChange(id, { x: newX, y: newY });
+    }
+  }, [id, onSizeChange, onPositionChange]);
 
   const handleResizeEnd = useCallback(() => {
     isResizingRef.current = false;
@@ -396,6 +467,7 @@ export default function PreviewWindow({
               className="window-title-input"
               value={noteEditor.title}
               onChange={noteEditor.handleTitleChange}
+              onMouseDown={handleTitleMouseDown}
               placeholder="문서 제목을 입력하세요..."
             />
           ) : (
@@ -763,14 +835,23 @@ export default function PreviewWindow({
         )}
       </div>
 
-      {/* Bottom-Right Resize Handle */}
+      {/* Resize Handles — all 4 edges + all 4 corners */}
       {!isMaximized && (
-        <div 
-          className="os-window-resize-handle"
-          onMouseDown={handleResizeStart}
-          onTouchStart={handleResizeStart}
-          title="드래그하여 크기 조절"
-        />
+        <>
+          <div className="os-resize-edge edge-n" onMouseDown={handleResizeStart('n')} onTouchStart={handleResizeStart('n')} title="드래그하여 크기 조절" />
+          <div className="os-resize-edge edge-s" onMouseDown={handleResizeStart('s')} onTouchStart={handleResizeStart('s')} title="드래그하여 크기 조절" />
+          <div className="os-resize-edge edge-e" onMouseDown={handleResizeStart('e')} onTouchStart={handleResizeStart('e')} title="드래그하여 크기 조절" />
+          <div className="os-resize-edge edge-w" onMouseDown={handleResizeStart('w')} onTouchStart={handleResizeStart('w')} title="드래그하여 크기 조절" />
+          <div className="os-resize-edge edge-nw" onMouseDown={handleResizeStart('nw')} onTouchStart={handleResizeStart('nw')} title="드래그하여 크기 조절" />
+          <div className="os-resize-edge edge-ne" onMouseDown={handleResizeStart('ne')} onTouchStart={handleResizeStart('ne')} title="드래그하여 크기 조절" />
+          <div className="os-resize-edge edge-sw" onMouseDown={handleResizeStart('sw')} onTouchStart={handleResizeStart('sw')} title="드래그하여 크기 조절" />
+          <div
+            className="os-window-resize-handle edge-se"
+            onMouseDown={handleResizeStart('se')}
+            onTouchStart={handleResizeStart('se')}
+            title="드래그하여 크기 조절"
+          />
+        </>
       )}
     </div>
   );
