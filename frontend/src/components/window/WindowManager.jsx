@@ -4,7 +4,10 @@ import WindowTaskbar from './WindowTaskbar';
 
 export default function WindowManager({
   windowManager,
-  onEditFile
+  onToggleFavorite,
+  onDeleteFile,
+  activeWorkspaceId,
+  currentUser
 }) {
   const {
     windows,
@@ -16,7 +19,8 @@ export default function WindowManager({
     toggleMaximize,
     focusWindow,
     updateWindowPosition,
-    updateWindowSize
+    updateWindowSize,
+    updateWindowFile
   } = windowManager;
 
   if (!windows || windows.length === 0) return null;
@@ -34,12 +38,11 @@ export default function WindowManager({
           onFocus={focusWindow}
           onPositionChange={updateWindowPosition}
           onSizeChange={updateWindowSize}
-          onEditFile={(file) => {
-            if (onEditFile) {
-              onEditFile(file);
-              closeWindow(file.id);
-            }
-          }}
+          onUpdateWindowFile={updateWindowFile}
+          onToggleFavorite={onToggleFavorite}
+          onDeleteFile={onDeleteFile}
+          activeWorkspaceId={activeWorkspaceId}
+          currentUser={currentUser}
         />
       ))}
 

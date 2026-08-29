@@ -1,38 +1,44 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { 
-  X, 
+import { SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react';
+import { filterSuggestionItems } from '@blocknote/core';
+import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
+import { BlockNoteView } from '@blocknote/mantine';
+import '@blocknote/mantine/style.css';
+import {
+  X,
   Minus,
-  Maximize2, 
+  Maximize2,
   Minimize2,
-  Download, 
-  Edit3,
+  Download,
   Copy,
   Check,
-  ZoomIn, 
-  ZoomOut, 
-  RotateCw, 
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
   Sparkles,
-  FileText, 
-  Film, 
-  Image as ImageIcon, 
-  Table, 
-  FileCode, 
-  File, 
-  Eye, 
+  FileText,
+  Film,
+  Image as ImageIcon,
+  Table,
+  FileCode,
+  File,
+  Eye,
   Music,
   ExternalLink,
   RefreshCw,
   Sun,
   Moon,
   Layers,
-  Loader2
+  Loader2,
+  Clock,
+  Star,
+  Trash2,
+  Paperclip
 } from '../../utils/icons';
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
-import { exportMarkdownToPdf } from '../../utils/pdfExport';
-import { createMarkdownLinkComponents } from '../../utils/markdownLinkComponents';
-import { useDialog } from '../../context/DialogContext';
+import { useNoteEditor, BN_THEME } from '../../hooks/useNoteEditor';
+import AttachExistingFileModal from '../editor/AttachExistingFileModal';
+import VersionHistoryModal from '../editor/VersionHistoryModal';
 import VideoPlayer from '../common/VideoPlayer';
 
 export default function PreviewWindow({
@@ -43,18 +49,18 @@ export default function PreviewWindow({
   onFocus,
   onPositionChange,
   onSizeChange,
-  onEditFile
+  onUpdateWindowFile,
+  onToggleFavorite,
+  onDeleteFile,
+  activeWorkspaceId,
+  currentUser
 }) {
   const { id, file, isMinimized, isMaximized, position, size, zIndex } = windowState;
-
-  const { showAlert } = useDialog();
-  const markdownLinkComponents = createMarkdownLinkComponents({ showAlert });
 
   const [fileDetail, setFileDetail] = useState(file);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [mediaUrl, setMediaUrl] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   // Image viewer controls
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -129,10 +135,29 @@ export default function PreviewWindow({
 
   const displayContent = fileDetail?.content || file.content || '';
 
-  // Copy text content
+  // Opening a note's preview window now IS its (live, collaborative) editor
+  // — there is no separate read-only mode or dedicated edit page anymore.
+  // `enabled` also waits out the content-prefetch above so the collaborative
+  // bootstrap always seeds from the note's real content, never a stale/
+  // partial `file` object passed in at window-open time (e.g. from a file
+  // list response that omits `content`).
+  const noteEditor = useNoteEditor({
+    file: fileDetail,
+    activeWorkspaceId,
+    currentUser,
+    enabled: isMarkdown && !isLoadingContent,
+    onFileUpdated: (updated) => onUpdateWindowFile(id, updated)
+  });
+
+  // Copy text content — for a live note, copy its current (possibly
+  // unsaved-to-disk-but-already-in-the-editor) markdown rather than the
+  // last-saved snapshot.
   const handleCopyContent = () => {
-    if (!displayContent) return;
-    navigator.clipboard.writeText(displayContent);
+    const content = isMarkdown && noteEditor.editor
+      ? noteEditor.editor.blocksToMarkdownLossy(noteEditor.editor.document)
+      : displayContent;
+    if (!content) return;
+    navigator.clipboard.writeText(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -169,7 +194,7 @@ export default function PreviewWindow({
   const handleDragStart = (e) => {
     if (isMaximized) return;
     if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // Fixed on mobile
-    if (e.target.closest('.window-action-btn') || e.target.closest('.window-os-controls') || e.target.closest('.window-header-actions')) return;
+    if (e.target.closest('.window-action-btn') || e.target.closest('.window-os-controls') || e.target.closest('.window-header-actions') || e.target.closest('.window-title-input')) return;
 
     onFocus(id);
     isDraggingRef.current = true;
@@ -365,7 +390,38 @@ export default function PreviewWindow({
           <div className="window-file-icon">
             {getHeaderIcon()}
           </div>
-          <span className="window-title-text">{file.name}</span>
+          {isMarkdown ? (
+            <input
+              type="text"
+              className="window-title-input"
+              value={noteEditor.title}
+              onChange={noteEditor.handleTitleChange}
+              placeholder="문서 제목을 입력하세요..."
+            />
+          ) : (
+            <span className="window-title-text">{file.name}</span>
+          )}
+          {isMarkdown && (
+            <span
+              className="window-save-status"
+              style={{
+                color: noteEditor.saveStatus === 'saved' ? 'var(--accent-emerald)' : (noteEditor.saveStatus === 'unsaved' && noteEditor.saveError ? 'var(--accent-rose)' : 'var(--accent-amber)')
+              }}
+              title={noteEditor.saveStatus === 'unsaved' && noteEditor.saveError ? `저장 실패: ${noteEditor.saveError}` : undefined}
+            >
+              {noteEditor.saveStatus === 'saved' ? '● 저장됨' : (noteEditor.saveStatus === 'saving' ? '⟳ 저장 중' : (noteEditor.saveError ? '⚠ 저장 실패' : '○ 미저장'))}
+            </span>
+          )}
+          {isMarkdown && noteEditor.syncStatus === 'error' && (
+            <span className="window-save-status" style={{ color: 'var(--accent-rose)' }} title="실시간 동기화 서버에 연결할 수 없습니다. 이 브라우저에서만 편집이 저장됩니다.">
+              ⚠ 동기화 실패
+            </span>
+          )}
+          {isMarkdown && noteEditor.isUploadingImage && (
+            <span className="window-save-status" style={{ color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Loader2 size={11} className="spin" /> 업로드 중
+            </span>
+          )}
           {file.is_embedded && (
             <span className="badge-embedded-tiny" title="AI 임베딩 완료">
               <Sparkles size={9} />
@@ -376,53 +432,56 @@ export default function PreviewWindow({
 
         {/* Right: Actions & OS Window Controls */}
         <div className="window-header-actions">
-          {/* Edit Button for Markdown / Text */}
-          {isTextOrCode && onEditFile && (
-            <button
-              type="button"
-              className="window-action-btn edit-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEditFile(fileDetail || file);
-              }}
-              title="에디터에서 수정하기"
-            >
-              <Edit3 size={13} />
-              <span>수정</span>
-            </button>
-          )}
-
-          {/* PDF Export Button for Markdown */}
+          {/* Note Editor Buttons: History, Favorite, Delete, Markdown/PDF Export */}
           {isMarkdown && (
-            <button
-              type="button"
-              className="window-action-btn"
-              disabled={isExportingPdf}
-              onClick={async (e) => {
-                e.stopPropagation();
-                if (isExportingPdf) return;
-                setIsExportingPdf(true);
-                try {
-                  await exportMarkdownToPdf(file.name, displayContent);
-                } catch (err) {
-                  await showAlert({
-                    title: 'PDF 내보내기 실패',
-                    message: 'PDF를 생성하는 중 오류가 발생했습니다: ' + err.message,
-                    type: 'error'
-                  });
-                } finally {
-                  setIsExportingPdf(false);
-                }
-              }}
-              title="PDF로 내보내기 / 인쇄"
-            >
-              {isExportingPdf ? (
-                <Loader2 size={13} className="spin" color="var(--accent-rose)" />
-              ) : (
-                <FileText size={13} color="var(--accent-rose)" />
-              )}
-              <span>PDF</span>
-            </button>
+            <>
+              <button
+                type="button"
+                className="window-action-btn icon-only"
+                onClick={(e) => { e.stopPropagation(); noteEditor.setIsHistoryModalOpen(true); }}
+                title="문서 히스토리"
+              >
+                <Clock size={13} />
+              </button>
+              <button
+                type="button"
+                className="window-action-btn icon-only"
+                onClick={(e) => { e.stopPropagation(); onToggleFavorite(fileDetail || file); }}
+                title="즐겨찾기 토글"
+              >
+                <Star size={13} color={file.is_favorite ? '#f59e0b' : undefined} fill={file.is_favorite ? '#f59e0b' : 'none'} />
+              </button>
+              <button
+                type="button"
+                className="window-action-btn icon-only"
+                onClick={(e) => { e.stopPropagation(); onDeleteFile(file.id); }}
+                title="문서 삭제"
+              >
+                <Trash2 size={13} color="var(--accent-rose)" />
+              </button>
+              <button
+                type="button"
+                className="window-action-btn icon-only"
+                onClick={(e) => { e.stopPropagation(); noteEditor.handleExportMarkdown(); }}
+                title="마크다운 다운로드 (.md)"
+              >
+                <Download size={13} />
+              </button>
+              <button
+                type="button"
+                className="window-action-btn"
+                disabled={noteEditor.isExportingPdf}
+                onClick={(e) => { e.stopPropagation(); noteEditor.handleExportPdf(); }}
+                title="PDF로 내보내기 / 인쇄"
+              >
+                {noteEditor.isExportingPdf ? (
+                  <Loader2 size={13} className="spin" color="var(--accent-rose)" />
+                ) : (
+                  <FileText size={13} color="var(--accent-rose)" />
+                )}
+                <span>PDF</span>
+              </button>
+            </>
           )}
 
           {/* Copy Button for Text/Markdown/Code */}
@@ -591,17 +650,51 @@ export default function PreviewWindow({
             />
           </div>
         ) : isMarkdown ? (
-          <div className="os-markdown-viewport markdown-body">
-            {displayContent ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownLinkComponents}>
-                {displayContent}
-              </ReactMarkdown>
-            ) : (
-              <div className="empty-content-placeholder">
-                <FileText size={32} style={{ opacity: 0.4, margin: '0 auto 8px', display: 'block' }} />
-                <span>문서 내용이 비어있습니다. 상단 '수정' 버튼을 눌러 내용을 작성해보세요.</span>
+          <div className="window-note-editor-body">
+            {(isLoadingContent || noteEditor.isContentLoading) && (
+              <div className="editor-loading-overlay">
+                <Loader2 size={20} className="spin" color="var(--accent-primary)" />
+                <span>내용을 불러오는 중...</span>
               </div>
             )}
+            {noteEditor.editor && (
+              <div className="editor-pane-blocknote">
+                <BlockNoteView editor={noteEditor.editor} theme={BN_THEME} onChange={noteEditor.handleEditorChange} slashMenu={false}>
+                  <SuggestionMenuController
+                    triggerCharacter="/"
+                    getItems={async (query) => filterSuggestionItems(
+                      [
+                        ...getDefaultReactSlashMenuItems(noteEditor.editor),
+                        {
+                          title: '보관함 파일 첨부',
+                          onItemClick: () => {
+                            insertOrUpdateBlockForSlashMenu(noteEditor.editor, { type: 'paragraph' });
+                            noteEditor.setIsAttachModalOpen(true);
+                          },
+                          aliases: ['file', 'attach', '파일', '첨부', '보관함'],
+                          group: '미디어',
+                          icon: <Paperclip size={18} />,
+                          subtext: '보관함에 이미 저장된 파일을 첨부합니다'
+                        }
+                      ],
+                      query
+                    )}
+                  />
+                </BlockNoteView>
+              </div>
+            )}
+
+            <AttachExistingFileModal
+              isOpen={noteEditor.isAttachModalOpen}
+              onClose={() => noteEditor.setIsAttachModalOpen(false)}
+              onInsertMarkdown={noteEditor.handleInsertAttachedFile}
+            />
+            <VersionHistoryModal
+              fileId={file.id}
+              isOpen={noteEditor.isHistoryModalOpen}
+              onClose={() => noteEditor.setIsHistoryModalOpen(false)}
+              onRestored={noteEditor.handleVersionRestored}
+            />
           </div>
         ) : isTextOrCode ? (
           <div className="os-code-viewport">

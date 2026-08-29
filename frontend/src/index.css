@@ -2388,102 +2388,12 @@ h1, h2, h3, h4, h5, h6,
 /* ==========================================================================
    Markdown Editor & Preview Typography Styles
    ========================================================================== */
-.editor-layout {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background: var(--bg-primary);
-  overflow: hidden;
-}
-
-.editor-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-  gap: 1rem;
-  flex-shrink: 0;
-}
-
-.editor-title-input {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  background: transparent;
-  border: none;
-  outline: none;
-  width: 100%;
-  padding: 0.2rem 0.4rem;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s ease;
-}
-
-.editor-title-input:focus {
-  background: var(--bg-tertiary);
-}
-
-.editor-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.45rem 1.25rem;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-  overflow-x: auto;
-  flex-shrink: 0;
-}
-
-.toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.35rem 0.55rem;
-  border-radius: var(--radius-sm);
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.toolbar-btn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
-.toolbar-btn.active {
-  background: var(--bg-tertiary);
-  color: var(--accent-primary);
-}
-
-.toolbar-divider {
-  width: 1px;
-  height: 18px;
-  background: var(--border-subtle);
-  margin: 0 0.35rem;
-  flex-shrink: 0;
-}
-
-.editor-panes {
-  flex: 1;
-  display: flex;
-  height: calc(100% - 100px);
-  overflow: hidden;
-  position: relative;
-}
-
 /* Sits on top of the already-mounted BlockNoteView while its collaborative
    content is still syncing in — matches the read-only preview's own
    "내용을 불러오는 중..." state. Deliberately an overlay rather than a
    swap-in/swap-out of the editor itself: gating BlockNoteView's mount on a
-   "ready" flag is what broke remote-update sync earlier this session (see
-   NoteEditor.jsx's collab bootstrap effect). */
+   "ready" flag is what broke remote-update sync earlier (see
+   useNoteEditor.js's collab bootstrap effect). */
 .editor-loading-overlay {
   position: absolute;
   inset: 0;
@@ -2957,6 +2867,31 @@ h1, h2, h3, h4, h5, h6,
   min-width: 0;
 }
 
+.window-title-input {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.window-title-input:focus {
+  background: var(--bg-tertiary);
+}
+
+.window-save-status {
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .badge-embedded-tiny {
   display: inline-flex;
   align-items: center;
@@ -3087,6 +3022,20 @@ h1, h2, h3, h4, h5, h6,
   height: 100%;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+/* Hosts the live collaborative BlockNote editor inside a preview window's
+   body — unlike .editor-panes (the old full-page editor's wrapper, which
+   hardcodes `height: calc(100% - 100px)` to account for that page's own
+   fixed header+title-row stack), a window's body has no such fixed chrome
+   above it, so this just fills whatever space .os-window-body gives it. */
+.window-note-editor-body {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
 }
 
 .os-markdown-viewport {

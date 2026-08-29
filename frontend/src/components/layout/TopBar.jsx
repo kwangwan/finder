@@ -34,7 +34,6 @@ export default function TopBar({
   onOpenUpload,
   onOpenInvitations,
   currentFolder,
-  currentFile,
   theme,
   onToggleTheme,
   onSetTheme,

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import FolderExplorer from './components/explorer/FolderExplorer';
-import NoteEditor from './components/editor/NoteEditor';
 import SemanticSearchModal from './components/search/SemanticSearchModal';
 import ChunkedUploadModal from './components/upload/ChunkedUploadModal';
 import FileConflictModal from './components/upload/FileConflictModal';
@@ -188,13 +187,14 @@ export default function App() {
     activeViewRef.current = activeView;
   }, [activeView]);
 
-  // True once a background upload lands a file in the folder currently being
-  // viewed. Deliberately does NOT trigger an auto-refresh of the file list —
-  // with the default "최근 수정일순" sort, silently refetching would keep
-  // bumping the user's current page's files onto later pages as new arrivals
-  // take the top slots, making files the user is looking at seem to vanish
-  // even though they still exist. Surface a "새 파일이 추가되었습니다" prompt
-  // instead and let the user choose when to refresh.
+  // True once the viewed set's watermark (max updated_at) moves — a file was
+  // added, edited, or removed in the current view. Deliberately does NOT
+  // trigger an auto-refresh of the file list — with the default "최근
+  // 수정일순" sort, silently refetching would keep bumping the user's current
+  // page's files onto later pages as new/updated items sort to the top,
+  // making files the user is looking at seem to vanish even though they
+  // still exist. Surface a "새로운 변경 사항이 있습니다" prompt instead and let
+  // the user choose when to refresh.
   const [hasNewFilesInView, setHasNewFilesInView] = useState(false);
 
   const [files, setFiles] = useState([]);
@@ -202,7 +202,6 @@ export default function App() {
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
-  const [activeFile, setActiveFile] = useState(null);
   const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -599,7 +598,6 @@ export default function App() {
       localStorage.setItem('kb_active_ws_data', JSON.stringify(ws));
     }
     setActiveFolderId(null);
-    setActiveFile(null);
     setActiveView('all');
     setCurrentPage(1);
     updateUrlParams({ wsId: ws?.id || null, folderId: null, view: 'all' });
@@ -865,7 +863,6 @@ export default function App() {
     setActiveFolderId(folderId);
     const newView = folderId ? 'folder' : 'all';
     setActiveView(newView);
-    setActiveFile(null);
     setCurrentPage(1);
     updateUrlParams({ folderId, view: newView });
     if (window.innerWidth <= 768) {
@@ -876,7 +873,6 @@ export default function App() {
   const handleSelectView = (viewName) => {
     setActiveView(viewName);
     setActiveFolderId(null);
-    setActiveFile(null);
     setCurrentPage(1);
     updateUrlParams({ folderId: null, view: viewName });
     if (window.innerWidth <= 768) {
@@ -900,7 +896,7 @@ export default function App() {
       });
       await refreshFiles();
       await refreshFoldersAndStats();
-      setActiveFile(newNote);
+      windowManager.openWindow(newNote);
     } catch (err) {
       await showAlert({
         title: '생성 실패',
@@ -908,18 +904,6 @@ export default function App() {
         type: 'error'
       });
     }
-  };
-
-  const handleSaveNote = async ({ name, content, tags }) => {
-    if (!activeFile) return;
-    const updated = await updateMarkdownNote(activeFile.id, {
-      name,
-      content,
-      tags
-    });
-    setActiveFile(updated);
-    refreshFiles();
-    refreshFoldersAndStats();
   };
 
   const handleTrashFile = async (file, onConfirmed) => {
@@ -940,9 +924,7 @@ export default function App() {
 
     try {
       await moveToTrashFile(file.id);
-      if (activeFile?.id === file.id) {
-        setActiveFile(null);
-      }
+      windowManager.closeWindow(file.id);
       refreshFiles();
       refreshFoldersAndStats();
       updateToast(toastId, { message: `'${file.name}' 파일이 휴지통으로 이동되었습니다.`, type: 'success' });
@@ -957,7 +939,7 @@ export default function App() {
   };
 
   const handleDeleteFile = async (fileId, onConfirmed) => {
-    const targetFile = files.find(f => f.id === fileId) || activeFile;
+    const targetFile = files.find(f => f.id === fileId) || windowManager.windows.find(w => w.id === fileId)?.file;
     if (targetFile) {
       await handleTrashFile(targetFile, onConfirmed);
     } else {
@@ -966,9 +948,7 @@ export default function App() {
           await onConfirmed();
         }
         await moveToTrashFile(fileId);
-        if (activeFile?.id === fileId) {
-          setActiveFile(null);
-        }
+        windowManager.closeWindow(fileId);
         refreshFiles();
         refreshFoldersAndStats();
       } catch (err) {
@@ -1020,9 +1000,7 @@ export default function App() {
     }
     refreshFiles();
     refreshFoldersAndStats();
-    if (activeFile?.id === id) {
-      setActiveFile(prev => ({ ...prev, name: newName }));
-    }
+    windowManager.updateWindowFile(id, { name: newName });
   };
 
   const handleFolderContextMenu = (e, folder) => {
@@ -1058,7 +1036,7 @@ export default function App() {
               });
               await refreshFiles();
               await refreshFoldersAndStats();
-              setActiveFile(newNote);
+              windowManager.openWindow(newNote);
             } catch (err) {
               await showAlert({
                 title: '생성 실패',
@@ -1179,9 +1157,7 @@ export default function App() {
     try {
       await updateMarkdownNote(file.id, { is_favorite: !file.is_favorite });
       refreshFiles();
-      if (activeFile?.id === file.id) {
-        setActiveFile(prev => ({ ...prev, is_favorite: !prev.is_favorite }));
-      }
+      windowManager.updateWindowFile(file.id, { is_favorite: !file.is_favorite });
     } catch (err) {
       console.error('Favorite toggle error:', err);
     }
@@ -1312,14 +1288,12 @@ export default function App() {
           onOpenUpload={() => setIsUploadOpen(true)}
           onOpenInvitations={() => setIsInvitationModalOpen(true)}
           currentFolder={currentFolder}
-          currentFile={activeFile}
           theme={theme}
           onToggleTheme={toggleTheme}
           onSetTheme={handleSetTheme}
           onNavigateHome={() => {
             setActiveFolderId(null);
             setActiveView('all');
-            setActiveFile(null);
           }}
           onOpenAdmin={() => setActiveView('admin')}
           onLogout={handleLogout}
@@ -1334,16 +1308,6 @@ export default function App() {
               refreshFiles();
               refreshFoldersAndStats();
             }}
-          />
-        ) : activeFile ? (
-          <NoteEditor
-            file={activeFile}
-            activeWorkspaceId={activeWorkspace?.id}
-            currentUser={currentUser}
-            onSave={handleSaveNote}
-            onBack={() => setActiveFile(null)}
-            onDelete={handleDeleteFile}
-            onToggleFavorite={handleToggleFavorite}
           />
         ) : (
           <FolderExplorer
@@ -1474,9 +1438,10 @@ export default function App() {
       {/* OS-Style Multi-Window Preview Manager & Dock */}
       <WindowManager
         windowManager={windowManager}
-        onEditFile={(file) => {
-          setActiveFile(file);
-        }}
+        onToggleFavorite={handleToggleFavorite}
+        onDeleteFile={handleDeleteFile}
+        activeWorkspaceId={activeWorkspace?.id}
+        currentUser={currentUser}
       />
 
       {/* Invitation Manager Modal (7-day invites & AWS SES) */}

@@ -250,6 +250,16 @@ export function useWindowManager() {
     );
   }, []);
 
+  // Patches a single open window's own file object in place (e.g. after a
+  // note autosaves, its favorite is toggled, or it's renamed) — lets a
+  // window update itself without a global "currently active file" state,
+  // now that any number of note windows can be open/editing at once.
+  const updateWindowFile = useCallback((fileId, patch) => {
+    setWindows((prev) =>
+      prev.map((w) => (w.id === fileId ? { ...w, file: { ...w.file, ...patch } } : w))
+    );
+  }, []);
+
   return {
     windows,
     openWindow,
@@ -261,6 +271,7 @@ export function useWindowManager() {
     toggleMaximize,
     focusWindow,
     updateWindowPosition,
-    updateWindowSize
+    updateWindowSize,
+    updateWindowFile
   };
 }

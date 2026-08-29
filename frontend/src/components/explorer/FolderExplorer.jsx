@@ -533,9 +533,10 @@ export default function FolderExplorer({
         </div>
       </div>
 
-      {/* New files landed in this folder while an upload was running —
-          refresh is manual so the current page's files don't keep getting
-          silently bumped onto later pages as new arrivals sort to the top. */}
+      {/* A file in this folder was added, edited, or removed elsewhere (e.g.
+          an upload still running, or a document someone edited) — refresh is
+          manual so the current page's files don't keep getting silently
+          bumped onto later pages as changed items sort to the top. */}
       {hasNewFiles && (
         <button
           type="button"
@@ -558,7 +559,7 @@ export default function FolderExplorer({
           }}
         >
           <RefreshCw size={15} />
-          새 파일이 추가되었습니다 · 새로고침
+          새로운 변경 사항이 있습니다 · 새로고침
         </button>
       )}
 
