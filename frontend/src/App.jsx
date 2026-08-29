@@ -1616,6 +1616,7 @@ export default function App() {
       {/* OS-Style Multi-Window Preview Manager & Dock */}
       <WindowManager
         windowManager={windowManager}
+        workspaces={workspaces}
         onToggleFavorite={handleToggleFavorite}
         onDeleteFile={handleDeleteFile}
         activeWorkspaceId={activeWorkspace?.id}

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { getWindowState, saveWindowState, getFileDetail } from '../api';
+import { getWindowState, getWindowStateVersion, saveWindowState, getFileDetail } from '../api';
 
 const RESIZE_MIN_X = 0;
 const RESIZE_MIN_Y = 48; // keeps the header below the topbar, matching handleDragMove's clamp
@@ -43,9 +43,13 @@ function fitWindowToViewport(win, screenWidth, screenHeight, isMobile) {
 }
 
 // How often to check whether another browser changed the taskbar. Only runs
-// while the tab is visible, mirroring the file-list watermark poll — a
-// background tab has nothing to redraw and no reason to keep asking.
-const SYNC_POLL_MS = 10000;
+// while the tab is visible — a background tab has nothing to redraw and no
+// reason to keep asking.
+//
+// Fast enough to feel immediate because the poll hits a timestamp-only
+// endpoint; the full state (which resolves every entry and runs a per-file
+// access check) is fetched only when that timestamp actually moves.
+const SYNC_POLL_MS = 1500;
 // Writes are debounced: dragging a window or clicking through several files
 // would otherwise fire a PUT per change.
 const SYNC_SAVE_DEBOUNCE_MS = 800;
@@ -64,6 +68,9 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
   const hasLoadedRef = useRef(false);
   const lastSyncedRef = useRef('');
   const saveTimerRef = useRef(null);
+  // Timestamp of the state this client last saw, so the cheap poll can tell
+  // 'nothing changed' without pulling the full payload.
+  const lastVersionRef = useRef(null);
 
   useEffect(() => {
     const handleViewportResize = () => {
@@ -335,9 +342,11 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     let cancelled = false;
     hasLoadedRef.current = false;
     lastSyncedRef.current = '';
+    lastVersionRef.current = null;
     (async () => {
       try {
         const state = await getWindowState();
+        lastVersionRef.current = state.updated_at || null;
         if (!cancelled) await applyRemote(state.windows || []);
       } catch (e) {
         console.warn('[WindowSync] restore failed:', e);
@@ -361,7 +370,11 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
       // Record the signature before the request resolves, so the poll below
       // recognises this state as ours even if the response is slow.
       lastSyncedRef.current = signature;
-      saveWindowState(payload).catch((e) => console.warn('[WindowSync] save failed:', e));
+      saveWindowState(payload)
+        // Adopt the server's new timestamp so the poll doesn't immediately
+        // treat this client's own write as a remote change.
+        .then((res) => { lastVersionRef.current = res?.updated_at || lastVersionRef.current; })
+        .catch((e) => console.warn('[WindowSync] save failed:', e));
     }, SYNC_SAVE_DEBOUNCE_MS);
 
     return () => {
@@ -377,6 +390,9 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
       // Don't overwrite anything still on its way to the server.
       if (saveTimerRef.current) return;
       try {
+        const { updated_at: remoteVersion } = await getWindowStateVersion();
+        if (!remoteVersion || remoteVersion === lastVersionRef.current) return;
+        lastVersionRef.current = remoteVersion;
         const state = await getWindowState();
         await applyRemote(state.windows || []);
       } catch (e) { /* best-effort */ }

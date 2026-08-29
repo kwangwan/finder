@@ -14,9 +14,11 @@ import {
   Maximize2,
   Grid
 } from '../../utils/icons';
+import { getThumbnailUrl, clearMediaToken, ensureMediaToken } from '../../api';
 
 export default function WindowTaskbar({
   windows,
+  workspaces = [],
   onRestoreWindow,
   onToggleMinimize,
   onCloseWindow,
@@ -24,6 +26,11 @@ export default function WindowTaskbar({
   onMinimizeAllWindows
 }) {
   const [isMobileSwitcherOpen, setIsMobileSwitcherOpen] = useState(false);
+  // Files whose thumbnail failed to load. A thumbnail can legitimately be
+  // missing — a video's is generated asynchronously after upload, and some
+  // images never get one — so those fall back to the icon preview instead of
+  // leaving an empty card.
+  const [thumbFailed, setThumbFailed] = useState(() => new Set());
 
   if (!windows || windows.length === 0) return null;
 
@@ -44,6 +51,41 @@ export default function WindowTaskbar({
     if (name.match(/\.(docx|doc)$/i)) return <FileText size={14} color="#2563eb" />;
     if (name.match(/\.(js|jsx|ts|tsx|json|html|css|py|sql|sh|yaml|yml)$/i)) return <FileCode size={14} color="var(--accent-amber)" />;
     return <File size={14} color="var(--text-secondary)" />;
+  };
+
+  // Tabs are grouped by the workspace their file belongs to. Windows stay
+  // open across a workspace switch, so an ungrouped grid mixed files from
+  // several workspaces with nothing to tell them apart — two identically
+  // named files in different workspaces were indistinguishable.
+  const groupedWindows = (() => {
+    const nameById = new Map((workspaces || []).map(w => [w.id, w.name]));
+    const groups = new Map();
+    for (const win of windows) {
+      const wsId = win.file?.workspace_id || null;
+      if (!groups.has(wsId)) {
+        groups.set(wsId, {
+          id: wsId,
+          // A file with no workspace predates workspaces or sits outside
+          // one; it still has to appear somewhere.
+          name: wsId ? (nameById.get(wsId) || '알 수 없는 워크스페이스') : '워크스페이스 없음',
+          windows: [],
+        });
+      }
+      groups.get(wsId).windows.push(win);
+    }
+    return [...groups.values()];
+  })();
+
+  // Images and videos get a real thumbnail; everything else keeps the text
+  // snippet or icon. thumbnail_s3_key is the authoritative signal (a video's
+  // is generated asynchronously after upload, so it can legitimately be
+  // absent for a while), with a type check as a fallback for file objects
+  // that came from a listing without it.
+  const hasThumbnail = (file) => {
+    if (!file) return false;
+    if (file.thumbnail_s3_key || file.thumbnail_url) return true;
+    const type = (file.file_type || '').toLowerCase();
+    return type === 'image' || type === 'video';
   };
 
   const formatFileSize = (bytes) => {
@@ -163,8 +205,18 @@ export default function WindowTaskbar({
           </div>
 
           <div className="os-chrome-tab-switcher-body">
+            {groupedWindows.map((group) => (
+            <section key={group.id || 'none'} className="chrome-tab-group">
+              {/* Only label the groups when there is more than one — a single
+                  workspace needs no heading telling the user where they are. */}
+              {groupedWindows.length > 1 && (
+                <div className="chrome-tab-group-title">
+                  <span>{group.name}</span>
+                  <span className="menu-badge">{group.windows.length}</span>
+                </div>
+              )}
             <div className="chrome-tab-grid">
-              {windows.map((win) => {
+              {group.windows.map((win) => {
                 const isActive = activeWindow?.id === win.id && !win.isMinimized;
                 return (
                   <div
@@ -203,7 +255,37 @@ export default function WindowTaskbar({
 
                     {/* Card Preview Thumbnail / Snippet Body */}
                     <div className="tab-card-preview">
-                      {win.file.content ? (
+                      {hasThumbnail(win.file) && !thumbFailed.has(win.file.id) ? (
+                        <img
+                          className="tab-card-thumb"
+                          src={win.file.thumbnail_url || getThumbnailUrl(win.file.id)}
+                          alt=""
+                          loading="lazy"
+                          onError={async (e) => {
+                            // A thumbnail 401s when the cached media token
+                            // expired just as this rendered, and an <img>
+                            // never retries on its own. Force a fresh token
+                            // and retry once — the same recovery the file
+                            // grid already does — before falling back to the
+                            // icon, which would otherwise be permanent for
+                            // what is only a transient token problem.
+                            const img = e.currentTarget;
+                            if (!img.dataset.retriedToken) {
+                              img.dataset.retriedToken = '1';
+                              clearMediaToken();
+                              await ensureMediaToken();
+                              img.src = getThumbnailUrl(win.file.id);
+                              return;
+                            }
+                            setThumbFailed(prev => {
+                              if (prev.has(win.file.id)) return prev;
+                              const next = new Set(prev);
+                              next.add(win.file.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      ) : win.file.content ? (
                         <div className="tab-card-text-preview">
                           {win.file.content.slice(0, 180)}
                         </div>
@@ -217,7 +299,7 @@ export default function WindowTaskbar({
 
                     {/* Card Footer */}
                     <div className="tab-card-footer">
-                      <span>{formatFileSize(win.file.file_size || win.file.size)}</span>
+                      <span>{formatFileSize(win.file.size_bytes)}</span>
                       <span className="tab-status-tag">
                         {win.isMinimized ? '최소화됨' : isActive ? '현재 보는 중' : '열림'}
                       </span>
@@ -226,6 +308,8 @@ export default function WindowTaskbar({
                 );
               })}
             </div>
+            </section>
+            ))}
           </div>
         </div>
       )}

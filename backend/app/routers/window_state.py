@@ -85,6 +85,26 @@ async def get_window_state(
     return WindowStateResponse(windows=visible, updated_at=row.updated_at)
 
 
+@router.get("/version")
+async def get_window_state_version(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Just the timestamp, for polling.
+
+    The full GET resolves every entry against the file table and runs a
+    per-file access check, which is far too heavy to run every couple of
+    seconds. Clients poll this instead and only fetch the real state when the
+    timestamp actually moves — which is what makes a near-instant poll
+    interval affordable.
+    """
+    updated_at = (await db.execute(
+        select(UserWindowState.updated_at).where(UserWindowState.user_id == current_user.id)
+    )).scalar_one_or_none()
+    return {"updated_at": updated_at}
+
+
 @router.put("", response_model=WindowStateResponse)
 async def put_window_state(
     req: WindowStateUpdate,

@@ -1319,3 +1319,11 @@ export async function saveWindowState(windows) {
   if (!res.ok) throw new Error('Failed to save window state');
   return res.json();
 }
+
+/** Cheap poll target: just the timestamp, so clients only fetch the full
+ *  window state when it has actually changed. */
+export async function getWindowStateVersion() {
+  const res = await fetch(`${API_BASE}/window-state/version`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to load window state version');
+  return res.json();
+}

@@ -4,6 +4,7 @@ import WindowTaskbar from './WindowTaskbar';
 
 export default function WindowManager({
   windowManager,
+  workspaces = [],
   onToggleFavorite,
   onDeleteFile,
   activeWorkspaceId,
@@ -49,6 +50,7 @@ export default function WindowManager({
       {/* 2. Desktop Dock & Mobile Floating Action Button */}
       <WindowTaskbar
         windows={windows}
+        workspaces={workspaces}
         onRestoreWindow={restoreWindow}
         onToggleMinimize={toggleMinimize}
         onCloseWindow={closeWindow}
