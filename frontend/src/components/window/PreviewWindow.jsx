@@ -126,7 +126,14 @@ export default function PreviewWindow({
                   file.file_type === 'code' || file.is_markdown ||
                   fileNameLower.match(/\.(docx|doc|xlsx|xls|csv|txt|json|py|js|html|css|md|yaml|yml|ts|jsx|tsx|sh)$/i);
 
-    if (isDoc && (!file.content || file.content.length < 5)) {
+    // A caller may hand over a partial file — search results open a window
+    // from the search hit alone, which carries no size and no content. With
+    // nothing to identify the file by, every type check below falls through
+    // and even an image renders as the generic "download this file" panel.
+    // Fetch the real record whenever the essentials are missing.
+    const isIncomplete = !file.name || !file.file_type || file.size_bytes === undefined;
+
+    if (isIncomplete || (isDoc && (!file.content || file.content.length < 5))) {
       setIsLoadingContent(true);
       getFileDetail(file.id)
         .then((detail) => setFileDetail(detail))
@@ -138,19 +145,27 @@ export default function PreviewWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id]);
 
+  // Everything below renders from the fetched record, overlaid with whatever
+  // the window's own copy holds — that copy is the live one (updateWindowFile
+  // patches it on save/rename/favorite) but may start out partial, so the
+  // fetched detail supplies the fields it lacks rather than the other way
+  // round. Spreading `file` last is safe precisely because a partial object
+  // only carries the keys it actually has.
+  const resolvedFile = { ...fileDetail, ...file };
+
   // File type detection
-  const fileNameLower = file.name?.toLowerCase() || '';
-  const isVideo = file.file_type === 'video' || fileNameLower.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/i);
-  const isAudio = file.file_type === 'audio' || fileNameLower.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/i);
-  const isImage = file.file_type === 'image' || fileNameLower.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i);
-  const isPdf = file.file_type === 'pdf' || fileNameLower.endsWith('.pdf');
-  const isExcel = file.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i);
-  const isDocx = file.file_type === 'docx' || fileNameLower.match(/\.(docx|doc)$/i);
-  const isMarkdown = file.is_markdown || fileNameLower.endsWith('.md') || fileNameLower.endsWith('.markdown');
-  const isTextOrCode = file.file_type === 'text' || file.file_type === 'code' || isMarkdown || 
+  const fileNameLower = resolvedFile.name?.toLowerCase() || '';
+  const isVideo = resolvedFile.file_type === 'video' || fileNameLower.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/i);
+  const isAudio = resolvedFile.file_type === 'audio' || fileNameLower.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/i);
+  const isImage = resolvedFile.file_type === 'image' || fileNameLower.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i);
+  const isPdf = resolvedFile.file_type === 'pdf' || fileNameLower.endsWith('.pdf');
+  const isExcel = resolvedFile.file_type === 'xlsx' || fileNameLower.match(/\.(xlsx|xls|csv)$/i);
+  const isDocx = resolvedFile.file_type === 'docx' || fileNameLower.match(/\.(docx|doc)$/i);
+  const isMarkdown = resolvedFile.is_markdown || fileNameLower.endsWith('.md') || fileNameLower.endsWith('.markdown');
+  const isTextOrCode = resolvedFile.file_type === 'text' || resolvedFile.file_type === 'code' || isMarkdown ||
                        fileNameLower.match(/\.(txt|json|py|js|html|css|yaml|yml|ts|jsx|tsx|sh|sql|xml|env)$/i);
 
-  const displayContent = fileDetail?.content || file.content || '';
+  const displayContent = resolvedFile.content || '';
 
   // Opening a note's preview window now IS its (live, collaborative) editor
   // — there is no separate read-only mode or dedicated edit page anymore.
@@ -180,7 +195,7 @@ export default function PreviewWindow({
   };
 
   const handleDownload = () => {
-    downloadFileChunked(file.id, file.name, file.size_bytes);
+    downloadFileChunked(resolvedFile.id, resolvedFile.name, resolvedFile.size_bytes);
   };
 
   // Format file size
@@ -474,7 +489,7 @@ export default function PreviewWindow({
         onDoubleClick={() => onMaximize(id)}
       >
         {/* Left: Title Information */}
-        <div className="window-title-box" title={file.name}>
+        <div className="window-title-box" title={resolvedFile.name}>
           <div className="window-file-icon">
             {getHeaderIcon()}
           </div>
@@ -488,7 +503,7 @@ export default function PreviewWindow({
               placeholder="문서 제목을 입력하세요..."
             />
           ) : (
-            <span className="window-title-text">{file.name}</span>
+            <span className="window-title-text">{resolvedFile.name}</span>
           )}
           {isMarkdown && (
             <span
@@ -532,12 +547,12 @@ export default function PreviewWindow({
                 onClick={(e) => { e.stopPropagation(); onToggleFavorite(fileDetail || file); }}
                 title="즐겨찾기 토글"
               >
-                <Star size={13} color={file.is_favorite ? '#f59e0b' : undefined} fill={file.is_favorite ? '#f59e0b' : 'none'} />
+                <Star size={13} color={resolvedFile.is_favorite ? '#f59e0b' : undefined} fill={resolvedFile.is_favorite ? '#f59e0b' : 'none'} />
               </button>
               <button
                 type="button"
                 className="window-action-btn icon-only"
-                onClick={(e) => { e.stopPropagation(); onDeleteFile(file.id); }}
+                onClick={(e) => { e.stopPropagation(); onDeleteFile(resolvedFile.id); }}
                 title="문서 삭제"
               >
                 <Trash2 size={13} color="var(--accent-rose)" />
@@ -698,7 +713,7 @@ export default function PreviewWindow({
           >
             <img
               src={mediaUrl}
-              alt={file.name}
+              alt={resolvedFile.name}
               style={{
                 transform: `scale(${zoomLevel}) rotate(${rotation}deg) translate(${pan.x / zoomLevel}px, ${pan.y / zoomLevel}px)`,
                 transition: isPanning ? 'none' : 'transform 0.15s ease'
@@ -718,7 +733,7 @@ export default function PreviewWindow({
           <div className="os-audio-viewport">
             <Music size={48} color="var(--accent-primary)" style={{ marginBottom: '1.25rem' }} />
             <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '1rem' }}>
-              {file.name}
+              {resolvedFile.name}
             </div>
             <audio controls src={mediaUrl} style={{ width: '85%', maxWidth: 420 }} />
           </div>
@@ -726,7 +741,7 @@ export default function PreviewWindow({
           <div className="os-pdf-viewport">
             <iframe 
               src={`${mediaUrl}#toolbar=1&navpanes=0`} 
-              title={file.name}
+              title={resolvedFile.name}
               width="100%" 
               height="100%" 
               style={{ border: 'none' }}
@@ -773,7 +788,7 @@ export default function PreviewWindow({
               onInsertMarkdown={noteEditor.handleInsertAttachedFile}
             />
             <VersionHistoryModal
-              fileId={file.id}
+              fileId={resolvedFile.id}
               isOpen={noteEditor.isHistoryModalOpen}
               onClose={() => noteEditor.setIsHistoryModalOpen(false)}
               onRestored={noteEditor.handleVersionRestored}
@@ -790,7 +805,7 @@ export default function PreviewWindow({
             <div style={{ textAlign: 'center', maxWidth: 400 }}>
               {isExcel ? <Table size={48} color="var(--accent-emerald)" style={{ margin: '0 auto 12px' }} /> : <FileText size={48} color="#2563eb" style={{ margin: '0 auto 12px' }} />}
               <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-primary)', marginBottom: 8 }}>
-                {file.name}
+                {resolvedFile.name}
               </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.4 }}>
                 스프레드시트 및 Office 문서는 외부 애플리케이션으로 편집하거나 다운로드하여 확인하실 수 있습니다.
@@ -802,7 +817,7 @@ export default function PreviewWindow({
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, margin: '0 auto' }}
               >
                 <Download size={15} />
-                <span>파일 다운로드 ({formatFileSize(file.size_bytes)})</span>
+                <span>파일 다운로드 ({formatFileSize(resolvedFile.size_bytes)})</span>
               </button>
             </div>
           </div>
@@ -810,10 +825,10 @@ export default function PreviewWindow({
           <div className="os-office-viewport">
             <File size={48} color="var(--text-muted)" style={{ margin: '0 auto 12px', display: 'block' }} />
             <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', marginBottom: 6 }}>
-              {file.name}
+              {resolvedFile.name}
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>
-              {formatFileSize(file.size_bytes)}
+              {formatFileSize(resolvedFile.size_bytes)}
             </div>
             <button
               type="button"
@@ -831,11 +846,11 @@ export default function PreviewWindow({
       {/* Footer Meta Bar */}
       <div className="os-window-footer">
         <div className="footer-left">
-          <span>{formatFileSize(file.size_bytes)}</span>
-          {file.created_at && (
+          <span>{formatFileSize(resolvedFile.size_bytes)}</span>
+          {resolvedFile.created_at && (
             <>
               <span>•</span>
-              <span>{new Date(file.updated_at || file.created_at).toLocaleDateString()}</span>
+              <span>{new Date(resolvedFile.updated_at || resolvedFile.created_at).toLocaleDateString()}</span>
             </>
           )}
         </div>

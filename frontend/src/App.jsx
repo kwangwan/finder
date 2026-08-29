@@ -1493,7 +1493,21 @@ export default function App() {
         activeWorkspaceId={activeWorkspace?.id || null}
         folders={folders}
         onSelectResult={(item) => {
-          handleOpenFile({ id: item.file_id });
+          // Pass through what the search hit already knows. PreviewWindow
+          // picks its viewer from name/file_type, so opening with only an id
+          // meant every type check fell through and even an image rendered
+          // as the generic "download this file" panel. It refetches the rest
+          // (size, content) itself when the object is incomplete.
+          handleOpenFile({
+            id: item.file_id,
+            name: item.file_name,
+            file_type: item.file_type,
+            is_markdown: item.is_markdown,
+            folder_id: item.folder_id,
+            workspace_id: item.workspace_id,
+            created_at: item.created_at,
+            updated_at: item.updated_at
+          });
         }}
       />
 
