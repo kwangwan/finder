@@ -4186,6 +4186,12 @@ select option {
    ========================================================================== */
 
 .folder-window {
+  /* Nothing in this window is text meant to be selected, and dragging the
+     header or rubber-banding the body would otherwise leave the breadcrumb
+     and file names highlighted blue — unreadable, and never what the drag
+     was for. */
+  user-select: none;
+  -webkit-user-select: none;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);

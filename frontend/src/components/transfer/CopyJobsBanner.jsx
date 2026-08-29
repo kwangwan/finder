@@ -7,6 +7,13 @@ import { listCopyJobs, dismissCopyJob } from '../../api';
 const ACTIVE_POLL_MS = 1500;
 const IDLE_POLL_MS = 20000;
 
+// A finished row has said what it needed to; leaving it up means a day's worth
+// of completions stacked over the page. It retires itself shortly after being
+// seen — the job record itself lives on server-side, so nothing is lost.
+const DONE_LINGER_MS = 8000;
+// Never let the stack grow past this, however many finished at once.
+const MAX_VISIBLE = 3;
+
 function pct(job) {
   if (!job.total_files) return job.status === 'done' ? 100 : 0;
   return Math.min(100, Math.round((job.copied_files / job.total_files) * 100));
@@ -25,6 +32,7 @@ export default function CopyJobsBanner({ onJobsFinished }) {
   const [jobs, setJobs] = useState([]);
   const [dismissed, setDismissed] = useState(() => new Set());
   const activeIdsRef = useRef(new Set());
+  const retireTimersRef = useRef(new Map());
 
   const poll = useCallback(async () => {
     try {
@@ -42,6 +50,27 @@ export default function CopyJobsBanner({ onJobsFinished }) {
     } catch (e) { /* best-effort: a failed poll just retries */ }
   }, [onJobsFinished]);
 
+  // Retire finished rows on a timer rather than on the next poll, so one that
+  // completes while the queue is idle still goes away promptly.
+  useEffect(() => {
+    const timers = retireTimersRef.current;
+    jobs.forEach((job) => {
+      const finished = job.status === 'done' || job.status === 'failed';
+      // Failures stay until acknowledged: they are the one outcome the user
+      // has to actually read.
+      if (!finished || job.status === 'failed' || timers.has(job.id) || dismissed.has(job.id)) return;
+      timers.set(job.id, setTimeout(() => {
+        timers.delete(job.id);
+        setDismissed((prev) => new Set([...prev, job.id]));
+      }, DONE_LINGER_MS));
+    });
+  }, [jobs, dismissed]);
+
+  useEffect(() => () => {
+    retireTimersRef.current.forEach((t) => clearTimeout(t));
+    retireTimersRef.current.clear();
+  }, []);
+
   useEffect(() => {
     poll();
     let timer = null;
@@ -54,7 +83,7 @@ export default function CopyJobsBanner({ onJobsFinished }) {
     return () => clearTimeout(timer);
   }, [poll]);
 
-  const visible = jobs.filter((j) => !dismissed.has(j.id));
+  const visible = jobs.filter((j) => !dismissed.has(j.id)).slice(0, MAX_VISIBLE);
   if (visible.length === 0) return null;
 
   const hide = async (job) => {
