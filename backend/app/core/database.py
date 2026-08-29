@@ -118,6 +118,9 @@ async def init_db():
             # runs from one day to another is the normal case, and only the end
             # of it was recordable.
             "ALTER TABLE kb_board_tasks ADD COLUMN IF NOT EXISTS start_date DATE;",
+            # A photo the person uploaded here, which wins over the one the
+            # identity provider supplied.
+            "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS avatar_s3_key VARCHAR(1024);",
         ]
 
         # Every timestamp column was originally created as a naive

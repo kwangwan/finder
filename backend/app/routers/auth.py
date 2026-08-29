@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 import uuid
 import re
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +14,7 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.folder import Folder
 from app.models.file import FileItem
+from app.services.s3_service import s3_service, build_storage_key
 from app.models.invitation import Invitation
 from app.schemas.auth import (
     GoogleLoginRequest, PasswordRegisterRequest, PasswordLoginRequest,
@@ -141,6 +143,92 @@ async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token
     if invitations_to_process:
         await db.commit()
         await db.refresh(user)
+
+
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+@router.post("/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Replace this account's photo.
+
+    Stored rather than linked: an address on someone else's server can change
+    or disappear, and this one has to keep working for everyone who sees this
+    person's name on a task.
+    """
+    if (file.content_type or "").lower() not in ALLOWED_AVATAR_TYPES:
+        raise HTTPException(status_code=400, detail="JPG, PNG, WEBP, GIF 이미지만 올릴 수 있습니다.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="빈 파일입니다.")
+    if len(data) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail="이미지는 2MB 이하만 올릴 수 있습니다.")
+
+    key = build_storage_key("avatars", current_user.id, file.filename or "avatar")
+    stored = await run_in_threadpool(s3_service.put_object, key, data, file.content_type)
+    if not stored:
+        raise HTTPException(status_code=500, detail="이미지를 저장하지 못했습니다.")
+
+    previous = current_user.avatar_s3_key
+    current_user.avatar_s3_key = key
+    await db.commit()
+    await db.refresh(current_user)
+    if previous and previous != key:
+        try:
+            await run_in_threadpool(s3_service.delete_object, previous)
+        except Exception:
+            pass          # the new one is in place; an orphan is not worth failing over
+    return {"picture": current_user.avatar_url}
+
+
+@router.delete("/avatar")
+async def remove_avatar(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """Go back to whatever the identity provider supplies."""
+    key = current_user.avatar_s3_key
+    current_user.avatar_s3_key = None
+    await db.commit()
+    await db.refresh(current_user)
+    if key:
+        try:
+            await run_in_threadpool(s3_service.delete_object, key)
+        except Exception:
+            pass
+    return {"picture": current_user.avatar_url}
+
+
+@router.get("/avatar/{user_id}")
+async def get_avatar(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Serve a photo.
+
+    Deliberately unauthenticated: it is rendered in <img> tags all over the
+    app, which cannot carry a header, and a face next to a name is not a
+    secret from people who can already see the name.
+    """
+    user = await db.get(User, user_id)
+    if user is None or not user.avatar_s3_key:
+        raise HTTPException(status_code=404, detail="이미지가 없습니다.")
+    data = await run_in_threadpool(s3_service.get_object_content, user.avatar_s3_key)
+    if not data:
+        raise HTTPException(status_code=404, detail="이미지를 불러올 수 없습니다.")
+    return Response(
+        content=data,
+        media_type="image/jpeg" if user.avatar_s3_key.lower().endswith((".jpg", ".jpeg")) else "image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
 
 @router.get("/config")
 async def get_auth_config():
@@ -294,6 +382,8 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
         await db.refresh(user)
     else:
         user.last_login_at = datetime.now(timezone.utc)
+        # The provider's photo is kept up to date, but it is only *shown* when
+        # the person has not uploaded one of their own — see User.avatar_url.
         if google_profile.get("picture"):
             user.picture = google_profile["picture"]
         if google_profile.get("name"):

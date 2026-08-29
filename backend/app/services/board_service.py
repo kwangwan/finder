@@ -180,11 +180,12 @@ async def next_position(db: AsyncSession, file_id, parent_task_id) -> int:
 
 
 async def user_names(db: AsyncSession, user_ids: Iterable[uuid.UUID]) -> dict:
+    """Name and photo per id — a face beside a name is how a row is read."""
     ids = [uid for uid in set(user_ids) if uid]
     if not ids:
         return {}
     rows = (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
-    return {u.id: (u.username or u.name or u.email) for u in rows}
+    return {u.id: {"name": (u.username or u.name or u.email), "avatar": u.avatar_url} for u in rows}
 
 
 def task_to_dict(
@@ -210,15 +211,22 @@ def task_to_dict(
         # mean, instead of each one re-deriving it from a date string.
         "days_left": (task.due_date - today).days if task.due_date else None,
         "position": task.position,
+        # Whether there is anything written in the notes, so a row can say so
+        # without the listing carrying every task's full text.
+        "has_detail": bool((task.detail or "").strip()),
         "assignees": [
-            {"id": str(uid), "name": names.get(uid, "(탈퇴한 이용자)")}
+            {
+                "id": str(uid),
+                "name": (names.get(uid) or {}).get("name", "(탈퇴한 이용자)"),
+                "avatar": (names.get(uid) or {}).get("avatar"),
+            }
             for uid in (assignee_ids or {}).get(task.id, [])
         ],
         "created_by": str(task.created_by) if task.created_by else None,
-        "created_by_name": names.get(task.created_by),
+        "created_by_name": (names.get(task.created_by) or {}).get("name"),
         "created_at": task.created_at,
         "updated_at": task.updated_at,
-        "last_edited_by_name": names.get(task.last_edited_by),
+        "last_edited_by_name": (names.get(task.last_edited_by) or {}).get("name"),
     }
     if include_detail:
         data["detail"] = task.detail or ""

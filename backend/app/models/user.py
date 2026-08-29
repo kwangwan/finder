@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Boolean, DateTime, BigInteger
 from sqlalchemy.dialects.postgresql import UUID
@@ -13,7 +14,12 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, index=True, nullable=False)
     name = Column(String(255), nullable=True)
+    # Whatever the identity provider gave us — the Google profile photo for an
+    # account that signed in that way. Used until the person uploads their own.
     picture = Column(String(1024), nullable=True)
+    # Set once someone uploads a photo of their own, which then wins: a later
+    # Google sign-in must not silently put the old one back.
+    avatar_s3_key = Column(String(1024), nullable=True)
     google_id = Column(String(255), nullable=True, index=True)
     hashed_password = Column(String(255), nullable=True)
     # The account's public identity: lowercase ASCII, unique, and the name
@@ -56,12 +62,24 @@ class User(Base):
             return 0.0 if committed == 0 else 100.0
         return round((committed / self.storage_quota_bytes) * 100, 1)
 
+    @property
+    def avatar_url(self) -> Optional[str]:
+        """
+        The picture to show for this person.
+
+        An uploaded one wins over the identity provider's: it was chosen here
+        deliberately, and a later sign-in elsewhere must not undo that.
+        """
+        if self.avatar_s3_key:
+            return f"/api/auth/avatar/{self.id}"
+        return self.picture
+
     def to_dict(self):
         return {
             "id": str(self.id),
             "email": self.email,
             "name": self.name or self.email.split("@")[0],
-            "picture": self.picture,
+            "picture": self.avatar_url,
             "google_id": self.google_id,
             "has_password": bool(self.hashed_password),
             "username": self.username,

@@ -5409,15 +5409,19 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 
 /* ==========================================================================
-   일정 — the board table
+   일정 — boards and the workspace-wide list
    ========================================================================== */
 
-/* Laid out as a table that scrolls sideways with the name column pinned, the
-   way a board tool does it. The first attempt reflowed each task into a card
-   so nothing would overflow; that kept everything on screen but made the
-   columns impossible to compare down a page, and at narrow widths the name —
-   the one thing you always need — was the first thing squeezed out. Pinning
-   it and letting the rest scroll keeps both. */
+/* One row, laid out as a grid whose areas change with the *container's* width
+   rather than the window's — a board lives inside a window the user can
+   resize, so a media query would be answering the wrong question.
+   Wide: one line, columns aligned down the page like a board tool.
+   Narrower: two lines, then three. Nothing ever scrolls sideways, and the
+   name is never the thing that gets squeezed out. */
+
+/* `position: relative` because the task drawer is absolutely positioned over
+   whichever of the two it is opened from. */
+.bd-pane, .sc-explorer { container-type: inline-size; position: relative; }
 
 .bd-pane {
   display: flex;
@@ -5437,8 +5441,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   flex-shrink: 0;
 }
 
-/* The board's name is editable in place — it is the first thing a new board
-   needs and there was nowhere to do it. */
 .bd-title {
   flex: 1;
   min-width: 0;
@@ -5453,100 +5455,114 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .bd-title:hover:not(:disabled) { border-color: var(--border-subtle); }
-.bd-title:focus {
-  border-color: var(--border-focus);
-  background: var(--bg-input, var(--bg-tertiary));
-  outline: none;
-}
+.bd-title:focus { border-color: var(--border-focus); background: var(--bg-input, var(--bg-tertiary)); outline: none; }
 
 .bd-header-stat { flex-shrink: 0; font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
 .bd-header-done { color: var(--accent-emerald); }
 
-/* `.btn-primary` carries `flex: 1`, which in a flex header stretches this
-   across everything left over. */
-.bd-add-top {
-  flex: 0 0 auto;
-  height: 30px;
-  padding: 0 0.8rem;
-  font-size: 0.79rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
+/* `.btn-primary` carries `flex: 1`, which would stretch this across the row. */
+.bd-add-top { flex: 0 0 auto; height: 30px; padding: 0 0.85rem; font-size: 0.79rem; display: inline-flex; align-items: center; gap: 5px; }
 
-.bd-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding-bottom: 16px;
-}
+.bd-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
+.bd-table { display: flex; flex-direction: column; }
 
-.bd-table { min-width: max-content; }
+/* --- the row ------------------------------------------------------------- */
 
 .bd-row {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--border-subtle);
-  min-height: 38px;
+  border-left: 3px solid transparent;
+  /* Narrowest: three lines. Everything below widens it back out. */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name    actions"
+    "status  priority"
+    "period  people";
 }
 
-.bd-row:hover:not(.bd-head) .bd-cell { background: var(--bg-card-hover); }
-.bd-row.is-open .bd-cell { background: var(--bg-tertiary); }
+.bd-row.tone-overdue { border-left-color: var(--accent-rose); }
+.bd-row.tone-today, .bd-row.tone-soon { border-left-color: var(--accent-amber); }
+.bd-row.tone-done { border-left-color: var(--accent-emerald); }
+
+.bd-row:hover { background: var(--bg-card-hover); }
+.bd-row.is-open { background: var(--bg-tertiary); }
 .bd-row.is-dragging { opacity: 0.4; }
 .bd-row.is-drop { box-shadow: inset 0 2px 0 var(--accent-primary); }
 .bd-row.is-done .bd-name { text-decoration: line-through; color: var(--text-muted); }
+.bd-row.depth-1 { padding-left: 34px; }
 
-.bd-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  background: var(--bg-primary);
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  border-right: 1px solid var(--border-subtle);
+.bd-f-name    { grid-area: name; display: flex; align-items: center; gap: 5px; min-width: 0; }
+.bd-f-status  { grid-area: status; min-width: 0; }
+.bd-f-priority{ grid-area: priority; min-width: 0; }
+.bd-f-people  { grid-area: people; position: relative; display: flex; align-items: center; }
+.bd-f-period  { grid-area: period; min-width: 0; display: flex; align-items: center; }
+.bd-f-stamps  { grid-area: stamps; display: flex; gap: 10px; font-size: 0.71rem; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bd-f-actions { grid-area: actions; display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+
+/* Each field gets an area of its own. Two of them sharing one area meant they
+   were laid on top of each other, and whichever came last swallowed the
+   clicks meant for the other. */
+.bd-f-priority { min-width: 88px; }
+.bd-f-stamps { display: none; }
+
+/* Two lines from 560px: chips join the name, period and people share line 2. */
+@container (min-width: 560px) {
+  .bd-row {
+    grid-template-columns: minmax(0, 1fr) 96px 96px auto;
+    grid-template-areas:
+      "name   status priority actions"
+      "period period people   people";
+  }
+  .bd-f-status { grid-area: status; }
+  .bd-f-priority { grid-area: priority; margin-left: 0; }
+  .bd-f-people { justify-content: flex-end; }
 }
 
-/* Pinned. Without a solid background the scrolled columns show through it. */
-.bd-cell-name {
+/* One line from 800px — the board-tool layout, columns aligned down the page.
+   Chosen so an ordinary window lands here rather than on the two-line layout,
+   which leaves the name column with all the slack and the row looking sparse. */
+@container (min-width: 800px) {
+  .bd-row {
+    grid-template-columns: minmax(120px, 1fr) 96px 96px 92px minmax(178px, 230px) auto;
+    grid-template-areas: "name status priority people period actions";
+  }
+  .bd-f-people { justify-content: flex-start; }
+}
+
+/* The stamps are the least urgent thing on the row, so they only appear once
+   there is room that nothing else wants. */
+@container (min-width: 1060px) {
+  .bd-row {
+    grid-template-columns: minmax(150px, 1fr) 100px 100px 104px minmax(190px, 240px) 126px auto;
+    grid-template-areas: "name status priority people period stamps actions";
+  }
+  .bd-f-stamps { display: flex; }
+}
+
+.bd-head {
   position: sticky;
-  left: 0;
-  z-index: 2;
-  width: 300px;
-  min-width: 300px;
-  border-left: 3px solid transparent;
-  box-shadow: 2px 0 6px -4px rgba(0, 0, 0, 0.7);
-}
-
-/* Urgency on the pinned edge, so it is visible however far the table is
-   scrolled sideways. */
-.bd-cell-name.tone-overdue { border-left-color: var(--accent-rose); }
-.bd-cell-name.tone-today, .bd-cell-name.tone-soon { border-left-color: var(--accent-amber); }
-.bd-cell-name.tone-done { border-left-color: var(--accent-emerald); }
-
-.bd-cell-people { width: 108px; min-width: 108px; position: relative; }
-.bd-cell-select { width: 118px; min-width: 118px; padding: 0; }
-.bd-cell-period { width: 232px; min-width: 232px; }
-.bd-cell-stamp { width: 84px; min-width: 84px; font-variant-numeric: tabular-nums; color: var(--text-muted); font-size: 0.74rem; }
-.bd-cell-actions { width: 44px; min-width: 44px; justify-content: center; border-right: none; }
-
-.bd-head { position: sticky; top: 0; z-index: 4; }
-.bd-head .bd-cell {
+  top: 0;
+  z-index: 3;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-medium);
   font-size: 0.71rem;
   font-weight: 700;
   color: var(--text-muted);
-  min-height: 32px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  display: none;
 }
-.bd-head .bd-cell-name { z-index: 5; }
-.bd-head .bd-cell-select { padding: 4px 10px; }
+
+/* A header only means anything once the row really is one line of columns. */
+@container (min-width: 800px) { .bd-head { display: grid; } }
+.bd-head:hover { background: var(--bg-secondary); }
 
 .bd-grip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   width: 12px;
   flex-shrink: 0;
   color: var(--text-muted);
@@ -5554,7 +5570,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   cursor: grab;
 }
 
-.bd-row:hover .bd-grip { opacity: 0.75; }
+.bd-row:hover .bd-grip { opacity: 0.7; }
 
 .bd-twisty {
   display: inline-flex;
@@ -5571,16 +5587,15 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .bd-twisty.is-empty { cursor: default; }
-.bd-row.depth-1 .bd-cell-name { padding-left: 30px; }
 
 .bd-name {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   padding: 2px 0;
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   font-weight: 600;
   font-family: inherit;
   text-align: left;
@@ -5602,52 +5617,50 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-weight: 700;
 }
 
-/* --- people -------------------------------------------------------------- */
+.bd-hasnote { flex-shrink: 0; color: var(--text-muted); opacity: 0.8; }
 
-.bd-people {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border: none;
+.bd-rowboard {
+  flex-shrink: 1;
+  min-width: 0;
+  padding: 1px 7px;
   border-radius: var(--radius-full);
-  background: transparent;
-  cursor: pointer;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* --- people -------------------------------------------------------------- */
+
+.bd-people { display: inline-flex; align-items: center; padding: 2px; border: none; border-radius: var(--radius-full); background: transparent; cursor: pointer; }
 .bd-people:disabled { cursor: default; }
 
 .bd-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
   margin-left: -6px;
   border-radius: var(--radius-full);
   border: 1.5px solid var(--bg-primary);
   color: #fff;
-  font-size: 0.68rem;
   font-weight: 700;
   flex-shrink: 0;
+  object-fit: cover;
 }
 
 .bd-avatar:first-child { margin-left: 0; }
-
-.bd-avatar.is-empty {
-  background: transparent;
-  border: 1px dashed var(--border-medium);
-  color: var(--text-muted);
-}
-
-.bd-avatar.is-more { background: var(--bg-tertiary); color: var(--text-secondary); }
+.bd-avatar.is-empty { background: transparent; border: 1px dashed var(--border-medium); color: var(--text-muted); }
+.bd-avatar.is-more { background: var(--bg-tertiary); color: var(--text-secondary); font-size: 0.62rem; }
 
 .bd-people-pop {
   position: absolute;
-  top: calc(100% - 2px);
-  left: 6px;
-  z-index: 20;
-  min-width: 168px;
-  max-height: 220px;
+  top: calc(100% + 2px);
+  right: 0;
+  z-index: 30;
+  min-width: 176px;
+  max-height: 240px;
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-subtle);
@@ -5677,29 +5690,53 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 /* --- status and priority ------------------------------------------------- */
 
-/* Solid and filling the whole cell, the way a board tool colours them: a board
-   is read by colour first, and a small outlined pill in a wide cell reads as
-   nothing at all from across a room. Tinted from the theme's own accents so a
-   remapped palette carries them with it. */
+/* A custom menu, not a native <select>: the browser paints the operating
+   system's own list — white rows and a system font in the middle of a themed
+   board — and cannot show the colour that these two columns exist to show. */
+.bd-pillwrap { position: relative; display: block; width: 100%; }
+
 .bd-pill {
+  display: block;
   width: 100%;
-  height: 100%;
-  min-height: 38px;
-  padding: 0 8px;
+  padding: 5px 8px;
   border: none;
+  border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.75rem;
   font-weight: 700;
   font-family: inherit;
   text-align: center;
-  text-align-last: center;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.bd-pill:disabled { cursor: default; }
+.bd-pill:disabled { cursor: default; opacity: 0.85; }
+
+.bd-pill-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.bd-pill-menu .bd-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
 
 .bd-pill.priority-urgent { background: color-mix(in srgb, var(--accent-rose) 88%, black); color: #fff; }
 .bd-pill.priority-high   { background: color-mix(in srgb, var(--accent-amber) 88%, black); color: #fff; }
@@ -5724,7 +5761,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  font-size: 0.76rem;
+  font-size: 0.75rem;
   font-family: inherit;
   cursor: pointer;
 }
@@ -5738,17 +5775,18 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   padding: 0 6px;
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.67rem;
   font-weight: 700;
 }
 
-.bd-cell-period.due-overdue { color: var(--accent-rose); }
-.bd-cell-period.due-today, .bd-cell-period.due-soon { color: var(--accent-amber); }
-.bd-cell-period.due-done { color: var(--text-muted); }
+.bd-f-period.due-overdue { color: var(--accent-rose); }
+.bd-f-period.due-today, .bd-f-period.due-soon { color: var(--accent-amber); }
+.bd-f-period.due-done { color: var(--text-muted); }
 
-.bd-period-edit { display: inline-flex; align-items: center; gap: 4px; }
+.bd-period-edit { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 
-.bd-period-edit input[type="date"] {
+.bd-period-edit input[type="date"],
+.td-period input[type="date"] {
   padding: 2px 4px;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-sm);
@@ -5779,66 +5817,46 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 /* --- adding -------------------------------------------------------------- */
 
-.bd-draft .bd-cell { background: var(--bg-tertiary); }
+.bd-draft { background: var(--bg-tertiary); grid-template-areas: "name actions" !important; grid-template-columns: minmax(0, 1fr) auto !important; }
 
-.bd-draft .bd-cell-name input {
+.bd-draft .bd-f-name input {
   flex: 1;
   min-width: 0;
-  padding: 4px 7px;
+  padding: 5px 8px;
   border: 1px solid var(--accent-primary);
   border-radius: var(--radius-sm);
   background: var(--bg-input, var(--bg-primary));
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   font-family: inherit;
 }
 
-.bd-draft-actions {
-  gap: 6px;
-  border-right: none;
-  position: sticky;
-  left: 300px;
-}
+.bd-draft-actions { grid-area: actions; display: flex; align-items: center; gap: 6px; }
+.bd-draft-actions button { height: 27px; padding: 0 0.75rem; font-size: 0.76rem; flex: 0 0 auto; }
+.bd-draft-hint { font-size: 0.71rem; color: var(--text-muted); white-space: nowrap; }
+@container (max-width: 560px) { .bd-draft-hint { display: none; } }
 
-.bd-draft-actions button { height: 26px; padding: 0 0.7rem; font-size: 0.75rem; }
-.bd-draft-hint { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
-
-/* Sits where the next sub-item will appear, so the button is where the row
-   comes from. Sticky-left so it stays reachable while scrolled sideways. */
-.bd-subadd, .bd-addrow {
+.bd-addrow {
   display: flex;
   align-items: center;
   gap: 5px;
   width: 100%;
-  padding: 5px 10px 5px 34px;
+  padding: 8px 14px;
   border: none;
   border-bottom: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-muted);
-  font-size: 0.76rem;
+  font-size: 0.78rem;
   font-family: inherit;
+  font-weight: 600;
   cursor: pointer;
-  position: sticky;
-  left: 0;
 }
 
-/* Shown under the task the pointer is on, or under one that already has
-   sub-items. Showing it under every task doubled the number of rows and made
-   the board twice as long to read. */
-.bd-subadd { padding-left: 52px; }
-.bd-subadd:hover, .bd-addrow:hover { color: var(--accent-primary); background: var(--bg-card-hover); }
-.bd-addrow { font-weight: 600; }
+.bd-addrow:hover { color: var(--accent-primary); background: var(--bg-card-hover); }
 
-.bd-empty-row {
-  padding: 2.4rem 1rem;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.83rem;
-  position: sticky;
-  left: 0;
-}
-
-.bd-readonly { padding: 10px 14px; font-size: 0.78rem; color: var(--text-muted); position: sticky; left: 0; }
+.bd-empty-row { padding: 2.4rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.83rem; }
+.bd-readonly { padding: 10px 14px; font-size: 0.78rem; color: var(--text-muted); }
+.board-muted { color: var(--text-muted); }
 
 .bd-empty {
   display: flex;
@@ -5852,176 +5870,124 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 /* --- one task, opened ---------------------------------------------------- */
 
-.board-detail {
-  flex-shrink: 0;
-  max-height: 56%;
+/* A drawer over the board, not a strip beneath it: the notes are the reason
+   to open a task, and a bottom quarter put the editor below the fold. */
+.td-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.td-drawer {
   display: flex;
   flex-direction: column;
-  border-top: 2px solid var(--accent-primary);
+  width: min(560px, 100%);
+  height: 100%;
   background: var(--bg-secondary);
+  border-left: 1px solid var(--border-medium);
+  box-shadow: -18px 0 44px rgba(0, 0, 0, 0.45);
   overflow-y: auto;
 }
 
-.board-detail-head {
+.td-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
+  padding: 12px 14px 10px;
   border-bottom: 1px solid var(--border-subtle);
   position: sticky;
   top: 0;
   background: var(--bg-secondary);
-  z-index: 3;
+  z-index: 2;
 }
 
-.board-detail-title {
+.td-title {
   flex: 1;
   min-width: 0;
-  padding: 4px 7px;
+  padding: 5px 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   font-family: inherit;
 }
 
-.board-detail-title:focus {
-  border-color: var(--border-focus);
-  background: var(--bg-input, var(--bg-tertiary));
-  outline: none;
-}
+.td-title:hover:not(:disabled) { border-color: var(--border-subtle); }
+.td-title:focus { border-color: var(--border-focus); background: var(--bg-input, var(--bg-tertiary)); outline: none; }
 
-.board-detail-state {
+.td-state { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-muted); }
+.td-error { color: var(--accent-rose); font-weight: 700; }
+.td-where { padding: 8px 14px 0; font-size: 0.74rem; color: var(--text-muted); }
+
+.td-fields { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 14px 0; }
+.td-fields label { display: flex; flex-direction: column; gap: 5px; min-width: 104px; }
+.td-fields label > span:first-child, .td-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); }
+.td-period-field { flex: 1 1 220px; }
+.td-period { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; color: var(--text-secondary); }
+
+.td-people { padding: 14px 14px 0; }
+.td-people-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+
+.td-person {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.board-detail-error { color: var(--accent-rose); font-weight: 700; }
-
-.board-detail-fields { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; }
-.board-detail-fields label { display: flex; flex-direction: column; gap: 5px; }
-.board-detail-fields label > span,
-.board-detail-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); }
-.board-detail-period { display: inline-flex; align-items: center; gap: 5px; }
-
-.board-detail-fields input[type="date"] {
-  padding: 5px 7px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input, var(--bg-tertiary));
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-family: inherit;
-  font-variant-numeric: tabular-nums;
-}
-
-.board-detail-fields .board-chip {
-  padding: 5px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 700;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.board-detail-stamps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  padding: 0 12px 10px;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.board-detail-people { padding: 0 12px 12px; }
-.board-people-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
-
-.board-person-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.76rem;
   cursor: pointer;
 }
 
-.board-person-toggle.on {
-  border-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
-  color: var(--accent-primary);
-  font-weight: 700;
-}
+.td-person.on { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); font-weight: 700; }
+.td-person:disabled { cursor: default; opacity: 0.6; }
 
-.board-person-toggle:disabled { cursor: default; opacity: 0.6; }
-.board-muted { color: var(--text-muted); }
-.board-detail-notes { padding: 0 12px 14px; }
+.td-notes { display: flex; flex-direction: column; flex: 1; min-height: 240px; padding: 16px 14px 0; }
+.td-notes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.td-attach { margin-left: auto; height: 26px; padding: 0 0.65rem; font-size: 0.73rem; display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 
-.board-detail-label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-
-.board-attach-btn {
-  margin-left: auto;
-  height: 26px;
-  padding: 0 0.65rem;
-  font-size: 0.73rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.board-editor {
+.td-editor {
+  flex: 1;
+  min-height: 200px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-primary);
-  min-height: 150px;
-  padding: 4px 0;
+  padding: 6px 0;
+  overflow-y: auto;
 }
 
-@media (max-width: 640px) {
-  .bd-cell-name { width: 200px; min-width: 200px; }
-  .bd-draft-actions { left: 200px; }
-  .board-detail { max-height: 72%; }
+.td-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 14px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.71rem;
+  color: var(--text-muted);
 }
 
 /* --- the workspace-wide list -------------------------------------------- */
 
-.schedule-explorer { display: flex; flex-direction: column; gap: 0.9rem; min-height: 0; }
+.sc-explorer { display: flex; flex-direction: column; gap: 0.85rem; min-height: 0; }
 
-.schedule-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
+.sc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sc-title { display: flex; align-items: center; gap: 8px; }
+.sc-title h2 { font-size: 1.05rem; font-weight: 700; }
+.sc-count { padding: 1px 8px; border-radius: var(--radius-full); background: var(--bg-tertiary); color: var(--text-muted); font-size: 0.74rem; font-weight: 700; }
+.sc-head-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
 
-.schedule-title { display: flex; align-items: center; gap: 8px; }
-.schedule-title h2 { font-size: 1.05rem; font-weight: 700; }
+.sc-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sc-search { flex: 1; min-width: 170px; }
 
-.schedule-count {
-  padding: 1px 8px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  font-weight: 700;
-}
-
-.schedule-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.schedule-search { flex: 1; min-width: 180px; }
-
-.schedule-filters select {
+.sc-filters select {
   height: 32px;
   padding: 0 9px;
   border: 1px solid var(--border-subtle);
@@ -6033,7 +5999,24 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   cursor: pointer;
 }
 
-.schedule-toggle {
+.sc-groupby { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
+
+.sc-groupby button {
+  height: 32px;
+  padding: 0 11px;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sc-groupby button:last-child { border-right: none; }
+.sc-groupby button.on { background: color-mix(in srgb, var(--accent-primary) 18%, transparent); color: var(--accent-primary); font-weight: 700; }
+
+.sc-toggle {
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--border-subtle);
@@ -6042,95 +6025,58 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   color: var(--text-secondary);
   font-size: 0.78rem;
   font-weight: 600;
+  font-family: inherit;
   cursor: pointer;
 }
 
-.schedule-toggle.on {
-  border-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
-  color: var(--accent-primary);
-}
+.sc-toggle.on { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); }
 
-.schedule-list { display: flex; flex-direction: column; gap: 6px; }
+.sc-groups { display: flex; flex-direction: column; gap: 14px; }
 
-/* Same two-line shape as a board card, for the same reason. */
-.schedule-item {
+.sc-group { border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-card); }
+
+/* The group's own colour bar, so the headings are told apart at a glance. */
+.sc-group-head {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 100%;
-  padding: 10px 13px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  text-align: left;
-  cursor: pointer;
-}
-
-.schedule-item:hover { border-color: var(--accent-primary); background: var(--bg-card-hover); }
-.schedule-item.is-done { opacity: 0.72; }
-.schedule-item.is-done .schedule-name { text-decoration: line-through; color: var(--text-muted); }
-
-.schedule-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
-
-.schedule-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.schedule-meta {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 14px;
-  font-size: 0.74rem;
-  color: var(--text-muted);
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--border-medium);
+  background: var(--bg-secondary);
 }
 
-.schedule-due { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.schedule-due.due-overdue { color: var(--accent-rose); font-weight: 700; }
-.schedule-due.due-today, .schedule-due.due-soon { color: var(--accent-amber); font-weight: 700; }
+.sc-group.group-overdue .sc-group-head { border-left-color: var(--accent-rose); }
+.sc-group.group-today .sc-group-head { border-left-color: var(--accent-amber); }
+.sc-group.group-week .sc-group-head { border-left-color: var(--accent-primary); }
+.sc-group.group-month .sc-group-head { border-left-color: var(--accent-cyan); }
+.sc-group.group-done .sc-group-head { border-left-color: var(--accent-emerald); }
 
-.schedule-where {
+.sc-group-name { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); }
+.sc-group-count { padding: 0 7px; border-radius: var(--radius-full); background: var(--bg-tertiary); color: var(--text-muted); font-size: 0.7rem; font-weight: 700; }
+
+.sc-group-open {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 3px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.schedule-people { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.sc-group-open:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+.sc-group .bd-row:last-child { border-bottom: none; }
 
-.schedule-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 3rem 1rem;
-  text-align: center;
-}
+.sc-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 3rem 1rem; text-align: center; }
+.sc-empty h3 { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.sc-empty p { font-size: 0.83rem; color: var(--text-muted); }
 
-.schedule-empty h3 { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
-.schedule-empty p { font-size: 0.83rem; color: var(--text-muted); }
-
-.menu-badge-due { background: var(--accent-amber); color: var(--on-accent); }
-
-@media (max-width: 640px) {
-  /* The chips move under the name rather than squeezing it out. */
-  .board-card-top, .schedule-top { flex-wrap: wrap; }
-  .board-name-btn, .schedule-name { flex: 1 1 100%; white-space: normal; }
-  .board-card-meta, .board-draft-hint { padding-left: 0; }
-  .board-period input[type="date"] { width: 106px; }
-  .board-detail { max-height: 72%; }
-}
 
 /* --- 일정 알림 설정 ------------------------------------------------------- */
 
@@ -6269,3 +6215,26 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   .digest-actions .btn-secondary, .digest-actions .btn-primary { flex: 1; justify-content: center; }
   .digest-spacer { display: none; }
 }
+
+/* The profile photo, changed where the name is changed. */
+.avatar-edit { position: relative; flex-shrink: 0; line-height: 0; }
+.avatar-edit img { object-fit: cover; }
+
+.avatar-edit-btn {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1.5px solid var(--bg-secondary);
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+
+.avatar-edit-btn:disabled { cursor: default; opacity: 0.7; }

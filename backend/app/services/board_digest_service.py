@@ -33,15 +33,23 @@ DEFAULTS = {
     "send_minute": 0,
     # Which horizons to include. A digest with every horizon on is a wall of
     # text; one with none is an empty mail.
-    "horizons": ["today", "tomorrow", "week", "month"],
+    "horizons": ["today", "tomorrow", "d7", "d30"],
 }
 
+# Rolling windows, not calendar boundaries.
+#
+# "이번 주" and "이번 달" were the honest reading of those words, but on a Sunday
+# or the last of the month they cover nothing at all, and the mail arrived
+# almost empty on exactly the days someone is planning the week ahead. Counting
+# forward from today always looks the same distance ahead.
+HORIZONS = ["today", "tomorrow", "d7", "d30"]
 HORIZON_LABELS = {
     "today": "오늘 중",
     "tomorrow": "내일 중",
-    "week": "이번 주 중",
-    "month": "이번 달 중",
+    "d7": "7일 이내",
+    "d30": "30일 이내",
 }
+HORIZON_DAYS = {"today": 0, "tomorrow": 1, "d7": 7, "d30": 30}
 
 
 def _key(workspace_id) -> str:
@@ -70,8 +78,10 @@ async def save_settings(db: AsyncSession, workspace_id, incoming: dict) -> dict:
     current["send_hour"] = max(0, min(23, int(current["send_hour"])))
     current["send_minute"] = max(0, min(59, int(current["send_minute"])))
     current["enabled"] = bool(current["enabled"])
-    horizons = [h for h in (current.get("horizons") or []) if h in HORIZON_LABELS]
-    current["horizons"] = horizons or list(DEFAULTS["horizons"])
+    # Kept in the fixed order so the mail's sections always read nearest first,
+    # whatever order they arrived in.
+    chosen = {h for h in (current.get("horizons") or []) if h in HORIZON_LABELS}
+    current["horizons"] = [h for h in HORIZONS if h in chosen] or list(DEFAULTS["horizons"])
 
     row = (await db.execute(
         select(AppSetting).where(AppSetting.key == _key(workspace_id))
@@ -89,41 +99,25 @@ def local_today(utc_offset_hours: int) -> date:
 
 
 def horizon_bounds(today: date) -> dict:
-    """
-    The last day each horizon covers.
-
-    "This week" ends on the coming Sunday and "this month" on the last of the
-    month — a horizon is a real calendar boundary, not "seven days from now".
-    Someone reading "이번 주 중" means the week they are in.
-    """
-    week_end = today + timedelta(days=(6 - today.weekday()))
-    if today.month == 12:
-        month_end = date(today.year, 12, 31)
-    else:
-        month_end = date(today.year, today.month + 1, 1) - timedelta(days=1)
-    return {
-        "today": today,
-        "tomorrow": today + timedelta(days=1),
-        "week": week_end,
-        "month": month_end,
-    }
+    """The last day each horizon covers, counted forward from today."""
+    return {name: today + timedelta(days=days) for name, days in HORIZON_DAYS.items()}
 
 
 def bucket_of(due: date, today: date, bounds: dict) -> Optional[str]:
     """
-    Which horizon a deadline belongs to — the nearest one that contains it.
+    Which horizon a deadline belongs to — the nearest one that contains it,
+    and only that one.
+
+    The sections do not overlap: something due tomorrow appears under 내일 중
+    and nowhere else. Repeating it under every wider window would make the
+    same three tasks fill the mail four times over.
 
     Anything already late is reported under 오늘 rather than dropped: a missed
     deadline is the most urgent thing in the list, not the least.
     """
-    if due <= bounds["today"]:
-        return "today"
-    if due <= bounds["tomorrow"]:
-        return "tomorrow"
-    if due <= bounds["week"]:
-        return "week"
-    if due <= bounds["month"]:
-        return "month"
+    for name in HORIZONS:
+        if due <= bounds[name]:
+            return name
     return None
 
 

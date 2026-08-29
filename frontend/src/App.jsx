@@ -64,7 +64,6 @@ import {
   listFavoriteIds,
   setFavorite,
   createBoard,
-  listWorkspaceTasks,
   deleteFolder,
   updateFolder,
   getSystemStats,
@@ -726,7 +725,6 @@ export default function App() {
   // Bumped whenever a board changes, so the 일정 tab reflects it without the
   // user having to ask — the same rule the rest of the app follows.
   const [scheduleRefreshToken, setScheduleRefreshToken] = useState(0);
-  const [dueSoonCount, setDueSoonCount] = useState(0);
 
   // The badge is what tells an administrator there is anything to look at, so
   // it is refreshed on a slow interval rather than only on page load.
@@ -782,19 +780,6 @@ export default function App() {
       setPendingReportCount(res.pending || 0);
     } catch (e) { /* best-effort */ }
   }, [currentUser?.is_admin, activeWorkspace?.is_shared]);
-
-  // What is already late or due within three days. A number on the tab is only
-  // worth showing if it means "look at this now", so it deliberately is not a
-  // count of everything outstanding.
-  const refreshDueSoonCount = useCallback(async () => {
-    if (!activeWorkspace?.id) { setDueSoonCount(0); return; }
-    try {
-      const res = await listWorkspaceTasks({ workspaceId: activeWorkspace.id, pageSize: 100 });
-      setDueSoonCount((res.items || []).filter((t) => t.days_left !== null && t.days_left <= 3).length);
-    } catch (e) { /* the tab simply shows no badge */ }
-  }, [activeWorkspace?.id]);
-
-  useEffect(() => { refreshDueSoonCount(); }, [refreshDueSoonCount, scheduleRefreshToken]);
 
   useEffect(() => {
     refreshReportCount();
@@ -2081,7 +2066,6 @@ export default function App() {
           setIsNewFolderOpen(true);
         }}
         onOpenUpload={() => setIsUploadOpen(true)}
-        dueSoonCount={dueSoonCount}
         onFolderContextMenu={handleFolderContextMenu}
         onDirectMoveItems={handleDirectMoveItems}
         onTransferItems={handleTransferItems}

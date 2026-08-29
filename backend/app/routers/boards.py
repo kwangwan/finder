@@ -251,7 +251,8 @@ async def get_board(
         "workspace_id": str(board.workspace_id) if board.workspace_id else None,
         "can_write": can_write,
         "assignable_users": [
-            {"id": str(u.id), "name": (u.username or u.name or u.email)} for u in members
+            {"id": str(u.id), "name": (u.username or u.name or u.email), "avatar": u.avatar_url}
+            for u in members
         ],
         "tasks": await board_service.list_board_tasks(db, file_id),
     }

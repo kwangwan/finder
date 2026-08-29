@@ -37,7 +37,6 @@ export default function Sidebar({
   onSelectView,
   currentUser,
   pendingReportCount = 0,
-  dueSoonCount = 0,
   onNewNote,
   onNewFolder,
   onOpenUpload,
@@ -347,7 +346,6 @@ export default function Sidebar({
         >
           <CalendarCheck size={16} />
           <span>일정</span>
-          {dueSoonCount > 0 && <span className="menu-badge menu-badge-due">{dueSoonCount}</span>}
         </li>
         <li 
           className={`menu-item ${activeView === 'favorites' ? 'active' : ''}`}

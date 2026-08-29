@@ -19,6 +19,7 @@ import {
   BookOpen as LuBookOpen,
   Briefcase as LuBriefcase,
   Calendar as LuCalendar,
+  Camera as LuCamera,
   CalendarCheck as LuCalendarCheck,
   CalendarClock as LuCalendarClock,
   Check as LuCheck,
@@ -78,6 +79,7 @@ import {
   LogIn as LuLogIn,
   LogOut as LuLogOut,
   Mail as LuMail,
+  MessageSquare as LuMessageSquare,
   Maximize2 as LuMaximize2,
   Minimize2 as LuMinimize2,
   Minus as LuMinus,
@@ -169,7 +171,9 @@ import {
   Heading2 as PxHeading2,
   Heading3 as PxHeading3,
   Home as PxHome,
+  Camera as PxCamera,
   Image as PxImage,
+  Message as PxMessage,
   Key as PxKey,
   Link as PxLink,
   Loader as PxLoader,
@@ -254,6 +258,7 @@ export const Bold = makeIcon(LuBold, null);
 export const BookOpen = makeIcon(LuBookOpen, PxBookOpen);
 export const Briefcase = makeIcon(LuBriefcase, PxBriefcase);
 export const Calendar = makeIcon(LuCalendar, PxCalendar);
+export const Camera = makeIcon(LuCamera, PxCamera);
 // pixelarticons has no dated-checkmark variant, so both fall back to its
 // plain calendar in the matrix theme rather than to a mismatched glyph.
 export const CalendarCheck = makeIcon(LuCalendarCheck, PxCalendar);
@@ -315,6 +320,7 @@ export const Lock = makeIcon(LuLock, PxLock);
 export const LogIn = makeIcon(LuLogIn, PxLogin);
 export const LogOut = makeIcon(LuLogOut, PxLogout);
 export const Mail = makeIcon(LuMail, PxMail);
+export const MessageSquare = makeIcon(LuMessageSquare, PxMessage);
 export const Maximize2 = makeIcon(LuMaximize2, PxExpand);
 export const Minimize2 = makeIcon(LuMinimize2, PxCollapse);
 export const Minus = makeIcon(LuMinus, PxMinus);

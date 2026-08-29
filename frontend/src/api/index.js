@@ -1397,6 +1397,38 @@ export async function reorderBoardTasks(fileId, parentTaskId, taskIds) {
   return res.json();
 }
 
+/**
+ * Replace this account's photo.
+ *
+ * Stored here rather than linked: an address on someone else's server can
+ * change or disappear, and this one has to keep working for everyone who sees
+ * this person's name on a task.
+ */
+export async function uploadAvatar(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE}/auth/avatar`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `이미지를 올리지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
+/** Go back to the photo the identity provider supplies. */
+export async function removeAvatar() {
+  const res = await fetch(`${API_BASE}/auth/avatar`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `되돌리지 못했습니다. (${res.status})`);
+  }
+  return res.json();
+}
+
 /** When the daily deadline mail goes out, and by whose clock. */
 export async function getDigestSettings(workspaceId) {
   const res = await fetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, { headers: authHeaders() });

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { updateMyName } from '../../api';
+import { updateMyName, uploadAvatar } from '../../api';
+import { useDialog } from '../../context/DialogContext';
 import {
   Search,
   ChevronsRight,
@@ -18,6 +19,8 @@ import {
   Terminal,
   Edit3,
   Check,
+  Camera,
+  Loader2,
   X
 } from '../../utils/icons';
 
@@ -46,7 +49,10 @@ export default function TopBar({
   onLogout,
   onUserUpdated
 }) {
+  const { showAlert } = useDialog();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const avatarRef = useRef(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [nameError, setNameError] = useState('');
@@ -148,13 +154,46 @@ export default function TopBar({
               {/* User Profile Header */}
               <div className="dropdown-user-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  {currentUser?.picture ? (
-                    <img src={currentUser.picture} alt="" style={{ width: 34, height: 34, borderRadius: '50%' }} />
-                  ) : (
-                    <div className="user-avatar-fallback" style={{ width: 34, height: 34, fontSize: '0.95rem' }}>
-                      {(currentUser?.name || currentUser?.email || 'U')[0].toUpperCase()}
-                    </div>
-                  )}
+                  {/* The photo everyone else sees beside this person's name on
+                      a task, so it is changed where the name is changed. */}
+                  <div className="avatar-edit">
+                    {currentUser?.picture ? (
+                      <img src={currentUser.picture} alt="" style={{ width: 34, height: 34, borderRadius: '50%' }} />
+                    ) : (
+                      <div className="user-avatar-fallback" style={{ width: 34, height: 34, fontSize: '0.95rem' }}>
+                        {(currentUser?.name || currentUser?.email || 'U')[0].toUpperCase()}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="avatar-edit-btn"
+                      title={isSavingAvatar ? '올리는 중...' : '프로필 사진 변경'}
+                      disabled={isSavingAvatar}
+                      onClick={() => avatarRef.current?.click()}
+                    >
+                      {isSavingAvatar ? <Loader2 size={11} className="spin" /> : <Camera size={11} />}
+                    </button>
+                    <input
+                      ref={avatarRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      style={{ display: 'none' }}
+                      onChange={async (e) => {
+                        const picked = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!picked) return;
+                        setIsSavingAvatar(true);
+                        try {
+                          const res = await uploadAvatar(picked);
+                          onUserUpdated?.({ ...currentUser, picture: res.picture });
+                        } catch (err) {
+                          await showAlert({ title: '사진을 바꾸지 못했습니다', message: err.message, type: 'error' });
+                        } finally {
+                          setIsSavingAvatar(false);
+                        }
+                      }}
+                    />
+                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {isEditingName ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
