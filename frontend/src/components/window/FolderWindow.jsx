@@ -63,6 +63,7 @@ export default function FolderWindow({
   onClipboardPaste,
   onTransferItems,
   onUploadFiles,
+  onUndo,
   externalRefreshToken = 0,
 }) {
   const { id, folderId, workspaceId, position, size, isMinimized, isMaximized, zIndex } = windowState;
@@ -319,7 +320,7 @@ export default function FolderWindow({
     }
     if (mod && key === 'x' && selectedCount) {
       e.preventDefault(); e.stopPropagation();
-      onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId);
+      onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId, folderId ?? null);
       return;
     }
     if (mod && key === 'c' && selectedCount) {
@@ -330,6 +331,16 @@ export default function FolderWindow({
     if (mod && key === 'v') {
       e.preventDefault(); e.stopPropagation();
       onClipboardPaste?.(folderId, workspaceId, refresh);
+      return;
+    }
+    // The app's global undo bails whenever focus is inside a window — the
+    // preview window's editor owns its own undo stack and must not have the
+    // app's stack fire underneath it. A folder window has no such stack, so
+    // it forwards instead: undoing the move you just made here is exactly
+    // when you reach for it.
+    if (mod && key === 'z' && !e.shiftKey) {
+      e.preventDefault(); e.stopPropagation();
+      onUndo?.();
       return;
     }
     if (e.key === 'Escape' && selectedCount) {
@@ -368,6 +379,7 @@ export default function FolderWindow({
         fileIds: items.fileIds,
         folderIds: items.folderIds,
         sourceWorkspaceId: intent.sourceWorkspaceId || workspaceId,
+        sourceFolderId: items.sourceFolderId ?? null,
         targetWorkspaceId: workspaceId,
         targetFolderId,
         mode: intent.mode,
@@ -388,6 +400,7 @@ export default function FolderWindow({
       label: item.name,
       count: sel.fileIds.length + sel.folderIds.length,
       workspaceId,
+      sourceFolderId: folderId ?? null,
     });
   };
 

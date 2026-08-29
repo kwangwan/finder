@@ -17,12 +17,17 @@ const PAYLOAD_TYPE = 'kb_items';
 // a copy, and show the right cursor for it.
 const WS_TYPE_PREFIX = 'application/x-kb-ws-';
 
-export function setItemDragData(e, { fileIds = [], folderIds = [], label, count, workspaceId = null } = {}) {
+export function setItemDragData(e, { fileIds = [], folderIds = [], label, count, workspaceId = null, sourceFolderId = null } = {}) {
   // workspaceId travels with the payload because a drop target can belong to a
   // different workspace than the drag started in (a folder window can show
   // any workspace). The target compares the two to decide whether the drop is
   // a move within one workspace or a copy across two.
-  e.dataTransfer.setData(MIME, JSON.stringify({ type: PAYLOAD_TYPE, fileIds, folderIds, workspaceId }));
+  //
+  // sourceFolderId travels for undo. Where an item came from was read off the
+  // main explorer's own file list, which does not contain a file dragged out
+  // of a folder window — so those moves recorded no origin and "되돌리기"
+  // reported success while putting nothing back.
+  e.dataTransfer.setData(MIME, JSON.stringify({ type: PAYLOAD_TYPE, fileIds, folderIds, workspaceId, sourceFolderId }));
   e.dataTransfer.setData(`${WS_TYPE_PREFIX}${workspaceId || 'none'}`, '1');
   e.dataTransfer.effectAllowed = 'copyMove';
   if (label) setDragLabel(e, label, count ?? (fileIds.length + folderIds.length));
@@ -93,7 +98,12 @@ export function getDraggedItems(e) {
     const fileIds = Array.isArray(parsed.fileIds) ? parsed.fileIds : [];
     const folderIds = Array.isArray(parsed.folderIds) ? parsed.folderIds : [];
     if (fileIds.length === 0 && folderIds.length === 0) return null;
-    return { fileIds, folderIds, workspaceId: parsed.workspaceId ?? null };
+    return {
+      fileIds,
+      folderIds,
+      workspaceId: parsed.workspaceId ?? null,
+      sourceFolderId: parsed.sourceFolderId ?? null,
+    };
   } catch {
     return null;
   }

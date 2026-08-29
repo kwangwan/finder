@@ -330,6 +330,7 @@ export default function FolderExplorer({
             fileIds: items.fileIds,
             folderIds: items.folderIds,
             sourceWorkspaceId: intent.sourceWorkspaceId || workspaceId,
+            sourceFolderId: items.sourceFolderId ?? null,
             targetWorkspaceId: workspaceId,
             targetFolderId,
             mode: intent.mode,
@@ -459,6 +460,12 @@ export default function FolderExplorer({
   // inviting an action the server refuses.
   const isSharedRoot = isSharedWorkspace && !currentFolder?.id;
 
+  // The shared home holds people's folders and no files — but that is a fact
+  // about the *home listing*, not about every view that happens to have no
+  // current folder. 문서 and 즐겨찾기 are queries across all folders, and
+  // hiding their results left a pager sitting above an empty page.
+  const isSharedHomeListing = isSharedRoot && (activeView === 'all' || activeView === 'folder');
+
   // Favourites are the other list that grows without anyone tidying it, so it
   // is fetched the same way as the shared root rather than rendered whole.
   const isFavoritesView = activeView === 'favorites';
@@ -466,7 +473,7 @@ export default function FolderExplorer({
   // Both are server-paged, server-searched folder lists. Handing the whole
   // list to the client and filtering it here would mean downloading every
   // account's folder — or every shortcut — to show twenty of them.
-  const isRemoteFolderList = isSharedRoot || isFavoritesView;
+  const isRemoteFolderList = isSharedHomeListing || isFavoritesView;
   const ROOT_PAGE_SIZE = 24;
   const [rootQuery, setRootQuery] = useState('');
   const [rootSearch, setRootSearch] = useState('');
@@ -627,18 +634,28 @@ export default function FolderExplorer({
 
   const dragCounter = useRef(0);
 
+  // Dropping on the explorer's own background means "put this in the folder I
+  // am looking at". Two different drags land here — files from the desktop,
+  // which upload, and items dragged from inside the app (a folder window, the
+  // sidebar, another card), which move or copy. Only the first was handled, so
+  // dragging out of a folder window onto the listing did nothing at all.
+  const backgroundDropProps = folderDropProps(currentFolder?.id ?? null);
+
   const handleDragEnter = (e) => {
+    if (isItemDrag(e)) return;
     e.preventDefault();
     dragCounter.current += 1;
     setIsDragOver(true);
   };
 
   const handleDragOver = (e) => {
+    if (isItemDrag(e)) { backgroundDropProps.onDragOver(e); return; }
     e.preventDefault();
     setIsDragOver(true);
   };
 
   const handleDragLeave = (e) => {
+    if (isItemDrag(e)) { backgroundDropProps.onDragLeave(e); return; }
     e.preventDefault();
     dragCounter.current -= 1;
     if (dragCounter.current <= 0) {
@@ -648,6 +665,7 @@ export default function FolderExplorer({
   };
 
   const handleDrop = async (e) => {
+    if (isItemDrag(e)) { backgroundDropProps.onDrop(e); return; }
     e.preventDefault();
     setIsDragOver(false);
     dragCounter.current = 0;
@@ -749,7 +767,7 @@ export default function FolderExplorer({
       }
       if (mod && key === 'x' && selectedCount) {
         e.preventDefault();
-        onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId);
+        onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId, currentFolder?.id ?? null);
         return;
       }
       if (mod && key === 'c' && selectedCount) {
@@ -1046,7 +1064,7 @@ export default function FolderExplorer({
           )}
         </div>
 
-        {!isSharedRoot && (
+        {!isSharedHomeListing && (
         <div className="explorer-toolbar-right">
           <div className="sort-control-group">
             <span className="sort-label hide-mobile">
@@ -1201,7 +1219,8 @@ export default function FolderExplorer({
                     label: sub.name,
                     count,
                     workspaceId,
-                  });
+                    sourceFolderId: currentFolder?.id ?? null,
+                    });
                 }}
                 {...folderDropProps(sub.id)}
               >
@@ -1286,7 +1305,7 @@ export default function FolderExplorer({
 
       {/* 2. Files Grid Section — absent at the shared root, which holds only
              people's folders. */}
-      <div style={isSharedRoot ? { display: 'none' } : undefined}>
+      <div style={isSharedHomeListing ? { display: 'none' } : undefined}>
         <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
           {activeView === 'notes' ? `문서 (${totalItemCount})` : activeView === 'favorites' ? `즐겨찾기 항목 (${totalItemCount})` : `문서 및 파일 (${totalItemCount})`}
         </div>
@@ -1425,6 +1444,7 @@ export default function FolderExplorer({
                       label: file.name,
                       count: sel.fileIds.length + sel.folderIds.length,
                       workspaceId,
+                      sourceFolderId: currentFolder?.id ?? null,
                     });
                   }}
                   onClick={(e) => handleCardClick(file, e)}
@@ -1666,7 +1686,7 @@ export default function FolderExplorer({
             type="button"
             className="btn-secondary"
             title="잘라내기 (Ctrl+X)"
-            onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId)}
+            onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId, currentFolder?.id ?? null)}
             
           >
             <Scissors size={15} />

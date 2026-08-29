@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_approved_user, get_current_admin_user
-from app.models import ContentReport, FileItem, User, Folder
+from app.models import ContentReport, FileItem, User, Folder, Workspace
 from app.services.access_service import access_service
 
 router = APIRouter(prefix="/api/reports", tags=["Content Reports"])
@@ -27,6 +27,25 @@ class CreateReportRequest(BaseModel):
     file_id: uuid.UUID
     reason: str = Field(..., max_length=64)
     detail: Optional[str] = Field(None, max_length=2000)
+
+
+def _scoped_to_shared(stmt):
+    """
+    Restrict a report query to files in the shared workspace.
+
+    Reporting is offered nowhere else — a private or team workspace has a
+    chosen set of members who already answer to each other — so a report about
+    anything outside it is either stale or something that should never have
+    been created. Scoping the query rather than trusting that keeps the queue
+    honest about what it is for.
+    """
+    return stmt.where(
+        ContentReport.file_id.in_(
+            select(FileItem.id)
+            .join(Workspace, Workspace.id == FileItem.workspace_id)
+            .where(Workspace.is_shared == True)  # noqa: E712
+        )
+    )
 
 
 @router.post("", status_code=201)
@@ -87,8 +106,14 @@ async def pending_count(
     admin_user: User = Depends(get_current_admin_user)
 ):
     """Just the number, for the sidebar badge."""
+    # Distinct files, matching what the queue shows. Five reports on one file
+    # is one thing to look at; a badge saying 5 sends an administrator looking
+    # for four more.
     n = (await db.execute(
-        select(func.count(ContentReport.id)).where(ContentReport.status == "pending")
+        _scoped_to_shared(
+            select(func.count(func.distinct(ContentReport.file_id)))
+            .where(ContentReport.status == "pending")
+        )
     )).scalar_one() or 0
     return {"pending": n}
 
@@ -104,6 +129,7 @@ async def list_reports(
     stmt = select(ContentReport).order_by(desc(ContentReport.created_at)).limit(limit)
     if status_filter != "all":
         stmt = stmt.where(ContentReport.status == status_filter)
+    stmt = _scoped_to_shared(stmt)
     reports = (await db.execute(stmt)).scalars().all()
 
     file_ids = {r.file_id for r in reports}
@@ -144,7 +170,47 @@ async def list_reports(
             },
         }
 
-    return {"reports": [row(r) for r in reports]}
+    # Grouped by file, not listed per report.
+    #
+    # Acting on one report already closes every other report on the same file,
+    # because they all describe the one decision being made. Showing them as
+    # separate rows meant an administrator read the same file five times to
+    # make that decision once — and the four rows that vanished after acting
+    # on the first looked like a bug. One card per file, carrying how many
+    # people reported it and what they each said.
+    grouped = {}
+    order = []
+    for r in reports:
+        key = str(r.file_id)
+        if key not in grouped:
+            grouped[key] = row(r)
+            grouped[key]["report_count"] = 0
+            grouped[key]["reports"] = []
+            order.append(key)
+        entry = grouped[key]
+        entry["report_count"] += 1
+        reporter = users.get(r.reporter_id) if r.reporter_id else None
+        entry["reports"].append({
+            "id": str(r.id),
+            "reason": r.reason,
+            "reason_label": REASONS.get(r.reason, r.reason),
+            "detail": r.detail,
+            "created_at": r.created_at,
+            "reporter": (reporter.username or reporter.name or reporter.email) if reporter else "(탈퇴한 이용자)",
+        })
+
+    for entry in grouped.values():
+        # The distinct reasons, most-cited first: five people picking the same
+        # one is a different signal from five people picking five.
+        counts = {}
+        for rep in entry["reports"]:
+            counts[rep["reason_label"]] = counts.get(rep["reason_label"], 0) + 1
+        entry["reason_summary"] = [
+            {"label": label, "count": n}
+            for label, n in sorted(counts.items(), key=lambda kv: -kv[1])
+        ]
+
+    return {"reports": [grouped[k] for k in order]}
 
 
 class ResolveRequest(BaseModel):

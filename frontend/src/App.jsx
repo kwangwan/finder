@@ -599,7 +599,7 @@ export default function App() {
   // Folders move one PUT each — there is no batch endpoint for them, and a
   // drag realistically carries one or a handful, not thousands like a file
   // multi-select can.
-  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null, { announce = true, undoable = true } = {}) => {
+  const handleDirectMoveItems = async (fileIds = [], folderIds = [], targetFolderId = null, { announce = true, undoable = true, sourceFolderId = undefined } = {}) => {
     if (!activeWorkspace?.id) return;
     if (!fileIds.length && !folderIds.length) return;
 
@@ -607,11 +607,19 @@ export default function App() {
     // drag can pull items out of several different folders, so "put it back"
     // has to mean the folder each one actually came from — a single origin
     // would scatter them somewhere they never were.
+    // `files` only holds what the main explorer is showing, so a file dragged
+    // or cut out of a folder window is not in it — those moves recorded no
+    // origin at all and "되돌리기" put nothing back while reporting success.
+    // The drag and the clipboard both carry where they came from for exactly
+    // this; a single drag comes from a single folder.
     const originById = new Map();
     files.forEach((f) => { if (fileIds.includes(f.id)) originById.set(f.id, f.folder_id ?? null); });
+    if (sourceFolderId !== undefined) {
+      fileIds.forEach((fid) => { if (!originById.has(fid)) originById.set(fid, sourceFolderId ?? null); });
+    }
     const folderOrigins = folderIds.map((id) => {
       const node = findFolderById(folders, id);
-      return { id, parentId: node?.parent_id ?? null };
+      return { id, parentId: node ? (node.parent_id ?? null) : (sourceFolderId ?? null) };
     });
 
     try {
@@ -697,6 +705,19 @@ export default function App() {
 
   useEffect(() => { refreshFavoriteFolders(); }, [refreshFavoriteFolders]);
 
+  // The queue carries a summary of the file, not the file record itself — the
+  // window needs the real one, and opening it with the summary left a window
+  // that appeared and then vanished when the state sync re-read it by id.
+  const handleOpenReportedFile = useCallback(async (summary) => {
+    if (!summary?.id) return;
+    try {
+      const full = await getFileDetail(summary.id);
+      windowManager.openWindow(full);
+    } catch (err) {
+      showToast(err.message || '파일을 열지 못했습니다. 이미 삭제되었을 수 있습니다.', { type: 'error' });
+    }
+  }, [windowManager, showToast]);
+
   const handleToggleFolderFavorite = useCallback(async (folder) => {
     const on = !favoriteFolderIds.has(folder.id);
     // Flipped first: the star is a direct response to a click, and waiting a
@@ -720,12 +741,12 @@ export default function App() {
   }, [favoriteFolderIds]);
 
   const refreshReportCount = useCallback(async () => {
-    if (!currentUser?.is_admin) { setPendingReportCount(0); return; }
+    if (!currentUser?.is_admin || !activeWorkspace?.is_shared) { setPendingReportCount(0); return; }
     try {
       const res = await getPendingReportCount();
       setPendingReportCount(res.pending || 0);
     } catch (e) { /* best-effort */ }
-  }, [currentUser?.is_admin]);
+  }, [currentUser?.is_admin, activeWorkspace?.is_shared]);
 
   useEffect(() => {
     refreshReportCount();
@@ -755,6 +776,7 @@ export default function App() {
     fileIds = [],
     folderIds = [],
     sourceWorkspaceId = null,
+    sourceFolderId = undefined,
     targetWorkspaceId = null,
     targetFolderId = null,
     mode = 'move',
@@ -763,7 +785,7 @@ export default function App() {
     const sameWorkspace = !sourceWorkspaceId || !targetWorkspaceId || sourceWorkspaceId === targetWorkspaceId;
 
     if (sameWorkspace && mode === 'move') {
-      await handleDirectMoveItems(fileIds, folderIds, targetFolderId);
+      await handleDirectMoveItems(fileIds, folderIds, targetFolderId, { sourceFolderId });
       bumpWindowRefresh();
       return;
     }
@@ -803,9 +825,18 @@ export default function App() {
   // workspace because neither move nor copy crosses a workspace boundary.
   const clipboardHasItems = !!clipboard && (clipboard.fileIds.length > 0 || clipboard.folderIds.length > 0);
 
-  const handleClipboardCut = (fileIds = [], folderIds = [], workspaceId = undefined) => {
+  const handleClipboardCut = (fileIds = [], folderIds = [], workspaceId = undefined, sourceFolderId = undefined) => {
     if (!fileIds.length && !folderIds.length) return;
-    setClipboard({ mode: 'cut', workspaceId: workspaceId ?? activeWorkspace?.id ?? null, fileIds, folderIds });
+    // Where it was cut from, for the same reason the drag payload carries it:
+    // a cut made in a folder window is invisible to the main file list, so
+    // undo would have nothing to put back.
+    setClipboard({
+      mode: 'cut',
+      workspaceId: workspaceId ?? activeWorkspace?.id ?? null,
+      sourceFolderId: sourceFolderId ?? activeFolderId ?? null,
+      fileIds,
+      folderIds,
+    });
     showToast(`${fileIds.length + folderIds.length}개 항목을 잘라냈습니다. 붙여넣을 위치에서 Ctrl+V를 누르세요.`, { type: 'info' });
   };
 
@@ -831,6 +862,7 @@ export default function App() {
         fileIds,
         folderIds,
         sourceWorkspaceId: clipboard.workspaceId,
+        sourceFolderId: clipboard.sourceFolderId,
         targetWorkspaceId: destWorkspaceId,
         targetFolderId,
         mode: mode === 'cut' ? 'move' : 'copy',
@@ -855,7 +887,10 @@ export default function App() {
         // A move is exactly what drag-and-drop already does, down to the
         // folder cycle guard the server applies, so paste reuses it rather
         // than growing a second path that could drift from it.
-        const moved = await handleDirectMoveItems(fileIds, folderIds, targetFolderId, { announce: false });
+        const moved = await handleDirectMoveItems(fileIds, folderIds, targetFolderId, {
+          announce: false,
+          sourceFolderId: clipboard.sourceFolderId,
+        });
         setClipboard(null);  // cut is consumed by its paste, as in Explorer
         bumpWindowRefresh();
         onDone?.();
@@ -870,6 +905,9 @@ export default function App() {
       }
 
       const res = await batchCopyItems(activeWorkspace.id, fileIds, folderIds, targetFolderId);
+      // The copy itself runs on the server and the banner reloads everything
+      // when it lands, but the queued state is worth showing straight away.
+      bumpWindowRefresh();
       onDone?.();
 
       if (!res.job_id) {
@@ -1562,13 +1600,16 @@ export default function App() {
   const clipboardMenuItems = (fileIds, folderIds, pasteTargetId, ctx = null) => {
     const sourceWorkspaceId = ctx?.workspaceId ?? activeWorkspace?.id ?? null;
     const pasteWorkspaceId = ctx?.workspaceId ?? activeWorkspace?.id ?? null;
+    // A menu raised inside a folder window acts on that window's folder, not
+    // on whatever the main explorer happens to be showing.
+    const sourceFolderId = ctx?.folderId !== undefined ? ctx.folderId : (activeFolderId ?? null);
     // The handlers accept either modifier; the hint shows the one the user's
     // own keyboard actually has, so it isn't wrong on half the machines.
     const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
     const items = [];
     if (fileIds.length || folderIds.length) {
       items.push(
-        { label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds, sourceWorkspaceId) },
+        { label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds, sourceWorkspaceId, sourceFolderId) },
         { label: '복사', icon: Copy, shortcut: `${mod}C`, onClick: () => handleClipboardCopy(fileIds, folderIds, sourceWorkspaceId) },
       );
     }
@@ -1681,6 +1722,12 @@ export default function App() {
     const fileIds = selection?.fileIds?.length ? selection.fileIds : [file.id];
     const folderIds = selection?.folderIds ?? [];
     const isMedia = file.file_type === 'image' || file.file_type === 'video' || file.file_type === 'pdf';
+    // Whether reporting applies is a fact about *this file's* workspace, not
+    // about the one the app happens to be switched to. A folder window can be
+    // showing the shared workspace while the app is elsewhere, and the entry
+    // went missing there — and appeared on private files in the reverse case.
+    const fileWorkspaceId = file.workspace_id ?? ctx?.workspaceId ?? activeWorkspace?.id ?? null;
+    const isSharedFile = workspaces.some(w => w.id === fileWorkspaceId && w.is_shared);
     setContextMenu({
       isOpen: true,
       x: e.clientX,
@@ -1709,7 +1756,7 @@ export default function App() {
         },
         // Only where it means something: reporting exists for material other
         // people can see, which is the shared workspace.
-        ...(activeWorkspace?.is_shared && file.created_by !== currentUser?.id ? [{
+        ...(isSharedFile && file.created_by !== currentUser?.id ? [{
           label: '신고하기',
           icon: Flag,
           onClick: () => setReportFile(file),
@@ -1947,7 +1994,7 @@ export default function App() {
 
         {activeView === 'reports' ? (
           <ReportsExplorer
-            onOpenFile={(f) => windowManager.openWindow(f)}
+            onOpenFile={handleOpenReportedFile}
             onResolved={() => {
               refreshReportCount();
               refreshFiles();
@@ -2154,6 +2201,7 @@ export default function App() {
           uploadManager.checkAndQueueFiles(picked, folderId, workspaceId);
           setIsUploadOpen(true);
         }}
+        onUndo={runUndo}
         externalRefreshToken={windowRefreshToken}
       />
 

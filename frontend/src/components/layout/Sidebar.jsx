@@ -99,6 +99,7 @@ export default function Sidebar({
             fileIds: items.fileIds,
             folderIds: items.folderIds,
             sourceWorkspaceId: intent.sourceWorkspaceId || wsId,
+            sourceFolderId: items.sourceFolderId ?? null,
             targetWorkspaceId: wsId,
             targetFolderId,
             mode: intent.mode,
@@ -208,7 +209,7 @@ export default function Sidebar({
           draggable={true}
           onDragStart={(e) => {
             e.stopPropagation();
-            setItemDragData(e, { folderIds: [folder.id], label: folder.name, workspaceId: activeWorkspace?.id || null });
+            setItemDragData(e, { folderIds: [folder.id], label: folder.name, workspaceId: activeWorkspace?.id || null, sourceFolderId: folder.parent_id ?? null });
           }}
           onClick={() => onSelectFolder(folder.id)}
           onContextMenu={(e) => {
@@ -353,7 +354,10 @@ export default function Sidebar({
         {/* Administrators only: the queue of reported content. Kept in the
             sidebar rather than inside the dashboard because it is worked
             through while browsing, not while managing accounts. */}
-        {currentUser?.is_admin && (
+        {/* Reporting only exists in the shared workspace, so the queue for it
+            does too — in a private workspace the tab would always be empty
+            and would imply a moderation queue that does not apply there. */}
+        {currentUser?.is_admin && activeWorkspace?.is_shared && (
           <li
             className={`menu-item ${activeView === 'reports' ? 'active' : ''}`}
             onClick={() => onSelectView('reports')}

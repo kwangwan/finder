@@ -4299,8 +4299,14 @@ select option {
 .fw-crumb.current { color: var(--text-primary); }
 .fw-crumb-sep { color: var(--text-muted); opacity: 0.5; flex-shrink: 0; }
 
+/* The gutters are the only place a band selection can start — the rows and
+   tiles fill everything else, and pressing one drags that item instead. The
+   window's invisible resize strips take the outer 8px of each side, so the
+   padding has to clear those before any of it is a target: at 12px only four
+   pixels were actually reachable. The bottom strip guarantees somewhere to
+   start from even when the page is full. */
 .fw-body {
-  padding: 4px;
+  padding: 6px 22px 48px;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -4401,7 +4407,7 @@ select option {
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 6px;
   align-content: start;
-  padding: 8px;
+  padding: 8px 22px 48px;
 }
 
 /* The states that have nothing to lay out span the grid instead of being
@@ -5176,6 +5182,12 @@ textarea::placeholder {
   color: var(--text-secondary);
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+
+.report-detail-by {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
 }
 
 .report-actions {

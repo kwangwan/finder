@@ -12,6 +12,7 @@ import {
 } from '../../utils/icons';
 import { listReports, resolveReport, getThumbnailUrl } from '../../api';
 import { useDialog } from '../../context/DialogContext';
+import { useToast } from '../../context/ToastContext';
 
 const TABS = [
   { key: 'pending', label: '처리 대기' },
@@ -38,6 +39,7 @@ function formatSize(bytes) {
  */
 export default function ReportsExplorer({ onOpenFile, onResolved }) {
   const { showConfirm, showAlert } = useDialog();
+  const { showToast } = useToast();
   const [tab, setTab] = useState('pending');
   const [reports, setReports] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,7 +63,7 @@ export default function ReportsExplorer({ onOpenFile, onResolved }) {
     if (action === 'delete') {
       const confirmed = await showConfirm({
         title: '신고된 파일 삭제',
-        message: `'${report.file?.name}' 파일을 휴지통으로 옮기시겠습니까?\n올린 사람에게 삭제 안내 메일이 발송되며, 같은 파일의 다른 신고도 함께 처리됩니다.`,
+        message: `'${report.file?.name}' 파일을 휴지통으로 옮기시겠습니까?\n올린 사람에게 삭제 안내 메일이 발송됩니다.${report.report_count > 1 ? `\n이 파일에 접수된 신고 ${report.report_count}건이 함께 처리됩니다.` : ''}`,
         confirmText: '삭제',
         danger: true,
       });
@@ -73,11 +75,9 @@ export default function ReportsExplorer({ onOpenFile, onResolved }) {
       await load();
       onResolved?.();
       if (res.closed > 1) {
-        await showAlert({
-          title: '처리 완료',
-          message: `같은 파일에 대한 신고 ${res.closed}건을 함께 처리했습니다.`,
-          type: 'success',
-        });
+        // The card already said how many were attached, and the confirm
+        // repeated it — a third dialog to say it a third time is just a click.
+        showToast(`신고 ${res.closed}건을 함께 처리했습니다.`, { type: 'success' });
       }
     } catch (e) {
       await showAlert({ title: '처리 실패', message: e.message, type: 'error' });
@@ -149,12 +149,29 @@ export default function ReportsExplorer({ onOpenFile, onResolved }) {
                 </div>
 
                 <div className="report-reason">
-                  <span className="report-reason-tag">{r.reason_label}</span>
-                  <span className="report-reporter">신고: {r.reporter}</span>
+                  {(r.reason_summary || [{ label: r.reason_label, count: 1 }]).map(s => (
+                    <span key={s.label} className="report-reason-tag">
+                      {s.label}{s.count > 1 ? ` ${s.count}` : ''}
+                    </span>
+                  ))}
+                  <span className="report-reporter">
+                    신고 {r.report_count || 1}건
+                    {r.report_count > 1 ? ` · ${(r.reports || []).map(x => x.reporter).join(', ')}` : ` · ${r.reporter}`}
+                  </span>
                   <span className="report-date">{r.created_at ? new Date(r.created_at).toLocaleString('ko-KR') : ''}</span>
                 </div>
 
-                {r.detail && <div className="report-detail">“{r.detail}”</div>}
+                {/* Every reporter's own words, not just the first. Five people
+                    all saying the same thing and five saying different things
+                    are different decisions, and the difference is only in
+                    what they wrote. */}
+                {(r.reports || []).filter(x => x.detail).map(x => (
+                  <div key={x.id} className="report-detail">
+                    “{x.detail}”
+                    {r.report_count > 1 && <span className="report-detail-by"> — {x.reporter}</span>}
+                  </div>
+                ))}
+                {!(r.reports || []).length && r.detail && <div className="report-detail">“{r.detail}”</div>}
               </div>
 
               <div className="report-actions">
