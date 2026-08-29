@@ -103,6 +103,10 @@ export default function SemanticSearchModal({
   // Guards against the observer firing again for the same page while a fetch
   // is already in flight (state updates lag the scroll events).
   const isFetchingRef = useRef(false);
+  // How many results the server has returned so far for the active
+  // search — the offset for the next page. Kept separate from
+  // results.length, which can lag it when de-duplication drops rows.
+  const nextOffsetRef = useRef(0);
 
   // Focus on open & reset
   useEffect(() => {
@@ -154,6 +158,7 @@ export default function SemanticSearchModal({
       min_similarity: simThreshold
     };
     activeSearchRef.current = criteria;
+    nextOffsetRef.current = 0;
 
     isFetchingRef.current = true;
     setIsLoading(true);
@@ -162,7 +167,9 @@ export default function SemanticSearchModal({
       // A slower earlier request must not overwrite the results of a newer
       // one — the query box is debounced, not serialised.
       if (activeSearchRef.current !== criteria) return;
-      setResults(data.results || []);
+      const firstPage = data.results || [];
+      nextOffsetRef.current = firstPage.length;
+      setResults(firstPage);
       setTotalResults(data.total_results || 0);
       setHasMore(!!data.has_more);
       setDurationMs(data.duration_ms || 0);
@@ -184,18 +191,39 @@ export default function SemanticSearchModal({
     isFetchingRef.current = true;
     setIsLoadingMore(true);
     try {
-      const offset = results.length;
+      // Offset counts what the SERVER has handed over, not how many rows
+      // survived de-duplication into the list. Deriving it from
+      // results.length meant that whenever a page overlapped the previous
+      // one, the next request asked for a range it had already seen —
+      // re-requesting the same rows forever while the list stopped growing.
+      const offset = nextOffsetRef.current;
       const data = await searchDocuments({ ...criteria, limit: PAGE_SIZE, offset });
       if (activeSearchRef.current !== criteria) return; // filters changed mid-flight
       const incoming = data.results || [];
+      nextOffsetRef.current = offset + incoming.length;
+
+      // Count the new rows HERE, against the results this closure already
+      // has — not inside the setResults updater below. The updater does not
+      // run until React commits, which is after this function has already
+      // read the count, so doing it there always saw 0 and made the very
+      // first appended page look like it had added nothing: hasMore went
+      // false and the list stopped dead at 60 of 200.
+      const seen = new Set(results.map(r => r.file_id));
+      const addedCount = incoming.filter(r => !seen.has(r.file_id)).length;
+
       setResults(prev => {
         // Defensive de-dupe: appending blind would duplicate rows if a page
         // ever overlapped, and React would then warn on duplicate keys.
-        const seen = new Set(prev.map(r => r.file_id));
-        return [...prev, ...incoming.filter(r => !seen.has(r.file_id))];
+        const prevSeen = new Set(prev.map(r => r.file_id));
+        const fresh = incoming.filter(r => !prevSeen.has(r.file_id));
+        return fresh.length ? [...prev, ...fresh] : prev;
       });
       setTotalResults(data.total_results || 0);
-      setHasMore(!!data.has_more);
+      // Stop when the server says so, when it returned nothing, or when a
+      // full page contributed no new rows — that last case means the ranking
+      // is no longer advancing, and continuing would spin the observer
+      // against an unchanging list.
+      setHasMore(!!data.has_more && incoming.length > 0 && addedCount > 0);
     } catch (err) {
       console.error('Search load-more error:', err);
       setHasMore(false); // don't let a failed page spin forever
@@ -250,6 +278,16 @@ export default function SemanticSearchModal({
 
   // Keyboard navigation (Arrow keys + Enter)
   const handleKeyDown = (e) => {
+    // Escape is handled before the "no results" guard below. It used to sit
+    // after it, so pressing Escape with an empty box — or on a query that
+    // matched nothing, exactly when someone most wants out — hit the early
+    // return and the modal refused to close.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+
     if (results.length === 0) return;
 
     if (e.key === 'ArrowDown') {
@@ -264,10 +302,24 @@ export default function SemanticSearchModal({
         onSelectResult(results[selectedIndex]);
         onClose();
       }
-    } else if (e.key === 'Escape') {
-      onClose();
     }
   };
+
+  // ...and again at the window level, because the handler above only fires
+  // while the search input holds focus. Clicking a filter dropdown, the
+  // results list, or anywhere else in the modal moved focus off the input
+  // and left Escape doing nothing at all.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onWindowKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onWindowKeyDown);
+    return () => window.removeEventListener('keydown', onWindowKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 

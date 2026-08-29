@@ -232,6 +232,23 @@ class SearchService:
         # because semantic matching already filled the result pool.
         if req.include_keyword_match:
             name_term = f"%{req.query.strip()}%"
+            query_norm = req.query.strip().lower()
+            # The match score is computed HERE, in SQL, rather than in Python
+            # afterwards, so this query can order by exactly the key the final
+            # merged sort uses (score desc, then file id).
+            #
+            # It has to: the candidate pool is a LIMIT over a table with tens
+            # of thousands of rows, so it is only ever a slice of the matches.
+            # When the slice was taken in name order but the results were then
+            # re-sorted by (score, id) — and every substring hit scores the
+            # same 0.9, making id the real key — growing the pool for the next
+            # page pulled in files that interleaved by id *anywhere*, including
+            # ahead of the current offset. Page N+1 then overlapped page N
+            # instead of continuing it: paging "2026" stalled at 63 unique
+            # results while every further request returned 30 already-seen rows
+            # and has_more stayed true, so the client looped forever. Selecting
+            # in the same order the final ranking uses makes each pool a true
+            # prefix of that ranking, so offsets line up.
             name_sql = """
                 SELECT
                     f.id as file_id,
@@ -244,36 +261,39 @@ class SearchService:
                     f.is_markdown,
                     f.created_at,
                     f.updated_at,
-                    fol.name as folder_name
+                    fol.name as folder_name,
+                    CASE
+                        WHEN lower(f.name) = :q_exact THEN 1.0
+                        WHEN lower(f.name) LIKE :q_prefix THEN 0.95
+                        ELSE 0.9
+                    END as name_score
                 FROM kb_files f
                 LEFT JOIN kb_folders fol ON f.folder_id = fol.id
                 LEFT JOIN kb_users u ON f.created_by = u.id
                 WHERE f.is_trashed = FALSE
                   AND f.name ILIKE :kw
             """
-            name_params = {"kw": name_term, "limit": candidate_limit}
+            name_params = {
+                "kw": name_term,
+                "q_exact": query_norm,
+                "q_prefix": f"{query_norm}%",
+                "limit": candidate_limit,
+            }
             name_sql = self._append_filters(name_sql, name_params, req, user_ws_ids, current_user, "n_")
-            # Deterministic order so the same file can't drift between pages
-            # as the pool grows (name is not unique here, hence the id).
-            name_sql += " ORDER BY f.name ASC, f.id ASC LIMIT :limit;"
+            # Must match the final sort in search() exactly — see the note on
+            # name_score above for why selecting in a different order breaks
+            # pagination. An exact name hit ranks above a prefix hit, both
+            # above a mere substring, and all above the 0.85 the chunk-content
+            # keyword match uses: if someone types a filename, that file
+            # belongs at the top, not under a loosely-related document body.
+            name_sql += " ORDER BY name_score DESC, f.id ASC LIMIT :limit;"
 
             try:
                 name_res = await db.execute(text(name_sql), name_params)
-                query_norm = req.query.strip().lower()
 
                 for row in name_res.fetchall():
                     fid = row.file_id
-                    file_name_lower = (row.file_name or "").lower()
-                    # Rank an exact name hit above a mere substring, and both
-                    # above the 0.85 the chunk-content keyword match uses —
-                    # if someone types a filename, that file belongs at the
-                    # top rather than under a loosely-related document body.
-                    if file_name_lower == query_norm:
-                        name_score = 1.0
-                    elif file_name_lower.startswith(query_norm):
-                        name_score = 0.95
-                    else:
-                        name_score = 0.9
+                    name_score = float(row.name_score)
 
                     if fid not in best_by_file:
                         best_by_file[fid] = SearchResultItem(

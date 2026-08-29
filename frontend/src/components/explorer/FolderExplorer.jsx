@@ -21,7 +21,6 @@ import {
   MoreHorizontal,
   Home,
   ArrowUpDown,
-  ArrowUp,
   ArrowDown,
   FileImage,
   MoreVertical,
@@ -138,13 +137,6 @@ export default function FolderExplorer({
       return next.size === prev.size ? prev : next;
     });
   }, [files]);
-
-  // folderPath is root-first and ends with the folder being viewed, so the
-  // entry before last is its parent; at depth 1 there is none and "up" means
-  // the workspace root (null).
-  const parentFolder = folderPath.length >= 2 ? folderPath[folderPath.length - 2] : null;
-  const parentFolderId = parentFolder?.id ?? null;
-  const parentFolderName = parentFolder?.name ?? null;
 
   // Which drop target the pointer is currently over, so exactly one shows
   // the highlight. Root is represented by the literal 'root' rather than
@@ -385,22 +377,6 @@ export default function FolderExplorer({
       {/* Explorer Header: Breadcrumb & Actions */}
       <div className="explorer-header">
         <div className="breadcrumb-nav">
-          {/* Up one level. Doubles as a drop target so items can be moved to
-              the parent by dragging onto it, the way a file manager's "up"
-              button behaves. Only rendered inside a folder — at the root
-              there is nowhere to go up to. */}
-          {currentFolder && (
-            <button
-              type="button"
-              className="breadcrumb-up-btn"
-              onClick={() => onSelectFolder(parentFolderId)}
-              title={parentFolderName ? `상위 폴더로 (${parentFolderName})` : '상위 폴더로 (홈)'}
-              {...folderDropProps(parentFolderId)}
-            >
-              <ArrowUp size={15} />
-            </button>
-          )}
-
           <span
             className={`breadcrumb-item ${(!currentFolder && activeView === 'all') ? 'active' : ''}`}
             onClick={() => {
@@ -673,7 +649,7 @@ export default function FolderExplorer({
                 draggable={true}
                 onDragStart={(e) => {
                   e.stopPropagation();
-                  setItemDragData(e, { folderIds: [sub.id] });
+                  setItemDragData(e, { folderIds: [sub.id], label: sub.name });
                 }}
                 {...folderDropProps(sub.id)}
               >
@@ -836,7 +812,7 @@ export default function FolderExplorer({
                   draggable={true}
                   onDragStart={(e) => {
                     const ids = selectedFileIds.includes(file.id) ? selectedFileIds : [file.id];
-                    setItemDragData(e, { fileIds: ids });
+                    setItemDragData(e, { fileIds: ids, label: file.name, count: ids.length });
                   }}
                   onClick={(e) => handleCardClick(file, e)}
                   onContextMenu={(e) => {

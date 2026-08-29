@@ -10,9 +10,49 @@
 const MIME = 'application/json';
 const PAYLOAD_TYPE = 'kb_items';
 
-export function setItemDragData(e, { fileIds = [], folderIds = [] }) {
+export function setItemDragData(e, { fileIds = [], folderIds = [], label, count } = {}) {
   e.dataTransfer.setData(MIME, JSON.stringify({ type: PAYLOAD_TYPE, fileIds, folderIds }));
   e.dataTransfer.effectAllowed = 'move';
+  if (label) setDragLabel(e, label, count ?? (fileIds.length + folderIds.length));
+}
+
+/**
+ * Replace the browser's default drag ghost (a translucent snapshot of the
+ * whole card) with a small chip naming what is being dragged, so the pointer
+ * carries a readable label instead of an anonymous smear.
+ *
+ * The element has to be in the document for setDragImage to rasterise it, so
+ * it is positioned off-screen and removed on the next tick — by then the
+ * browser has already taken its snapshot.
+ */
+function setDragLabel(e, label, count) {
+  try {
+    const chip = document.createElement('div');
+    chip.textContent = count > 1 ? `${label} 외 ${count - 1}개` : label;
+    Object.assign(chip.style, {
+      position: 'fixed',
+      top: '-1000px',
+      left: '-1000px',
+      maxWidth: '320px',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      padding: '6px 10px',
+      borderRadius: '6px',
+      background: 'var(--bg-secondary, #1e293b)',
+      color: 'var(--text-primary, #f1f5f9)',
+      border: '1px solid var(--accent-primary, #3b82f6)',
+      font: '600 12px/1.2 var(--font-sans, system-ui, sans-serif)',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(chip);
+    e.dataTransfer.setDragImage(chip, 12, 12);
+    setTimeout(() => chip.remove(), 0);
+  } catch {
+    // setDragImage is unsupported in a few environments — the default ghost
+    // is a fine fallback, so never let this break the drag itself.
+  }
 }
 
 /**

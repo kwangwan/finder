@@ -185,7 +185,7 @@ export default function Sidebar({
           draggable={true}
           onDragStart={(e) => {
             e.stopPropagation();
-            setItemDragData(e, { folderIds: [folder.id] });
+            setItemDragData(e, { folderIds: [folder.id], label: folder.name });
           }}
           onClick={() => onSelectFolder(folder.id)}
           onContextMenu={(e) => {
