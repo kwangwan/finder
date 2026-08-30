@@ -155,6 +155,7 @@ async def list_reports(
             "resolution": r.resolution,
             "admin_note": r.admin_note,
             "reporter": (reporter.username or reporter.name or reporter.email) if reporter else "(탈퇴한 이용자)",
+            "reporter_display_name": reporter.name if reporter else None,
             "file": None if not f else {
                 "id": str(f.id),
                 "name": f.name,
@@ -165,6 +166,7 @@ async def list_reports(
                 "folder_id": str(f.folder_id) if f.folder_id else None,
                 "folder_name": folder.name if folder else None,
                 "uploader": (owner.username or owner.name or owner.email) if owner else "(탈퇴한 이용자)",
+                "uploader_display_name": owner.name if owner else None,
                 "thumbnail_url": f"/api/storage/thumbnail/{f.id}" if f.thumbnail_s3_key else None,
                 "content_preview": (f.content or "")[:400] if f.is_markdown else None,
             },
@@ -197,6 +199,7 @@ async def list_reports(
             "detail": r.detail,
             "created_at": r.created_at,
             "reporter": (reporter.username or reporter.name or reporter.email) if reporter else "(탈퇴한 이용자)",
+            "reporter_display_name": reporter.name if reporter else None,
         })
 
     for entry in grouped.values():

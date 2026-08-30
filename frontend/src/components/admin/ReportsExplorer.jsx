@@ -143,7 +143,15 @@ export default function ReportsExplorer({ onOpenFile, onResolved }) {
                 </div>
 
                 <div className="report-meta">
-                  <span><UserIcon size={12} /> {r.file?.uploader}</span>
+                  <span>
+                    <UserIcon size={12} />
+                    {/* Handle first, name beside it: two people can share a
+                        name, and this screen is where knowing which one
+                        matters most. */}
+                    {r.file?.uploader}
+                    {r.file?.uploader_display_name && r.file.uploader_display_name !== r.file.uploader
+                      && <span className="report-who-name"> · {r.file.uploader_display_name}</span>}
+                  </span>
                   {r.file?.folder_name && <span><FolderIcon size={12} /> {r.file.folder_name}</span>}
                   {r.file?.size_bytes ? <span>{formatSize(r.file.size_bytes)}</span> : null}
                 </div>

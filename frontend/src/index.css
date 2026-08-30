@@ -6639,3 +6639,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 }
 
 .ch-logout:hover { color: var(--text-secondary); }
+
+/* The display name beside a handle — quieter, because the handle is the one
+   that identifies. */
+.report-who-name { color: var(--text-muted); }

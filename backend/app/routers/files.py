@@ -94,13 +94,20 @@ def _display_name(user: Optional[User]) -> Optional[str]:
     return user.username or user.name or user.email.split("@")[0]
 
 async def _batch_user_names(db: AsyncSession, files: List[FileItem]) -> dict:
-    """Uploader (created_by) and last-editor (last_edited_by) names, fetched
-    in one query for a whole page of files rather than per-row."""
+    """
+    Uploader (created_by) and last-editor (last_edited_by) identities, fetched
+    in one query for a whole page of files rather than per-row.
+
+    Both halves: the handle, which is unique and is what a row shows, and the
+    display name, which is not unique but is how people know each other. A
+    place with room for both — the file's info panel — can say "@jhkim ·
+    김지현" and answer "who is that" without a second lookup.
+    """
     user_ids = {f.created_by for f in files if f.created_by} | {f.last_edited_by for f in files if f.last_edited_by}
     if not user_ids:
         return {}
     res = await db.execute(select(User).where(User.id.in_(user_ids)))
-    return {u.id: _display_name(u) for u in res.scalars().all()}
+    return {u.id: {"handle": _display_name(u), "name": u.name} for u in res.scalars().all()}
 
 def _to_file_response(
     f: FileItem,
@@ -114,15 +121,19 @@ def _to_file_response(
     if f.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{f.id}"
     if users_by_id is not None:
-        resp.creator_name = users_by_id.get(f.created_by)
-        resp.last_editor_name = users_by_id.get(f.last_edited_by)
+        creator = users_by_id.get(f.created_by) or {}
+        editor = users_by_id.get(f.last_edited_by) or {}
+        resp.creator_name = creator.get("handle")
+        resp.creator_display_name = creator.get("name")
+        resp.last_editor_name = editor.get("handle")
+        resp.last_editor_display_name = editor.get("name")
     # The stored column is the pre-per-user leftover; what this reader sees is
     # their own list. Passing None leaves whatever the model held.
     if favorite_ids is not None:
         resp.is_favorite = f.id in favorite_ids
     return resp
 
-def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None, is_favorite: Optional[bool] = None, is_task_document: bool = False) -> FileDetailResponse:
+def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None, is_favorite: Optional[bool] = None, is_task_document: bool = False, creator_display_name: Optional[str] = None, last_editor_display_name: Optional[str] = None) -> FileDetailResponse:
     resp = FileDetailResponse.model_validate(f)
     if is_favorite is not None:
         resp.is_favorite = is_favorite
@@ -131,7 +142,9 @@ def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, dow
     resp.folder_name = folder_name
     resp.download_url = download_url
     resp.creator_name = creator_name
+    resp.creator_display_name = creator_display_name
     resp.last_editor_name = last_editor_name
+    resp.last_editor_display_name = last_editor_display_name
     resp.is_task_document = is_task_document
     return resp
 
@@ -513,17 +526,22 @@ async def get_file_detail(
             print(f"[Presigned URL Warning] Could not generate download url: {e}")
 
     creator_name = None
+    creator_display_name = None
     if file_item.created_by:
         creator = await db.get(User, file_item.created_by)
         creator_name = _display_name(creator)
-    last_editor_name = creator_name
+        creator_display_name = creator.name if creator else None
+    last_editor_name, last_editor_display_name = creator_name, creator_display_name
     if file_item.last_edited_by and file_item.last_edited_by != file_item.created_by:
         last_editor = await db.get(User, file_item.last_edited_by)
         last_editor_name = _display_name(last_editor)
+        last_editor_display_name = last_editor.name if last_editor else None
 
     return _to_file_detail_response(
         file_item, folder_name=folder_name, download_url=download_url,
         creator_name=creator_name, last_editor_name=last_editor_name,
+        creator_display_name=creator_display_name,
+        last_editor_display_name=last_editor_display_name,
         is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
         is_task_document=await link_service.owning_task(db, file_item.id) is not None,
     )
@@ -696,7 +714,10 @@ async def create_markdown_note(
         print(f"[Embedding Warning] Indexing failed for note {file_item.id}: {e}")
 
     creator_name = _display_name(current_user)
-    return _to_file_detail_response(file_item, creator_name=creator_name, last_editor_name=creator_name, is_favorite=False)
+    return _to_file_detail_response(
+        file_item, creator_name=creator_name, last_editor_name=creator_name, is_favorite=False,
+        creator_display_name=current_user.name, last_editor_display_name=current_user.name,
+    )
 
 @router.put("/notes/{file_id}", response_model=FileDetailResponse)
 async def update_markdown_note(
@@ -825,12 +846,16 @@ async def update_markdown_note(
         except Exception as e:
             print(f"[Embedding Warning] Re-indexing failed for note {file_item.id}: {e}")
 
-    creator_name = _display_name(await db.get(User, file_item.created_by)) if file_item.created_by else None
-    last_editor_name = creator_name
+    creator = await db.get(User, file_item.created_by) if file_item.created_by else None
+    creator_name = _display_name(creator)
+    last_editor, last_editor_name = creator, creator_name
     if file_item.last_edited_by and file_item.last_edited_by != file_item.created_by:
-        last_editor_name = _display_name(await db.get(User, file_item.last_edited_by))
+        last_editor = await db.get(User, file_item.last_edited_by)
+        last_editor_name = _display_name(last_editor)
     return _to_file_detail_response(
         file_item, creator_name=creator_name, last_editor_name=last_editor_name,
+        creator_display_name=creator.name if creator else None,
+        last_editor_display_name=last_editor.name if last_editor else None,
         is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
     )
 
@@ -975,10 +1000,13 @@ async def restore_file_version(
     except Exception as e:
         print(f"[Embedding Warning] Re-indexing failed for note {file_item.id}: {e}")
 
-    creator_name = _display_name(await db.get(User, file_item.created_by)) if file_item.created_by else None
+    creator = await db.get(User, file_item.created_by) if file_item.created_by else None
+    creator_name = _display_name(creator)
     last_editor_name = _display_name(current_user)
     return _to_file_detail_response(
         file_item, creator_name=creator_name, last_editor_name=last_editor_name,
+        creator_display_name=creator.name if creator else None,
+        last_editor_display_name=current_user.name,
         is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
     )
 

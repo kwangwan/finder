@@ -20,13 +20,23 @@ export default function FileInfoModal({ file, onClose }) {
 
   const isMarkdown = file.is_markdown;
 
+  // The handle identifies; the display name is how people know each other.
+  // Two people may share a name, so the handle comes first and the name sits
+  // beside it — and it is left out when it says nothing the handle didn't.
+  const who = (handle, name) => {
+    if (!handle && !name) return '알 수 없음';
+    if (!handle) return name;
+    if (!name || name === handle) return `@${handle}`;
+    return `@${handle} · ${name}`;
+  };
+
   const rows = [
     { label: '종류', value: isMarkdown ? '문서' : (file.file_type ? file.file_type.toUpperCase() : '-') },
     { label: '크기', value: formatBytes(file.size_bytes) },
-    { label: '업로드한 사람', value: file.creator_name || '알 수 없음' },
+    { label: '업로드한 사람', value: who(file.creator_name, file.creator_display_name) },
   ];
   if (isMarkdown) {
-    rows.push({ label: '최종 수정자', value: file.last_editor_name || '알 수 없음' });
+    rows.push({ label: '최종 수정자', value: who(file.last_editor_name, file.last_editor_display_name) });
   }
   rows.push({ label: '생성일', value: formatDate(file.created_at) });
   rows.push({ label: '수정일', value: formatDate(file.updated_at) });

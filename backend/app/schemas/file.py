@@ -59,9 +59,14 @@ class FileResponse(BaseModel):
     folder_id: Optional[uuid.UUID] = None
     workspace_id: Optional[uuid.UUID] = None
     created_by: Optional[uuid.UUID] = None
+    # The handle — unique, and what a row shows.
     creator_name: Optional[str] = None
+    # The display name — not unique, but how people know each other. Shown
+    # beside the handle where there is room for both.
+    creator_display_name: Optional[str] = None
     last_edited_by: Optional[uuid.UUID] = None
     last_editor_name: Optional[str] = None
+    last_editor_display_name: Optional[str] = None
     name: str
     file_type: str
     mime_type: Optional[str] = None
