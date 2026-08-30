@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Clock, X, RotateCcw, Loader2 } from '../../utils/icons';
@@ -36,7 +37,22 @@ function groupByDate(versions) {
   return groups;
 }
 
-export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestored }) {
+/**
+ * The same history panel, over whichever thing keeps a history.
+ *
+ * A 할 일's notes are written in the same editor as a document and are just as
+ * easy to overwrite, so they get the same list-and-restore rather than a
+ * second one built to look like it.
+ */
+export default function VersionHistoryModal({
+  fileId, isOpen, onClose, onRestored,
+  title = '문서 히스토리',
+  emptyText = '아직 저장된 이전 버전이 없습니다. 편집 후 시간이 지나면 자동으로 기록됩니다.',
+  source,
+}) {
+  const list = source?.list || ((id) => listFileVersions(id));
+  const fetchOne = source?.get || ((id, versionId) => getFileVersion(id, versionId));
+  const restore = source?.restore || ((id, versionId) => restoreFileVersion(id, versionId));
   const { showAlert, showConfirm } = useDialog();
   const [versions, setVersions] = useState([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
@@ -48,17 +64,18 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
     if (!isOpen) return;
     setSelectedVersion(null);
     setIsLoadingList(true);
-    listFileVersions(fileId)
+    list(fileId)
       .then(setVersions)
       .catch(() => setVersions([]))
       .finally(() => setIsLoadingList(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, fileId]);
 
   const handleSelectVersion = useCallback(async (version) => {
     setIsLoadingPreview(true);
     setSelectedVersion({ ...version, content: null });
     try {
-      const full = await getFileVersion(fileId, version.id);
+      const full = await fetchOne(fileId, version.id);
       setSelectedVersion(full);
     } catch (err) {
       await showAlert({ title: '불러오기 실패', message: '버전 내용을 불러오지 못했습니다: ' + err.message, type: 'error' });
@@ -66,6 +83,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
     } finally {
       setIsLoadingPreview(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId, showAlert]);
 
   const handleRestore = useCallback(async () => {
@@ -80,7 +98,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
     if (!ok) return;
     setIsRestoring(true);
     try {
-      const updatedFile = await restoreFileVersion(fileId, selectedVersion.id);
+      const updatedFile = await restore(fileId, selectedVersion.id);
       onRestored(updatedFile);
       onClose();
     } catch (err) {
@@ -88,6 +106,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
     } finally {
       setIsRestoring(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileId, selectedVersion, showConfirm, showAlert, onRestored, onClose]);
 
   if (!isOpen) return null;
@@ -95,8 +114,12 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
   const groups = groupByDate(versions);
   const markdownLinkComponents = createMarkdownLinkComponents({ showAlert });
 
-  return (
-    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1050 }}>
+  // Rendered at the document root, above the window layer (1200): a window
+  // paints itself with a transform, so a modal opened inside one was trapped
+  // behind the page it belongs to, and 1050 still left it under the windows.
+  // Below the confirm dialog (9999), which has to sit over this.
+  return createPortal(
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1500 }}>
       <div
         className="modal-content version-history-modal modal-self-padded"
         onClick={e => e.stopPropagation()}
@@ -108,7 +131,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Clock size={17} color="var(--accent-primary)" />
-            <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>문서 히스토리</span>
+            <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{title}</span>
           </div>
           <button className="btn-icon" onClick={onClose} title="닫기">
             <X size={18} />
@@ -124,7 +147,7 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
               </div>
             ) : groups.length === 0 ? (
               <div style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                아직 저장된 이전 버전이 없습니다. 편집 후 시간이 지나면 자동으로 기록됩니다.
+                {emptyText}
               </div>
             ) : (
               groups.map(group => (
@@ -193,13 +216,16 @@ export default function VersionHistoryModal({ fileId, isOpen, onClose, onRestore
             className="btn-primary"
             onClick={handleRestore}
             disabled={!selectedVersion || isLoadingPreview || isRestoring}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            /* `.btn-primary` carries `flex: 1`, which stretched this across
+               the whole footer. */
+            style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' }}
           >
             {isRestoring ? <Loader2 size={14} className="spin" /> : <RotateCcw size={14} />}
             <span>이 버전으로 복원</span>
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

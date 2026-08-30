@@ -4,8 +4,13 @@ import { BlockNoteView } from '@blocknote/mantine';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import '@blocknote/mantine/style.css';
 
-import { X, Loader2, Paperclip, Check, Calendar } from '../../utils/icons';
-import { getBoardTask, updateBoardTask, uploadNoteImage } from '../../api';
+import { X, Loader2, Paperclip, Check, Clock } from '../../utils/icons';
+import {
+  getBoardTask, updateBoardTask, uploadNoteImage,
+  listBoardTaskVersions, getBoardTaskVersion, restoreBoardTaskVersion, closeBoardTaskVersion,
+} from '../../api';
+import VersionHistoryModal from '../editor/VersionHistoryModal';
+import { DateRangeField } from './controls';
 import {
   BN_THEME, blocksToMarkdownTableSafe, expandBlankParagraphs, restoreBlankParagraphs,
 } from '../../hooks/useNoteEditor';
@@ -28,6 +33,7 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
   const [detailLoaded, setDetailLoaded] = useState(false);
   const [saveState, setSaveState] = useState('idle');
   const [isAttaching, setIsAttaching] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [name, setName] = useState(task.name);
   const saveTimer = useRef(null);
   const attachRef = useRef(null);
@@ -99,13 +105,17 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
   }, [canWrite, detailLoaded, editor, save]);
 
   // A pending edit must not be lost by closing the drawer — the debounce is a
-  // convenience, not permission to drop the last thing typed.
+  // convenience, not permission to drop the last thing typed. Closing also
+  // ends this sitting in the history, so what it is being left as becomes a
+  // state to go back to rather than something the next visit writes over.
   useEffect(() => () => {
-    if (!saveTimer.current) return;
+    const id = taskIdRef.current;
+    const finish = () => closeBoardTaskVersion(fileId, id).catch(() => {});
+    if (!saveTimer.current) { finish(); return; }
     clearTimeout(saveTimer.current);
-    updateBoardTask(fileId, taskIdRef.current, {
+    updateBoardTask(fileId, id, {
       detail: blocksToMarkdownTableSafe(editor, editor.document),
-    }).catch(() => {});
+    }).then(finish).catch(finish);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -169,22 +179,16 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
               disabled={!canWrite} onChange={(v) => save({ priority: v })}
             />
           </label>
+          {/* The same calendar as the table row, so the period is chosen the
+              one way everywhere rather than two. */}
           <label className="td-period-field">
             <span>기간</span>
-            <span className="td-period">
-              <Calendar size={12} />
-              <input
-                type="date" value={task.start_date || ''} max={task.due_date || undefined}
-                disabled={!canWrite} aria-label="시작일"
-                onChange={(e) => save({ start_date: e.target.value || null })}
-              />
-              <span className="bd-dash">–</span>
-              <input
-                type="date" value={task.due_date || ''} min={task.start_date || undefined}
-                disabled={!canWrite} aria-label="종료일"
-                onChange={(e) => save({ due_date: e.target.value || null })}
-              />
-            </span>
+            <DateRangeField
+              start={task.start_date}
+              end={task.due_date}
+              disabled={!canWrite}
+              onChange={(start, due) => save({ start_date: start, due_date: due })}
+            />
           </label>
         </div>
 
@@ -215,6 +219,26 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
         <div className="td-notes">
           <div className="td-notes-head">
             <span className="td-label">상세 내용</span>
+            <button
+              type="button"
+              className="btn-secondary td-attach"
+              onClick={() => {
+                // The notes save on a debounce; opening the history without
+                // settling it first would show a list missing the last thing
+                // typed.
+                if (saveTimer.current) {
+                  clearTimeout(saveTimer.current);
+                  saveTimer.current = null;
+                  save({ detail: blocksToMarkdownTableSafe(editor, editor.document) }).finally(() => setHistoryOpen(true));
+                  return;
+                }
+                setHistoryOpen(true);
+              }}
+              title="상세 내용의 지난 기록 보기"
+            >
+              <Clock size={12} />
+              <span>기록</span>
+            </button>
             <button
               type="button"
               className="btn-secondary td-attach"
@@ -267,6 +291,27 @@ export default function TaskDetailDrawer({ boardFile, task, canWrite, assignable
           <span>마지막 수정 {fullStamp(task.updated_at)}{task.last_edited_by_name ? ` · ${task.last_edited_by_name}` : ''}</span>
         </footer>
       </aside>
+
+      <VersionHistoryModal
+        fileId={fileId}
+        isOpen={historyOpen}
+        title="상세 내용 기록"
+        emptyText="아직 남은 기록이 없습니다. 상세 내용을 고치면 그때부터 기록됩니다."
+        source={{
+          list: (id) => listBoardTaskVersions(id, task.id),
+          get: (id, versionId) => getBoardTaskVersion(id, task.id, versionId),
+          restore: (id, versionId) => restoreBoardTaskVersion(id, task.id, versionId),
+        }}
+        onClose={() => setHistoryOpen(false)}
+        onRestored={(updated) => {
+          onSaved?.(updated);
+          const markdown = updated.detail || '';
+          const blocks = markdown.trim()
+            ? restoreBlankParagraphs(editor.tryParseMarkdownToBlocks(expandBlankParagraphs(markdown)))
+            : [{ type: 'paragraph', content: [] }];
+          editor.replaceBlocks(editor.document, blocks);
+        }}
+      />
     </div>
   );
 }

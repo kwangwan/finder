@@ -124,12 +124,23 @@ async def init_db():
             # `is_admin` sat next to a workspace's own "admin" role and read as
             # the same thing. This one is service-wide, so it says so.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
-            # Carry the old values over once; the column is dropped afterwards
-            # so nothing can keep writing to a flag nobody reads.
-            "UPDATE kb_users SET is_superadmin = is_admin WHERE EXISTS ("
-            "  SELECT 1 FROM information_schema.columns"
-            "  WHERE table_name = 'kb_users' AND column_name = 'is_admin');",
-            "ALTER TABLE kb_users DROP COLUMN IF EXISTS is_admin;",
+            # Carry the old values over once, then drop the column so nothing
+            # can keep writing to a flag nobody reads. Inside a DO block
+            # because a plain UPDATE naming `is_admin` fails to parse once the
+            # column is gone — the guard in its WHERE clause never gets to run,
+            # and the failure took the whole migration transaction with it.
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'kb_users' AND column_name = 'is_admin'
+                ) THEN
+                    EXECUTE 'UPDATE kb_users SET is_superadmin = is_admin';
+                    EXECUTE 'ALTER TABLE kb_users DROP COLUMN is_admin';
+                END IF;
+            END $$;
+            """,
         ]
 
         # Every timestamp column was originally created as a naive
@@ -168,18 +179,24 @@ async def init_db():
                 END $$;
             """)
 
+        # Each statement in a savepoint of its own. They all shared one
+        # transaction before, so the first failure aborted it and every
+        # migration after it — and the CREATE TABLE for any new model — was
+        # silently rolled back.
         for sql in migrations:
             try:
-                await conn.execute(text(sql))
+                async with conn.begin_nested():
+                    await conn.execute(text(sql))
             except Exception as e:
                 print(f"[DB Migration Warning] {e}")
 
         # Create HNSW index on embeddings if not exists
         try:
-            await conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw ON kb_document_chunks "
-                "USING hnsw (embedding vector_cosine_ops);"
-            ))
+            async with conn.begin_nested():
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw ON kb_document_chunks "
+                    "USING hnsw (embedding vector_cosine_ops);"
+                ))
         except Exception as e:
             print(f"[DB Init Index Warning] Could not create HNSW index: {e}")
 
@@ -199,7 +216,8 @@ async def init_db():
         # recent one per file (into permanent history, same as any other
         # session-end close — no content is discarded).
         try:
-            await conn.execute(text("""
+            async with conn.begin_nested():
+                await conn.execute(text("""
                 UPDATE kb_file_versions v
                 SET is_open = false
                 WHERE v.is_open = true
@@ -207,15 +225,16 @@ async def init_db():
                     SELECT MAX(v2.created_at) FROM kb_file_versions v2
                     WHERE v2.file_id = v.file_id AND v2.is_open = true
                 );
-            """))
+                """))
         except Exception as e:
             print(f"[DB Migration Warning] Could not dedupe pre-existing open file versions: {e}")
 
         try:
-            await conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_file_versions_one_open_per_file "
-                "ON kb_file_versions (file_id) WHERE is_open = true;"
-            ))
+            async with conn.begin_nested():
+                await conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_file_versions_one_open_per_file "
+                    "ON kb_file_versions (file_id) WHERE is_open = true;"
+                ))
         except Exception as e:
             print(f"[DB Init Index Warning] Could not create one-open-version-per-file index: {e}")
 
@@ -224,7 +243,8 @@ async def init_db():
         # counted here too, matching the live incremental accounting in quota_service (which
         # only frees quota on permanent deletion, not on move-to-trash).
         try:
-            await conn.execute(text("""
+            async with conn.begin_nested():
+                await conn.execute(text("""
                 UPDATE kb_users u
                 SET storage_used_bytes = COALESCE((
                     SELECT SUM(f.size_bytes)
@@ -236,7 +256,7 @@ async def init_db():
                     FROM kb_files f
                     WHERE f.workspace_id IS NULL AND f.created_by = u.id
                 ), 0);
-            """))
+                """))
         except Exception as e:
             print(f"[DB Migration Warning] Could not sync user storage_used_bytes: {e}")
 
@@ -244,7 +264,8 @@ async def init_db():
         # their single oldest owned workspace becomes the default. Idempotent —
         # once an owner has any workspace marked default, this is a no-op for them.
         try:
-            await conn.execute(text("""
+            async with conn.begin_nested():
+                await conn.execute(text("""
                 WITH earliest AS (
                     SELECT DISTINCT ON (owner_id) id, owner_id
                     FROM kb_workspaces
@@ -258,7 +279,7 @@ async def init_db():
                     SELECT 1 FROM kb_workspaces w2
                     WHERE w2.owner_id = w.owner_id AND w2.is_default = TRUE
                 );
-            """))
+                """))
         except Exception as e:
             print(f"[DB Migration Warning] Could not backfill default workspaces: {e}")
 
@@ -266,9 +287,10 @@ async def init_db():
         # has edited them since upload/creation, so the uploader/creator is
         # the correct initial "last edited by".
         try:
-            await conn.execute(text(
-                "UPDATE kb_files SET last_edited_by = created_by WHERE last_edited_by IS NULL AND created_by IS NOT NULL;"
-            ))
+            async with conn.begin_nested():
+                await conn.execute(text(
+                    "UPDATE kb_files SET last_edited_by = created_by WHERE last_edited_by IS NULL AND created_by IS NOT NULL;"
+                ))
         except Exception as e:
             print(f"[DB Migration Warning] Could not backfill last_edited_by: {e}")
 

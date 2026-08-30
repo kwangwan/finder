@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_approved_user
-from app.models import BoardTask, FileItem, Folder, User, Workspace, WorkspaceMember
+from app.models import BoardTask, BoardTaskVersion, FileItem, Folder, User, Workspace, WorkspaceMember
 from app.models.board import (
     BOARD_FILE_TYPE,
     PRIORITIES,
@@ -429,6 +429,10 @@ async def update_task(
     if "due_date" in sent:
         task.due_date = req.due_date
     if "detail" in sent:
+        # The notes have their own history — a 할 일's record of what happened
+        # is worth as much as a document's, and just as easy to overwrite.
+        if (req.detail or "") != (task.detail or ""):
+            await board_service.record_detail_version(db, task, current_user.id, req.detail or "")
         task.detail = req.detail
     if "position" in sent and req.position is not None:
         task.position = req.position
@@ -445,6 +449,103 @@ async def update_task(
     by_task = await board_service.assignees_by_task(db, [task.id])
     names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
     return board_service.task_to_dict(task, names, by_task, include_detail=True)
+
+
+@router.get("/{file_id}/tasks/{task_id}/versions")
+async def list_task_versions(
+    file_id: uuid.UUID,
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """What the notes have said before, newest first."""
+    board = await board_service.get_board(db, file_id)
+    await _require_read(db, current_user, board)
+    task = await db.get(BoardTask, task_id)
+    if task is None or task.file_id != file_id:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    return await board_service.list_detail_versions(db, task_id)
+
+
+@router.post("/{file_id}/tasks/{task_id}/versions/close", status_code=status.HTTP_204_NO_CONTENT)
+async def close_task_version(
+    file_id: uuid.UUID,
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    End the current sitting of writing.
+
+    Sent when the 할 일 is closed. Without it, coming back an hour later would
+    still roll the same entry forward, and the state it was left in last time
+    would never become something to go back to.
+    """
+    board = await board_service.get_board(db, file_id)
+    await _require_write(db, current_user, board)
+    task = await db.get(BoardTask, task_id)
+    if task is None or task.file_id != file_id:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    await board_service.close_detail_version(db, task_id)
+    await db.commit()
+
+
+@router.get("/{file_id}/tasks/{task_id}/versions/{version_id}")
+async def get_task_version(
+    file_id: uuid.UUID,
+    task_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    board = await board_service.get_board(db, file_id)
+    await _require_read(db, current_user, board)
+    version = await db.get(BoardTaskVersion, version_id)
+    if version is None or version.task_id != task_id:
+        raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다.")
+    task = await db.get(BoardTask, task_id)
+    if task is None or task.file_id != file_id:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    names = await board_service.user_names(db, [version.edited_by])
+    return {
+        "id": str(version.id),
+        "created_at": version.created_at.isoformat() if version.created_at else None,
+        "editor_name": (names.get(version.edited_by) or {}).get("name"),
+        "is_open": version.is_open,
+        "content": version.content,
+    }
+
+
+@router.post("/{file_id}/tasks/{task_id}/versions/{version_id}/restore")
+async def restore_task_version(
+    file_id: uuid.UUID,
+    task_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    board = await board_service.get_board(db, file_id)
+    await _require_write(db, current_user, board)
+    task = await db.get(BoardTask, task_id)
+    if task is None or task.file_id != file_id:
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+    version = await db.get(BoardTaskVersion, version_id)
+    if version is None or version.task_id != task_id:
+        raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다.")
+
+    # What is being replaced is kept first, so going back is itself undoable,
+    # and the restore starts a sitting of its own rather than being folded
+    # into whatever was open.
+    if (task.detail or "") != version.content:
+        await board_service.record_detail_version(db, task, current_user.id, task.detail or "")
+    await board_service.close_detail_version(db, task_id)
+    task.detail = version.content
+    task.last_edited_by = current_user.id
+    await db.commit()
+    await db.refresh(task)
+    by_task = await board_service.assignees_by_task(db, [task.id])
+    names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
+    return board_service.task_to_dict(task, names, by_task, board=board, include_detail=True)
 
 
 @router.put("/{file_id}/reorder")

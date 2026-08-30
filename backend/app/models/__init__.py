@@ -11,7 +11,7 @@ from app.models.copy_job import CopyJob
 from app.models.app_setting import AppSetting, SharedDailyUsage
 from app.models.sharing import FolderWriteGrant, ContentReport
 from app.models.favorite import Favorite
-from app.models.board import BoardTask, BoardTaskAssignee
+from app.models.board import BoardTask, BoardTaskAssignee, BoardTaskVersion
 
 __all__ = [
     "Folder",
@@ -32,4 +32,5 @@ __all__ = [
     "Favorite",
     "BoardTask",
     "BoardTaskAssignee",
+    "BoardTaskVersion",
 ]

@@ -67,6 +67,12 @@ export default function ScheduleExplorer({
   const [peopleByBoard, setPeopleByBoard] = useState({});
   // Adding here works the same as on a board: `{fileId, parentTaskId}` says
   // which 일정 the new 할 일 belongs to and, for a sub-item, under what.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleCollapse = (id) => setCollapsed((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const [draft, setDraft] = useState(null);
   const [draftName, setDraftName] = useState('');
   const draftRef = useRef(null);
@@ -150,9 +156,13 @@ export default function ScheduleExplorer({
     setBusyId(task.id);
     try {
       const updated = await updateBoardTask(task.file_id, task.id, payload);
+      const apply = (t) => (t.id === task.id ? { ...t, ...updated, board: t.board } : t);
       setData((prev) => ({
         ...prev,
-        items: prev.items.map((t) => (t.id === task.id ? { ...t, ...updated, board: t.board } : t)),
+        items: prev.items.map((t) => ({
+          ...apply(t),
+          children: (t.children || []).map(apply),
+        })),
       }));
       setOpenTask((prev) => (prev && prev.id === task.id ? { ...prev, ...updated, board: prev.board } : prev));
     } catch (e) {
@@ -173,7 +183,15 @@ export default function ScheduleExplorer({
     if (!confirmed) return;
     try {
       await deleteBoardTask(task.file_id, task.id);
-      setData((prev) => ({ ...prev, items: prev.items.filter((t) => t.id !== task.id), total: prev.total - 1 }));
+      // A sub-item is removed from its parent; a top-level one takes its
+      // sub-items with it, which is what the server just did.
+      setData((prev) => ({
+        ...prev,
+        items: prev.items
+          .filter((t) => t.id !== task.id)
+          .map((t) => ({ ...t, children: (t.children || []).filter((c) => c.id !== task.id) })),
+        total: task.parent_task_id ? prev.total : prev.total - 1,
+      }));
       if (openTask?.id === task.id) setOpenTask(null);
     } catch (e) {
       await showAlert({ title: '삭제하지 못했습니다', message: e.message, type: 'error' });
@@ -245,35 +263,62 @@ export default function ScheduleExplorer({
    * already returns the page in urgency order, so grouping never reorders
    * anything within a group.
    */
+  /**
+   * Two levels: when to do it, then what it is part of.
+   *
+   * Both matter and neither replaces the other — a deadline says whether to
+   * look now, and the 일정 says what the work belongs to. So the outer heading
+   * is whichever the user chose and the inner one is always the 일정, except
+   * when that *is* the outer choice and a second copy would say nothing.
+   */
   const groups = useMemo(() => {
     const items = data.items;
-    if (grouping === 'board') {
+
+    // How urgent a top-level 할 일 is, counting its sub-items: work due today
+    // is due today whichever row carries the date.
+    const soonest = (t) => {
+      const all = [t, ...(t.children || [])]
+        .map((x) => x.days_left)
+        .filter((d) => d !== null && d !== undefined);
+      return all.length ? Math.min(...all) : null;
+    };
+
+    const byBoard = (list) => {
       const map = new Map();
-      items.forEach((t) => {
+      list.forEach((t) => {
         const key = t.board?.id || 'none';
-        if (!map.has(key)) map.set(key, { key, label: t.board?.name || '(삭제된 일정)', items: [] });
+        if (!map.has(key)) {
+          map.set(key, { key, label: t.board?.name || '(삭제된 일정)', fileId: t.file_id, items: [] });
+        }
         map.get(key).items.push(t);
       });
       return [...map.values()];
+    };
+
+    let outer;
+    if (grouping === 'board') {
+      return byBoard(items).map((g) => ({ ...g, boards: [g] }));
     }
     if (grouping === 'status') {
       const order = ['todo', 'in_progress', 'review', 'hold', 'done'];
       const labels = { todo: '대기', in_progress: '진행 중', review: '검토', hold: '보류', done: '완료' };
-      return order
-        .map((s) => ({ key: s, label: labels[s], items: items.filter((t) => t.status === s) }))
+      outer = order
+        .map((st) => ({ key: st, label: labels[st], items: items.filter((t) => t.status === st) }))
+        .filter((g) => g.items.length);
+    } else {
+      const buckets = [
+        { key: 'overdue', label: '기한 지남', test: (d) => d !== null && d < 0 },
+        { key: 'today', label: '오늘', test: (d) => d === 0 },
+        { key: 'week', label: '7일 이내', test: (d) => d > 0 && d <= 7 },
+        { key: 'month', label: '30일 이내', test: (d) => d > 7 && d <= 30 },
+        { key: 'later', label: '그 이후', test: (d) => d > 30 },
+        { key: 'none', label: '기간 없음', test: (d) => d === null },
+      ];
+      outer = buckets
+        .map((b) => ({ key: b.key, label: b.label, items: items.filter((t) => b.test(soonest(t))) }))
         .filter((g) => g.items.length);
     }
-    const buckets = [
-      { key: 'overdue', label: '기한 지남', test: (t) => t.days_left !== null && t.days_left < 0 },
-      { key: 'today', label: '오늘', test: (t) => t.days_left === 0 },
-      { key: 'week', label: '7일 이내', test: (t) => t.days_left > 0 && t.days_left <= 7 },
-      { key: 'month', label: '30일 이내', test: (t) => t.days_left > 7 && t.days_left <= 30 },
-      { key: 'later', label: '그 이후', test: (t) => t.days_left > 30 },
-      { key: 'none', label: '기간 없음', test: (t) => t.days_left === null || t.days_left === undefined },
-    ];
-    return buckets
-      .map((b) => ({ key: b.key, label: b.label, items: items.filter(b.test) }))
-      .filter((g) => g.items.length);
+    return outer.map((g) => ({ ...g, boards: byBoard(g.items) }));
   }, [data.items, grouping]);
 
   const hasFilter = !!(search || includeDone || mineOnly || priority || status || fromDate || toDate);
@@ -399,42 +444,79 @@ export default function ScheduleExplorer({
                   </button>
                 )}
               </header>
-              <div className="bd-table">
-                {group.items.map((task) => (
-                  <React.Fragment key={task.id}>
-                    <TaskRow
-                      task={task}
-                      depth={task.parent_task_id ? 1 : 0}
-                      busy={busyId === task.id}
-                      people={peopleByBoard[task.board?.id] || []}
-                      showBoardName={grouping !== 'board'}
-                      isOpen={openTask?.id === task.id}
-                      onOpen={(t) => setOpenTask(t)}
-                      onPatch={patch}
-                      onDelete={removeTask}
-                      onAddSub={(t) => { setDraft({ fileId: t.file_id, parentTaskId: t.id }); setDraftName(''); }}
-                      onOpenBoardWindow={openBoard}
-                      onOpenFolderWindow={openFolder}
-                    />
-                    {draft && draft.parentTaskId === task.id && renderDraft()}
-                  </React.Fragment>
-                ))}
-                {/* Grouped by 일정, a group *is* one board, so a new 할 일 can
-                    be added here without asking which board it belongs to. */}
-                {grouping === 'board' && group.items[0]?.file_id && (
-                  draft && !draft.parentTaskId && draft.fileId === group.items[0].file_id
-                    ? renderDraft()
-                    : (
+
+              {group.boards.map((board) => (
+                <div key={board.key} className="sc-board">
+                  {/* Which 일정 this belongs to, once per run of rows rather
+                      than repeated on every one of them. */}
+                  {grouping !== 'board' && (
+                    <div className="sc-board-head">
                       <button
                         type="button"
-                        className="bd-addrow"
-                        onClick={() => { setDraft({ fileId: group.items[0].file_id, parentTaskId: null }); setDraftName(''); }}
+                        className="sc-board-name"
+                        onClick={() => board.items[0] && openBoard(board.items[0])}
+                        title="이 일정 열기"
                       >
-                        <Plus size={13} /><span>이 일정에 할 일 추가</span>
+                        <FolderIcon size={11} /><span>{board.label}</span>
                       </button>
-                    )
-                )}
-              </div>
+                      <span className="sc-board-count">{board.items.length}</span>
+                    </div>
+                  )}
+
+                  <div className="bd-table">
+                    {board.items.map((task) => (
+                      <React.Fragment key={task.id}>
+                        <TaskRow
+                          task={task}
+                          depth={0}
+                          childCount={(task.children || []).length}
+                          collapsed={collapsed.has(task.id)}
+                          busy={busyId === task.id}
+                          people={peopleByBoard[task.board?.id] || []}
+                          isOpen={openTask?.id === task.id}
+                          onToggleCollapse={toggleCollapse}
+                          onOpen={(t) => setOpenTask(t)}
+                          onPatch={patch}
+                          onDelete={removeTask}
+                          onAddSub={(t) => { setDraft({ fileId: t.file_id, parentTaskId: t.id }); setDraftName(''); }}
+                          onOpenBoardWindow={openBoard}
+                          onOpenFolderWindow={openFolder}
+                        />
+                        {/* Sub-items sit under what they are part of, whether
+                            or not they have a period of their own. */}
+                        {!collapsed.has(task.id) && (task.children || []).map((child) => (
+                          <TaskRow
+                            key={child.id}
+                            task={child}
+                            depth={1}
+                            busy={busyId === child.id}
+                            people={peopleByBoard[child.board?.id] || []}
+                            isOpen={openTask?.id === child.id}
+                            onOpen={(t) => setOpenTask(t)}
+                            onPatch={patch}
+                            onDelete={removeTask}
+                          />
+                        ))}
+                        {draft && draft.parentTaskId === task.id && renderDraft()}
+                      </React.Fragment>
+                    ))}
+
+                    {board.fileId && (
+                      draft && !draft.parentTaskId && draft.fileId === board.fileId
+                        ? renderDraft()
+                        : (
+                          <button
+                            type="button"
+                            className="bd-addrow"
+                            onClick={() => { setDraft({ fileId: board.fileId, parentTaskId: null }); setDraftName(''); }}
+                          >
+                            <Plus size={13} /><span>이 일정에 할 일 추가</span>
+                          </button>
+                        )
+                    )}
+                  </div>
+                </div>
+              ))}
             </section>
           ))}
         </div>

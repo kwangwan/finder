@@ -277,6 +277,10 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
 
   const openTask = tasks.find((t) => t.id === openTaskId) || null;
   const doneCount = tasks.filter((t) => t.status === 'done').length;
+  // A flat total counted a sub-item as another 할 일, so a board of two things
+  // with four steps each read as ten.
+  const topCount = tasks.filter((t) => !t.parent_task_id).length;
+  const subCount = tasks.length - topCount;
 
   return (
     <div className="bd-pane">
@@ -294,14 +298,13 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
           title="이름을 눌러 바꿀 수 있습니다"
           aria-label="일정 이름"
         />
+        {/* No "add" button here: the table already ends with a row that does
+            it, in the place the new row appears. Two ways to do one thing, one
+            of them far from its result, is one too many. */}
         <span className="bd-header-stat">
-          할 일 {tasks.length}개{doneCount > 0 && <span className="bd-header-done"> · 완료 {doneCount}</span>}
+          할 일 {topCount}개{subCount > 0 && ` · 하위 ${subCount}개`}
+          {doneCount > 0 && <span className="bd-header-done"> · 완료 {doneCount}</span>}
         </span>
-        {canWrite && (
-          <button type="button" className="btn-primary bd-add-top" onClick={() => { setDraftUnder(null); setDraftName(''); }}>
-            <Plus size={13} /><span>새 할 일</span>
-          </button>
-        )}
       </div>
 
       <div className="bd-scroll">

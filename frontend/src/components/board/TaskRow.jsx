@@ -19,6 +19,10 @@ export const STATUSES = [
   { value: 'hold', label: '보류' },
 ];
 
+// Faces first, then a count. Enough of them to see at a glance that several
+// people are on something, without the column growing without limit.
+const AVATARS_SHOWN = 3;
+
 export function dueTone(daysLeft, status) {
   if (status === 'done') return 'done';
   if (daysLeft === null || daysLeft === undefined) return 'none';
@@ -43,7 +47,10 @@ export function remainingText(daysLeft) {
 
 export function periodText(startDate, dueDate) {
   if (!startDate && !dueDate) return '기간 설정';
-  if (startDate && dueDate) return `${dayLabel(startDate)} – ${dayLabel(dueDate)}`;
+  // One day is a day, not a range from itself to itself.
+  if (startDate && dueDate) {
+    return startDate === dueDate ? dayLabel(dueDate) : `${dayLabel(startDate)} – ${dayLabel(dueDate)}`;
+  }
   return dueDate ? `${dayLabel(dueDate)}까지` : `${dayLabel(startDate)}부터`;
 }
 
@@ -266,9 +273,11 @@ export default function TaskRow({
         >
           {task.assignees.length === 0
             ? <span className="bd-avatar is-empty" style={{ width: 22, height: 22 }}>+</span>
-            : task.assignees.slice(0, 3).map((a) => <Avatar key={a.id} person={a} />)}
-          {task.assignees.length > 3 && (
-            <span className="bd-avatar is-more" style={{ width: 22, height: 22 }}>+{task.assignees.length - 3}</span>
+            : task.assignees.slice(0, AVATARS_SHOWN).map((a) => <Avatar key={a.id} person={a} />)}
+          {task.assignees.length > AVATARS_SHOWN && (
+            <span className="bd-avatar is-more" style={{ width: 22, height: 22 }}>
+              +{task.assignees.length - AVATARS_SHOWN}
+            </span>
           )}
         </button>
         {peopleOpen && (

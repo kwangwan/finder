@@ -81,13 +81,6 @@ export function Dropdown({ value, options, onChange, label, className = '', widt
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [open]);
-
   const current = options.find((o) => o.value === value) || options[0];
   return (
     <span className={`ui-dd ${className}`} ref={ref} style={width ? { width } : undefined}>
@@ -238,12 +231,10 @@ export function DateRangeField({ start, end, onChange, disabled, placeholder = '
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', close, true);
-    return () => document.removeEventListener('mousedown', close, true);
-  }, [open]);
+  // Closing on an outside click is Popover's job. Doing it here as well shut
+  // the calendar on the first day clicked — the calendar is portalled out of
+  // this element, so its own days counted as "outside" — and a period needs
+  // two clicks.
 
   const label = (() => {
     if (!start && !end) return placeholder;

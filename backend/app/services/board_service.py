@@ -1,14 +1,15 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, and_, case, func, select
+from sqlalchemy import Integer, and_, case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     BoardTask,
     BoardTaskAssignee,
+    BoardTaskVersion,
     FileItem,
     User,
     Workspace,
@@ -240,6 +241,108 @@ def task_to_dict(
     return data
 
 
+# One sitting of writing, rather than one row per autosave. Past this much
+# quiet, the next edit is a new entry in the history.
+DETAIL_ROLLUP = timedelta(minutes=10)
+# Enough to walk back through a day's work without the list becoming its own
+# archive to sift through.
+DETAIL_VERSIONS_KEPT = 40
+
+
+async def record_detail_version(db: AsyncSession, task: BoardTask, editor_id, content: str) -> None:
+    """
+    Keep a history of a 할 일's notes.
+
+    Called with the notes as they now stand, before the change is committed.
+    The current sitting's row is rolled forward in place; a different person,
+    or a long enough gap, closes it and starts a new one.
+    """
+    now = datetime.now(timezone.utc)
+    open_row = (await db.execute(
+        select(BoardTaskVersion)
+        .where(BoardTaskVersion.task_id == task.id, BoardTaskVersion.is_open.is_(True))
+        .order_by(BoardTaskVersion.created_at.desc())
+        .limit(1)
+    )).scalars().first()
+
+    if open_row is not None:
+        started = open_row.created_at
+        if started is not None and started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if open_row.edited_by == editor_id and started is not None and now - started < DETAIL_ROLLUP:
+            open_row.content = content
+            open_row.created_at = now
+            return
+        open_row.is_open = False
+    elif (task.detail or "").strip() and not await has_detail_versions(db, task.id):
+        # Nothing has ever been recorded for this 할 일, so what is written
+        # right now would be lost the moment it is overwritten. Kept first, as
+        # a closed entry, so the state before the very first change is one of
+        # the things that can be gone back to. Only on the very first record —
+        # after that, the previous sitting's own entry already holds it.
+        db.add(BoardTaskVersion(
+            task_id=task.id,
+            content=task.detail,
+            edited_by=task.last_edited_by or editor_id,
+            created_at=task.updated_at or now,
+            is_open=False,
+        ))
+
+    db.add(BoardTaskVersion(
+        task_id=task.id, content=content, edited_by=editor_id, created_at=now, is_open=True,
+    ))
+    await prune_detail_versions(db, task.id)
+
+
+async def has_detail_versions(db: AsyncSession, task_id: uuid.UUID) -> bool:
+    return (await db.execute(
+        select(BoardTaskVersion.id).where(BoardTaskVersion.task_id == task_id).limit(1)
+    )).scalars().first() is not None
+
+
+async def close_detail_version(db: AsyncSession, task_id: uuid.UUID) -> None:
+    """End the current sitting, so the next edit starts its own entry."""
+    rows = (await db.execute(
+        select(BoardTaskVersion).where(
+            BoardTaskVersion.task_id == task_id, BoardTaskVersion.is_open.is_(True),
+        )
+    )).scalars().all()
+    for row in rows:
+        row.is_open = False
+
+
+async def prune_detail_versions(db: AsyncSession, task_id: uuid.UUID) -> None:
+    keep = (await db.execute(
+        select(BoardTaskVersion.id)
+        .where(BoardTaskVersion.task_id == task_id)
+        .order_by(BoardTaskVersion.created_at.desc())
+        .limit(DETAIL_VERSIONS_KEPT)
+    )).scalars().all()
+    if len(keep) < DETAIL_VERSIONS_KEPT:
+        return
+    await db.execute(delete(BoardTaskVersion).where(
+        BoardTaskVersion.task_id == task_id, BoardTaskVersion.id.notin_(keep),
+    ))
+
+
+async def list_detail_versions(db: AsyncSession, task_id: uuid.UUID) -> List[dict]:
+    rows = (await db.execute(
+        select(BoardTaskVersion)
+        .where(BoardTaskVersion.task_id == task_id)
+        .order_by(BoardTaskVersion.created_at.desc())
+    )).scalars().all()
+    names = await user_names(db, [r.edited_by for r in rows])
+    return [
+        {
+            "id": str(r.id),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "editor_name": (names.get(r.edited_by) or {}).get("name"),
+            "is_open": r.is_open,
+        }
+        for r in rows
+    ]
+
+
 async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID) -> List[dict]:
     """Every row of one board, sub-items included, in manual order."""
     tasks = (await db.execute(
@@ -313,30 +416,92 @@ async def list_workspace_tasks(
         if from_date:
             conds.append(span_end >= from_date)
 
-    base = select(BoardTask).join(FileItem, FileItem.id == BoardTask.file_id).where(and_(*conds))
-    total = (await db.execute(
-        select(func.count()).select_from(base.subquery())
-    )).scalar_one()
-
-    tasks = (await db.execute(
-        base.order_by(*order_by_urgency()).offset((page - 1) * page_size).limit(page_size)
+    # Everything that matches, before grouping. Capped so one enormous
+    # workspace cannot turn this into a full-table scan; the cap is far above
+    # any real board and is reported so a truncated answer is never silent.
+    SCAN_LIMIT = 2000
+    matches = (await db.execute(
+        select(BoardTask)
+        .join(FileItem, FileItem.id == BoardTask.file_id)
+        .where(and_(*conds))
+        .limit(SCAN_LIMIT)
     )).scalars().all()
 
+    # A sub-item belongs under the thing it is part of, always — including when
+    # it has no period of its own and the parent does. So the unit being
+    # ordered and paged is the top-level 할 일 together with its children, not
+    # each row on its own.
+    parent_ids = {t.parent_task_id for t in matches if t.parent_task_id}
+    roots = {t.id: t for t in matches if not t.parent_task_id}
+    missing_parents = parent_ids - set(roots)
+    if missing_parents:
+        # A sub-item matched but its parent did not — the parent still has to
+        # come along, or the match would appear detached from what it is part of.
+        for parent in (await db.execute(
+            select(BoardTask).where(BoardTask.id.in_(missing_parents))
+        )).scalars().all():
+            roots[parent.id] = parent
+
+    if not roots:
+        return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 1}
+
+    children_rows = (await db.execute(
+        select(BoardTask).where(BoardTask.parent_task_id.in_(list(roots)))
+    )).scalars().all()
+    children_by_root = {}
+    for child in children_rows:
+        children_by_root.setdefault(child.parent_task_id, []).append(child)
+    for group in children_by_root.values():
+        group.sort(key=lambda t: (t.position, t.created_at))
+
+    def group_key(root):
+        """
+        Ordered by whichever part of the group is most pressing.
+
+        A parent with no date whose sub-item is due today belongs at the top:
+        the work is due today, and which row carries the date is bookkeeping.
+        """
+        members = [root] + children_by_root.get(root.id, [])
+        dues = [m.due_date for m in members if m.due_date]
+        soonest = min(dues) if dues else None
+        rank = min(PRIORITY_RANK.get(m.priority, len(PRIORITIES)) for m in members)
+        return (1 if soonest is None else 0, soonest or date.max, rank, root.created_at)
+
+    ordered = sorted(roots.values(), key=group_key)
+    total = len(ordered)
+    page_roots = ordered[(page - 1) * page_size: page * page_size]
+
+    board_ids = {r.file_id for r in page_roots}
     boards = {}
-    if tasks:
-        rows = (await db.execute(
-            select(FileItem).where(FileItem.id.in_({t.file_id for t in tasks}))
-        )).scalars().all()
-        boards = {f.id: f for f in rows}
-    by_task = await assignees_by_task(db, [t.id for t in tasks])
-    names = await user_names(db, [t.created_by for t in tasks] + [uid for ids in by_task.values() for uid in ids])
+    if board_ids:
+        boards = {f.id: f for f in (await db.execute(
+            select(FileItem).where(FileItem.id.in_(board_ids))
+        )).scalars().all()}
+
+    shown = [t for r in page_roots for t in [r] + children_by_root.get(r.id, [])]
+    by_task = await assignees_by_task(db, [t.id for t in shown])
+    names = await user_names(
+        db,
+        [t.created_by for t in shown] + [t.last_edited_by for t in shown]
+        + [uid for ids in by_task.values() for uid in ids],
+    )
+
+    items = []
+    for root in page_roots:
+        row = task_to_dict(root, names, by_task, board=boards.get(root.file_id))
+        row["children"] = [
+            task_to_dict(c, names, by_task, board=boards.get(c.file_id))
+            for c in children_by_root.get(root.id, [])
+        ]
+        items.append(row)
 
     return {
-        "items": [task_to_dict(t, names, by_task, board=boards.get(t.file_id)) for t in tasks],
+        "items": items,
         "total": total,
         "page": page,
         "page_size": page_size,
         "total_pages": max(1, (total + page_size - 1) // page_size),
+        "truncated": len(matches) >= SCAN_LIMIT,
     }
 
 

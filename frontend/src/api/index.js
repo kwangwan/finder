@@ -1340,6 +1340,35 @@ export async function getBoardTask(fileId, taskId) {
   return res.json();
 }
 
+export async function listBoardTaskVersions(fileId, taskId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('기록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getBoardTaskVersion(fileId, taskId, versionId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions/${versionId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('기록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function closeBoardTaskVersion(fileId, taskId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions/close`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('기록을 마무리하지 못했습니다.');
+}
+
+export async function restoreBoardTaskVersion(fileId, taskId, versionId) {
+  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions/${versionId}/restore`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('되돌리지 못했습니다.');
+  return res.json();
+}
+
 export async function createBoardTask(fileId, payload) {
   const res = await fetch(`${API_BASE}/boards/${fileId}/tasks`, {
     method: 'POST',
