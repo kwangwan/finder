@@ -16,7 +16,7 @@ function formatDate(isoString) {
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export default function FileInfoModal({ file, onClose }) {
+export default function FileInfoModal({ file, onClose, currentUser }) {
   // Which person's handle history is open, if any. The handle is how work is
   // attributed here, so it is a link to the record of what it used to be.
   const [historyUserId, setHistoryUserId] = useState(null);
@@ -35,8 +35,13 @@ export default function FileInfoModal({ file, onClose }) {
     return `${name} (@${handle})`;
   };
 
+  // The history is an administrator's record — it answers "did this handle
+  // change to get away from something". Everyone else seeing it would turn a
+  // corrected sign-up name into a permanent exhibit.
+  const canSeeHistory = !!currentUser?.is_superadmin;
+
   const person = (handle, name, userId) => (
-    userId ? (
+    userId && canSeeHistory ? (
       <button type="button" className="fi-person" onClick={() => setHistoryUserId(userId)} title="아이디 변경 이력 보기">
         {who(handle, name)}
       </button>

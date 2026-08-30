@@ -2197,6 +2197,7 @@ export default function App() {
           />
         ) : (
           <FolderExplorer
+            currentUser={currentUser}
             onNewBoard={handleCreateBoard}
             favoriteFolderIds={favoriteFolderIds}
             onToggleFolderFavorite={handleToggleFolderFavorite}

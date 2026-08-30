@@ -91,6 +91,8 @@ export default function FolderExplorer({
   favoriteFolderIds = new Set(),
   onToggleFolderFavorite,
   favoriteRefreshToken = 0,
+  // Only a superadmin is offered the handle-history link in the info panel.
+  currentUser = null,
   onDownloadFile,
   onOpenMoveModal,
   onBatchDownload,
@@ -1883,7 +1885,7 @@ export default function FolderExplorer({
         </div>
       )}
 
-      <FileInfoModal file={infoFile} onClose={() => setInfoFile(null)} />
+      <FileInfoModal file={infoFile} currentUser={currentUser} onClose={() => setInfoFile(null)} />
     </div>
   );
 }

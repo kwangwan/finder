@@ -62,6 +62,38 @@ def skeleton(username: str) -> str:
     return (username or "").lower().translate(_SKELETON)
 
 
+# The same claim made in a display name. Names are free-form and Korean, so
+# the Korean words matter here in a way they cannot in a handle.
+DISPLAY_AUTHORITY_TOKENS = AUTHORITY_TOKENS | {
+    "관리자", "운영자", "운영팀", "관리팀", "운영진", "매니저", "매니져",
+    "스태프", "고객센터", "고객지원", "지원팀", "헬프데스크", "공식", "본사",
+    "시스템", "총괄", "책임자", "담당자공식",
+}
+
+
+def validate_display_name(name: str) -> str:
+    """
+    A display name that does not claim to speak for the service.
+
+    A name is not unique-by-construction the way a handle is — two people may
+    share one — but "운영자" beside a message is a claim about authority, and
+    it is just as effective in the free-form field as in the handle.
+    """
+    candidate = " ".join((name or "").split())
+    if not candidate:
+        raise ValueError("이름을 입력해 주세요.")
+    if len(candidate) > 60:
+        raise ValueError("이름은 60자 이하로 입력해 주세요.")
+
+    lowered = candidate.lower()
+    folded = _fold_for_reserved(lowered)
+    compact = re.sub(r"[\s._-]+", "", lowered)
+    for token in DISPLAY_AUTHORITY_TOKENS:
+        if token in folded or token in compact:
+            raise ValueError("관리자·운영자를 연상시키는 이름은 사용할 수 없습니다.")
+    return candidate
+
+
 def validate(username: str) -> str:
     """Return the cleaned handle, or raise ValueError with a reason."""
     candidate = (username or "").strip().lower()
@@ -180,16 +212,6 @@ async def change_allowed_at(db: AsyncSession, user_id):
     return taken + timedelta(days=HANDLE_CHANGE_COOLDOWN_DAYS)
 
 
-def suggest_from_email(email: str) -> str:
-    """A starting handle derived from an email's local part. Only ever a
-    suggestion — the account still has to accept or change it."""
-    local = (email or "").split("@")[0].lower()
-    cleaned = re.sub(r"[^a-z0-9_]", "", local).strip("_")
-    if len(cleaned) < MIN_LEN:
-        cleaned = f"user{uuid.uuid4().hex[:6]}"
-    return cleaned[:MAX_LEN].rstrip("_") or f"user{uuid.uuid4().hex[:6]}"
-
-
 async def allocate(db: AsyncSession, base: str, exclude_user_id=None) -> str:
     """A free handle near `base`, for backfilling accounts that predate the field."""
     candidate = base[:MAX_LEN]
@@ -210,19 +232,20 @@ async def allocate(db: AsyncSession, base: str, exclude_user_id=None) -> str:
 
 async def backfill_all(db: AsyncSession) -> int:
     """
-    Give every existing account a handle.
+    Name the accounts that cannot be asked.
 
-    Runs at startup and is idempotent. Derived from the email's local part so
-    the temporary handle is at least recognisable to its owner, who can change
-    it afterwards.
+    Only the system accounts. A handle made from an email's local part
+    publishes whatever that address says about a person — an address holding
+    somebody's real name became the handle printed on every file they upload —
+    so a real account without one is asked to choose (ChooseHandleScreen)
+    rather than named after their address behind their back.
     """
     users = (await db.execute(select(User).where(User.username.is_(None)))).scalars().all()
     assigned = 0
     for u in users:
-        if getattr(u, "is_system", False):
-            u.username = f"system_{str(u.id)[:8]}"
-        else:
-            u.username = await allocate(db, suggest_from_email(u.email), exclude_user_id=u.id)
+        if not getattr(u, "is_system", False):
+            continue
+        u.username = f"system_{str(u.id)[:8]}"
         assigned += 1
         await db.flush()
     if assigned:

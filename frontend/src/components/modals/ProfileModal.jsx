@@ -203,7 +203,7 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
             <span className="pf-desc">
               올린 파일과 할 일에 표시되고, 공용 워크스페이스에서 내 폴더 이름이 됩니다.
               영문 소문자·숫자·밑줄만 쓸 수 있고, 누구와도 겹칠 수 없습니다.
-              바꾼 기록은 남아 누구나 볼 수 있으며, 30일에 한 번 바꿀 수 있습니다.
+              바꾼 기록은 최고 관리자만 볼 수 있으며, 30일에 한 번 바꿀 수 있습니다.
               내가 쓰던 아이디는 180일 동안 다른 사람이 가져갈 수 없습니다.
             </span>
             <span className={`pf-input state-${handleState}`}>

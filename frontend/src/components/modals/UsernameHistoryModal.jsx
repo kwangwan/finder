@@ -95,7 +95,9 @@ export default function UsernameHistoryModal({ userId, isOpen, onClose }) {
         )}
 
         <div className="uh-actions">
-          <span className="uh-note">아이디는 30일에 한 번 바꿀 수 있고, 바꾼 아이디는 180일 동안 다른 사람이 쓸 수 없습니다.</span>
+          <span className="uh-note">
+            최고 관리자에게만 보입니다. 아이디는 30일에 한 번 바꿀 수 있고, 놓아준 아이디는 180일 동안 다른 사람이 쓸 수 없습니다.
+          </span>
           <button type="button" className="btn-secondary" onClick={onClose}>닫기</button>
         </div>
       </div>

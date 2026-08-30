@@ -303,12 +303,23 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         if not await username_service.is_available(db, desired):
             raise HTTPException(status_code=409, detail="이미 사용 중이거나 기존 아이디와 혼동되는 아이디입니다.")
     else:
-        desired = await username_service.allocate(db, username_service.suggest_from_email(req.email))
+        # The signup form asks for one; an API call that omits it leaves the
+        # account without a handle rather than making one out of the email
+        # address, which would publish whatever the address happens to say
+        # about the person. They are asked for one before they can go on.
+        desired = None
+
+    from app.services import username_service as _display
+    signup_name = req.name or email.split("@")[0]
+    try:
+        signup_name = _display.validate_display_name(signup_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     user = User(
         email=email,
         username=desired,
-        name=req.name or email.split("@")[0],
+        name=signup_name,
         hashed_password=hash_password(req.password),
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
         is_superadmin=is_first_user,
@@ -321,7 +332,8 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
     db.add(user)
     await db.flush()
     # The handle chosen at sign-up is the first entry in its own history.
-    await username_service.record_taken(db, user.id, desired)
+    if desired:
+        await username_service.record_taken(db, user.id, desired)
     await db.commit()
     await db.refresh(user)
 
@@ -401,11 +413,15 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
         user_count = user_count_res.scalar_one_or_none() or 0
         is_first_user = (user_count == 0)
 
-        from app.services import username_service as _uns
-        google_handle = await _uns.allocate(db, _uns.suggest_from_email(email))
+        # No handle is invented here. Deriving one from the email address
+        # published somebody's real name — "kwangwan.woo@gmail.com" became
+        # "@kwangwan", which is then printed on every file they upload. An
+        # account without a handle is asked for one before it can do anything
+        # (ChooseHandleScreen), which is the person choosing rather than the
+        # address deciding.
         user = User(
             email=email,
-            username=google_handle,
+            username=None,
             name=google_profile.get("name") or email.split("@")[0],
             picture=google_profile.get("picture"),
             google_id=google_profile.get("google_id"),
@@ -417,8 +433,6 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             last_login_at=datetime.now(timezone.utc)
         )
         db.add(user)
-        await db.flush()
-        await _uns.record_taken(db, user.id, google_handle)
         await db.commit()
         await db.refresh(user)
     else:
@@ -543,9 +557,11 @@ async def update_my_name(
     impersonation trivial. Compared case-insensitively so "Kim" and "kim" are
     not treated as different people.
     """
-    name = " ".join(req.name.split())          # collapse runs of whitespace
-    if not name:
-        raise HTTPException(status_code=400, detail="이름을 입력해 주세요.")
+    from app.services import username_service
+    try:
+        name = username_service.validate_display_name(req.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     clash = (await db.execute(
         select(User).where(
@@ -609,16 +625,21 @@ async def check_name_available(
     current_user: User = Depends(get_current_approved_user)
 ):
     """Whether a name is free, so the form can say so before submitting."""
-    candidate = " ".join((name or "").split())
-    if not candidate:
-        return {"available": False, "reason": "empty"}
+    from app.services import username_service
+    try:
+        candidate = username_service.validate_display_name(name)
+    except ValueError as e:
+        return {"available": False, "reason": str(e)}
     clash = (await db.execute(
         select(User).where(
             func.lower(User.name) == candidate.lower(),
             User.id != current_user.id,
         )
     )).scalars().first()
-    return {"available": clash is None}
+    return {
+        "available": clash is None,
+        "reason": None if clash is None else "이미 다른 분이 쓰고 있는 이름입니다.",
+    }
 
 
 class UpdateUsernameRequest(BaseModel):
@@ -693,12 +714,16 @@ async def username_history(
     """
     Every handle this account has held, newest first.
 
-    Open to anyone signed in, on purpose: a handle is how work is attributed,
-    so "who is @jhkim, and were they always called that" is a question anybody
-    looking at an upload is entitled to ask. Paged, because somebody who
-    changes it often would otherwise push the useful entries off the end.
+    Superadmins only. The record exists so a handle cannot be changed to
+    escape what was done under it — an administrator's question. Showing it to
+    everyone would answer a different one: somebody who signed up with their
+    real name and then fixed it would have that name on permanent display to
+    every colleague, which is a punishment for a typo.
     """
     from app.models import UsernameHistory
+
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=403, detail="아이디 변경 이력은 최고 관리자만 볼 수 있습니다.")
 
     user = await db.get(User, user_id)
     if user is None:
