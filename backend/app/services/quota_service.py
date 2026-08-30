@@ -6,6 +6,20 @@ from sqlalchemy import select, update, func, and_
 from app.models import User, Workspace, FileItem
 
 
+# A workspace of one's own is charged to whoever owns it, so making one
+# without room to put anything in it only postpones the failure to the first
+# upload. Small on purpose: this is a sanity check, not a reservation.
+WORKSPACE_MIN_FREE_BYTES = 50 * 1024 * 1024
+
+
+def _size_text(value: int) -> str:
+    """A size a person reads, not a number a machine prints."""
+    if value >= 1024 ** 3:
+        return f"{value / (1024 ** 3):.1f}GB"
+    mb = value / (1024 * 1024)
+    return f"{mb:.0f}MB" if mb >= 10 or mb == int(mb) else f"{mb:.1f}MB"
+
+
 class QuotaService:
     async def get_quota_owner(
         self,
@@ -26,6 +40,32 @@ class QuotaService:
                 if owner:
                     return owner
         return default_user
+
+    async def remaining_bytes(self, db: AsyncSession, user: User) -> int:
+        """How much room this person still has of their own."""
+        await db.refresh(user)
+        return max(0, user.storage_quota_bytes - user.storage_used_bytes - user.storage_reserved_bytes)
+
+    async def require_room_for_workspace(self, db: AsyncSession, user: User) -> int:
+        """
+        Refuse a new workspace to someone with no room left.
+
+        A workspace is charged to whoever owns it, so one created without room
+        is a workspace where the first upload fails — which reads as the app
+        being broken rather than as the account being full. Said now, once,
+        with the number.
+        """
+        remaining = await self.remaining_bytes(db, user)
+        if remaining >= WORKSPACE_MIN_FREE_BYTES:
+            return remaining
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"남은 저장 용량이 {_size_text(remaining)}뿐이라 새 워크스페이스를 만들 수 없습니다. "
+                f"새 워크스페이스를 만들려면 {_size_text(WORKSPACE_MIN_FREE_BYTES)} 이상 남아 있어야 합니다. "
+                "파일을 정리하거나 최고 관리자에게 용량 증설을 요청해 주세요."
+            ),
+        )
 
     async def check_quota(
         self,

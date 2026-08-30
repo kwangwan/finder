@@ -32,10 +32,20 @@ export function dueTone(daysLeft, status) {
   return 'later';
 }
 
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+/**
+ * A date the way it gets said out loud, weekday included.
+ *
+ * Which day of the week something falls on is half of what a deadline means —
+ * "9월 5일" says little until you know it is a Friday.
+ */
 function dayLabel(iso) {
   if (!iso) return '';
-  const [, m, d] = iso.split('-');
-  return `${Number(m)}월 ${Number(d)}일`;
+  const [y, m, d] = iso.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const weekday = Number.isNaN(date.getTime()) ? '' : ` (${WEEKDAYS[date.getDay()]})`;
+  return `${m}월 ${d}일${weekday}`;
 }
 
 export function remainingText(daysLeft) {
@@ -64,7 +74,12 @@ export function shortStamp(value) {
 export function fullStamp(value) {
   if (!value) return '';
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ko-KR');
+  if (Number.isNaN(d.getTime())) return '';
+  const hour = d.getHours();
+  const half = hour < 12 ? '오전' : '오후';
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAYS[d.getDay()]}) `
+    + `${half} ${twelve}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 export function initialOf(name) {
@@ -267,9 +282,10 @@ export default function TaskRow({
         />
       </div>
 
-      <div className="bd-f-people" ref={peopleRef}>
+      <div className="bd-f-people">
         <button
           type="button"
+          ref={peopleRef}
           className="bd-people"
           disabled={!canWrite}
           onClick={() => setPeopleOpen((v) => !v)}
@@ -288,8 +304,11 @@ export default function TaskRow({
             </span>
           )}
         </button>
+        {/* Anchored to the button, not to the column cell it sits in: the cell
+            spans the whole column, so a right-aligned menu landed at the far
+            edge of it, hundreds of pixels from what was clicked. */}
         {peopleOpen && (
-          <Popover anchorRef={peopleRef} onClose={() => setPeopleOpen(false)} align="right" className="bd-people-pop">
+          <Popover anchorRef={peopleRef} onClose={() => setPeopleOpen(false)} className="bd-people-pop">
             {people.length === 0 && <div className="bd-pop-empty">지정할 수 있는 사람이 없습니다.</div>}
             {people.map((u) => {
               const on = task.assignees.some((a) => a.id === u.id);

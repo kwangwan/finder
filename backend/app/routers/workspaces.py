@@ -180,6 +180,11 @@ async def create_workspace(
     if not name:
         raise HTTPException(status_code=400, detail="워크스페이스 이름을 입력해주세요.")
 
+    # Checked before anything is written: a workspace whose owner has no room
+    # left is one where the first upload fails, and that reads as the app
+    # being broken rather than as the account being full.
+    await quota_service.require_room_for_workspace(db, current_user)
+
     slug = _slugify(name, str(current_user.id))
 
     # Check slug uniqueness; if collision, append random suffix

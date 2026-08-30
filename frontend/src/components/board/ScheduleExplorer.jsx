@@ -15,13 +15,23 @@ import ScheduleFilterModal, { DEFAULT_FILTERS, activeFilters } from './ScheduleF
 const PAGE_SIZE = 40;
 
 /** The wall clock in the workspace's reference zone, to the second. */
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+/**
+ * The reference clock, read at a glance.
+ *
+ * "2026-08-30 13:03:29" is a timestamp, not a time somebody reads — the year
+ * never changes, the seconds never matter, and the digits all look alike.
+ * What is worth knowing is which day it is here and roughly when.
+ */
 function formatInZone(date, timeZone) {
   try {
     const parts = new Intl.DateTimeFormat('ko-KR', {
-      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      timeZone, weekday: 'short', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
     }).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
-    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+    const weekday = (parts.weekday || '').replace('요일', '');
+    return `${parts.month}월 ${parts.day}일 (${weekday}) ${parts.dayPeriod || ''} ${parts.hour}:${parts.minute}`.replace(/\s+/g, ' ').trim();
   } catch (e) {
     return date.toLocaleString('ko-KR');
   }

@@ -17,7 +17,8 @@ import {
   Globe,
   BookOpen,
   Layers,
-  Settings
+  Settings,
+  AlertTriangle,
 } from '../../utils/icons';
 import { 
   createWorkspace, 
@@ -98,6 +99,21 @@ export default function WorkspaceSettingsModal({
   const isOwner = isCreateMode || workspace?.owner_id === currentUser?.id || currentUser?.is_superadmin;
   const currentMember = members.find(m => m.user_id === currentUser?.id);
   const isAdminOrOwner = isOwner || currentMember?.role === 'admin';
+
+  // A workspace is charged to whoever owns it, so someone with no room left
+  // would create one where the first upload fails. Said here, before the
+  // button is pressed, with the same floor the server enforces.
+  const MIN_FREE_BYTES = 50 * 1024 * 1024;
+  const remainingBytes = Math.max(
+    0,
+    (currentUser?.storage_quota_bytes ?? 0)
+      - (currentUser?.storage_used_bytes ?? 0)
+      - (currentUser?.storage_reserved_bytes ?? 0),
+  );
+  const outOfRoom = isCreateMode && remainingBytes < MIN_FREE_BYTES;
+  const remainingText = remainingBytes >= 1024 * 1024 * 1024
+    ? `${(remainingBytes / (1024 ** 3)).toFixed(1)}GB`
+    : `${Math.round(remainingBytes / (1024 * 1024))}MB`;
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
@@ -410,12 +426,30 @@ export default function WorkspaceSettingsModal({
               </div>
             </div>
 
+            {outOfRoom && (
+              <div className="ws-no-room">
+                <AlertTriangle size={15} />
+                <div>
+                  <strong>남은 저장 용량이 부족합니다</strong>
+                  <span>
+                    지금 남은 용량은 {remainingText}입니다. 새 워크스페이스를 만들려면 50MB 이상 남아 있어야 합니다.
+                    파일을 정리하거나 최고 관리자에게 용량 증설을 요청해 주세요.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {isAdminOrOwner && (
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
                 <button type="button" className="btn-secondary" onClick={onClose} style={{ fontSize: '0.82rem', padding: '0.45rem 0.85rem' }}>
                   취소
                 </button>
-                <button type="submit" className="btn-primary" disabled={isLoading || !name.trim()} style={{ fontSize: '0.82rem', padding: '0.45rem 0.95rem' }}>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={isLoading || !name.trim() || outOfRoom}
+                  style={{ fontSize: '0.82rem', padding: '0.45rem 0.95rem' }}
+                >
                   {isCreateMode ? '워크스페이스 생성' : '변경사항 저장'}
                 </button>
               </div>

@@ -6851,3 +6851,21 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .sf-actions { display: flex; align-items: center; gap: 8px; padding: 0.8rem 1.1rem; border-top: 1px solid var(--border-subtle); }
 .sf-spacer { flex: 1; }
 .sf-actions .btn-secondary { flex: 0 0 auto; height: 30px; display: inline-flex; align-items: center; gap: 5px; }
+
+/* Said before the button is pressed: a workspace with no room behind it is a
+   workspace where the first upload fails. */
+.ws-no-room {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+  color: var(--accent-amber);
+}
+
+.ws-no-room > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ws-no-room strong { font-size: 0.82rem; font-weight: 700; }
+.ws-no-room span { color: var(--text-secondary); font-size: 0.78rem; line-height: 1.45; }
