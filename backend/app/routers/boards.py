@@ -328,6 +328,10 @@ async def get_board(
         "folder_id": str(board.folder_id) if board.folder_id else None,
         "workspace_id": str(board.workspace_id) if board.workspace_id else None,
         "can_write": can_write,
+        # Nothing to pick from in the shared workspace: a person may only put
+        # themselves on a 할 일, so the view shows the 담당자 rather than a
+        # menu of one.
+        "assignee_locked": await board_service.is_shared_workspace(db, board.workspace_id),
         "assignable_users": [
             {"id": str(u.id), "name": (u.username or u.name or u.email), "avatar": u.avatar_url}
             for u in members
@@ -378,6 +382,11 @@ async def create_task(
         raise HTTPException(status_code=400, detail="시작일이 종료일보다 뒤일 수 없습니다.")
 
     assignees = await board_service.assert_assignable(db, current_user, board.workspace_id, req.assignee_ids)
+    # In the shared workspace a person may only assign themselves, so there is
+    # nothing to choose: whoever adds the 할 일 is its 담당자, set here rather
+    # than offered as a menu of one.
+    if not assignees and await board_service.is_shared_workspace(db, board.workspace_id):
+        assignees = [current_user.id]
     name = req.name.strip()
     # Its document, made with it and in the same folder, so everything a
     # document can do — writing, attaching, history, search — is what a 할

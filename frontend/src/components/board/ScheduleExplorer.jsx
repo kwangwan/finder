@@ -147,7 +147,9 @@ export default function ScheduleExplorer({
       .filter((id) => !(id in peopleByBoard));
     if (missing.length === 0) return undefined;
     let cancelled = false;
-    Promise.all(missing.map((id) => getBoard(id).then((b) => [id, b.assignable_users || []]).catch(() => [id, []])))
+    Promise.all(missing.map((id) => getBoard(id)
+      .then((b) => [id, { people: b.assignable_users || [], locked: !!b.assignee_locked }])
+      .catch(() => [id, { people: [], locked: false }])))
       .then((pairs) => { if (!cancelled) setPeopleByBoard((prev) => ({ ...prev, ...Object.fromEntries(pairs) })); });
     return () => { cancelled = true; };
   }, [data.items, peopleByBoard]);
@@ -460,7 +462,8 @@ export default function ScheduleExplorer({
                           childCount={(task.children || []).length}
                           collapsed={collapsed.has(task.id)}
                           busy={busyId === task.id}
-                          people={peopleByBoard[task.board?.id] || []}
+                          people={peopleByBoard[task.board?.id]?.people || []}
+                          assigneeLocked={!!peopleByBoard[task.board?.id]?.locked}
                           onToggleCollapse={toggleCollapse}
                           onOpen={openDocument}
                           onPatch={patch}
@@ -477,7 +480,8 @@ export default function ScheduleExplorer({
                             task={child}
                             depth={1}
                             busy={busyId === child.id}
-                            people={peopleByBoard[child.board?.id] || []}
+                            people={peopleByBoard[child.board?.id]?.people || []}
+                            assigneeLocked={!!peopleByBoard[child.board?.id]?.locked}
                             onOpen={openDocument}
                             onPatch={patch}
                             onDelete={removeTask}

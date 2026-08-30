@@ -6869,3 +6869,8 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .ws-no-room > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ws-no-room strong { font-size: 0.82rem; font-weight: 700; }
 .ws-no-room span { color: var(--text-secondary); font-size: 0.78rem; line-height: 1.45; }
+
+/* Where a person can only assign themselves, the cell reports the 담당자
+   instead of behaving like a control that opens something. */
+.bd-people.is-locked { cursor: default; }
+.bd-people.is-locked:disabled { opacity: 1; }

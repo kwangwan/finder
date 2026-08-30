@@ -268,6 +268,7 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) 
           canWrite={canWrite}
           busy={busyId === task.id}
           people={people}
+          assigneeLocked={!!board?.assignee_locked}
           onToggleCollapse={toggleCollapse}
           onOpen={openDocument}
           onPatch={patch}

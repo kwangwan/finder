@@ -111,6 +111,12 @@ async def assignable_users(db: AsyncSession, user: User, workspace_id) -> List[U
     return rows
 
 
+async def is_shared_workspace(db: AsyncSession, workspace_id) -> bool:
+    return bool((await db.execute(
+        select(Workspace.is_shared).where(Workspace.id == workspace_id)
+    )).scalar_one_or_none())
+
+
 async def assert_assignable(db: AsyncSession, user: User, workspace_id, user_ids: Iterable[uuid.UUID]) -> List[uuid.UUID]:
     wanted = [uid for uid in (user_ids or [])]
     if not wanted:

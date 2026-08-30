@@ -188,6 +188,7 @@ export default function TaskRow({
   canWrite = true,
   busy = false,
   people = [],
+  assigneeLocked = false,
   showBoardName = false,
   isOpen = false,
   onToggleCollapse,
@@ -204,6 +205,10 @@ export default function TaskRow({
 }) {
   const [editingPeriod, setEditingPeriod] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  // Where a person can only ever assign themselves there is no choice to
+  // offer — the cell says who it is instead of opening a menu of one.
+  const peopleLocked = assigneeLocked;
+
   const peopleRef = useRef(null);
   const periodRef = useRef(null);
 
@@ -286,10 +291,12 @@ export default function TaskRow({
         <button
           type="button"
           ref={peopleRef}
-          className="bd-people"
-          disabled={!canWrite}
-          onClick={() => setPeopleOpen((v) => !v)}
-          title={task.assignees.map((a) => a.name).join(', ') || '담당자 지정'}
+          className={`bd-people ${peopleLocked ? 'is-locked' : ''}`}
+          disabled={!canWrite || peopleLocked}
+          onClick={() => !peopleLocked && setPeopleOpen((v) => !v)}
+          title={peopleLocked
+            ? `${task.assignees.map((a) => a.name).join(', ') || '담당자 없음'} · 공용 워크스페이스에서는 만든 사람이 담당자입니다`
+            : (task.assignees.map((a) => a.name).join(', ') || '담당자 지정')}
         >
           {task.assignees.length === 0
             ? (
@@ -307,7 +314,7 @@ export default function TaskRow({
         {/* Anchored to the button, not to the column cell it sits in: the cell
             spans the whole column, so a right-aligned menu landed at the far
             edge of it, hundreds of pixels from what was clicked. */}
-        {peopleOpen && (
+        {peopleOpen && !peopleLocked && (
           <Popover anchorRef={peopleRef} onClose={() => setPeopleOpen(false)} className="bd-people-pop">
             {people.length === 0 && <div className="bd-pop-empty">지정할 수 있는 사람이 없습니다.</div>}
             {people.map((u) => {
