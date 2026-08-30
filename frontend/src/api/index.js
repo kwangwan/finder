@@ -105,11 +105,23 @@ export async function getAuthConfig() {
 /**
  * Authentication API
  */
+/**
+ * What this browser is set to read in.
+ *
+ * Sent when an account is created so nobody is asked a question their own
+ * settings already answer. It is a guess about a person, so the account
+ * settings can correct it afterwards.
+ */
+export function browserLanguage() {
+  const tag = (navigator.languages && navigator.languages[0]) || navigator.language || 'ko';
+  return String(tag).replace('_', '-').split('-')[0].toLowerCase();
+}
+
 export async function loginWithGoogle(idToken, inviteToken = null) {
   const res = await fetch(`${API_BASE}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id_token: idToken, invite_token: inviteToken }),
+    body: JSON.stringify({ id_token: idToken, invite_token: inviteToken, language: browserLanguage() }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -124,7 +136,10 @@ export async function registerWithPassword(email, password, name = '', inviteTok
   const res = await fetch(`${API_BASE}/auth/register-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name, invite_token: inviteToken, username: username || undefined }),
+    body: JSON.stringify({
+      email, password, name, invite_token: inviteToken,
+      username: username || undefined, language: browserLanguage(),
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -1833,6 +1848,48 @@ export async function uploadNoteImage(file, workspaceId = null, folderId = null)
  * reload and follows the user to another browser. Only which files are open
  * and whether each is minimized — geometry stays local to each screen.
  */
+/** Change your handle. The personal folder in the shared workspace follows it. */
+export async function updateMyUsername(username) {
+  const res = await fetch(`${API_BASE}/auth/me/username`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ username }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '아이디를 바꾸지 못했습니다.');
+  }
+  return res.json();
+}
+
+export async function checkMyUsernameAvailable(username) {
+  const res = await fetch(`${API_BASE}/auth/username-available?username=${encodeURIComponent(username)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('아이디를 확인하지 못했습니다.');
+  return res.json();
+}
+
+/** The languages an account may be set to, named in each language. */
+export async function listLanguages() {
+  const res = await fetch(`${API_BASE}/auth/languages`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('언어 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function updateMyLanguage(language) {
+  const res = await fetch(`${API_BASE}/auth/me/language`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ language }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || '사용 언어를 바꾸지 못했습니다.');
+  }
+  return res.json();
+}
+
 export async function getWindowState() {
   const res = await fetch(`${API_BASE}/window-state`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to load window state');

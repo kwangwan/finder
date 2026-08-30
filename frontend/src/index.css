@@ -6540,3 +6540,102 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
    instead of behaving like a control that opens something. */
 .bd-people.is-locked { cursor: default; }
 .bd-people.is-locked:disabled { opacity: 1; }
+
+/* Language, in the account menu — a select rather than a menu of four, since
+   it is a setting somebody changes once. */
+.tb-language {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.45rem 0.85rem;
+}
+
+.tb-language-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.tb-language select {
+  height: 28px;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+/* --- 아이디 정하기 -------------------------------------------------------- */
+
+.ch-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--bg-primary);
+}
+
+.ch-card {
+  width: min(430px, 100%);
+  padding: 2rem 1.75rem 1.5rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  text-align: center;
+}
+
+.ch-card h1 { font-size: 1.15rem; font-weight: 800; color: var(--text-primary); margin-bottom: 0.6rem; }
+.ch-card p { font-size: 0.83rem; line-height: 1.6; color: var(--text-secondary); margin-bottom: 1.25rem; }
+
+.ch-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+}
+
+.ch-field.state-free { border-color: var(--accent-emerald); color: var(--accent-emerald); }
+.ch-field.state-taken { border-color: var(--accent-rose); color: var(--accent-rose); }
+
+.ch-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.ch-hint { margin-top: 6px; font-size: 0.75rem; color: var(--text-muted); text-align: left; }
+.ch-hint.state-free { color: var(--accent-emerald); }
+.ch-hint.state-taken { color: var(--accent-rose); }
+
+.ch-save { width: 100%; margin-top: 1.1rem; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+
+.ch-logout {
+  margin-top: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.ch-logout:hover { color: var(--text-secondary); }

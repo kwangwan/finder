@@ -6,6 +6,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from sqlalchemy.exc import IntegrityError
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -238,6 +239,24 @@ async def get_auth_config():
         "sync_url": settings.VITE_SYNC_URL
     }
 
+SUPPORTED_LANGUAGES = ["ko", "en", "ja", "zh"]
+DEFAULT_LANGUAGE = "ko"
+
+
+def normalize_language(value: Optional[str]) -> str:
+    """
+    A browser's Accept-Language turned into something worth storing.
+
+    "ko-KR", "ko_KR" and "KO" are all the same answer, and anything the app has
+    no plans for is recorded as the default rather than as a tag nothing will
+    ever match.
+    """
+    if not value:
+        return DEFAULT_LANGUAGE
+    primary = str(value).strip().replace("_", "-").split("-")[0].lower()
+    return primary if primary in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
+
 @router.post("/register-password", response_model=TokenResponse)
 async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new test account with Email & Password."""
@@ -278,6 +297,7 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         hashed_password=hash_password(req.password),
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
         is_superadmin=is_first_user,
+        language=normalize_language(req.language),
         is_approved=True,
         is_active=True,
         storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
@@ -372,6 +392,7 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             picture=google_profile.get("picture"),
             google_id=google_profile.get("google_id"),
             is_superadmin=is_first_user,
+            language=normalize_language(req.language),
             is_approved=True,
             is_active=True,
             storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
@@ -528,6 +549,37 @@ async def update_my_name(
     await db.refresh(current_user)
 
     return {"id": str(current_user.id), "name": current_user.name}
+
+
+class UpdateMyLanguageRequest(BaseModel):
+    language: str = Field(..., max_length=10)
+
+
+@router.put("/me/language")
+async def update_my_language(
+    req: UpdateMyLanguageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Change the language you read in.
+
+    Taken from the browser at sign-up, because that answer already exists and
+    asking again is asking twice — but it is a guess about a person, so it is
+    theirs to correct.
+    """
+    language = normalize_language(req.language)
+    current_user.language = language
+    await db.commit()
+    await db.refresh(current_user)
+    return {"language": language, "user": current_user.to_dict()}
+
+
+@router.get("/languages")
+async def list_languages():
+    """What may be chosen, named in each language rather than in Korean."""
+    labels = {"ko": "한국어", "en": "English", "ja": "日本語", "zh": "中文"}
+    return {"languages": [{"value": code, "label": labels[code]} for code in SUPPORTED_LANGUAGES]}
 
 
 @router.get("/me/name-available")

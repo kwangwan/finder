@@ -6,6 +6,9 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict
 class GoogleLoginRequest(BaseModel):
     id_token: str
     invite_token: Optional[str] = None
+    # What the browser says this person reads in. Sent at sign-up so nobody has
+    # to be asked a question they have already answered in their own settings.
+    language: Optional[str] = Field(None, max_length=10)
 
 class PasswordRegisterRequest(BaseModel):
     email: EmailStr
@@ -16,6 +19,7 @@ class PasswordRegisterRequest(BaseModel):
     username: Optional[str] = Field(None, max_length=20)
     name: Optional[str] = None
     invite_token: Optional[str] = None
+    language: Optional[str] = Field(None, max_length=10)
 
 class PasswordLoginRequest(BaseModel):
     email: EmailStr
@@ -37,6 +41,7 @@ class UserResponse(BaseModel):
     name: Optional[str] = None
     picture: Optional[str] = None
     username: Optional[str] = None
+    language: str = "ko"
     is_superadmin: bool
     is_approved: bool
     is_active: bool

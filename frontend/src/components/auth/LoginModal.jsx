@@ -443,7 +443,11 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
             <button
               type="submit"
               className="btn-primary"
-              disabled={isLoading || !email.trim() || !password.trim()}
+              disabled={
+                isLoading || !email.trim() || !password.trim()
+                // 가입할 때는 쓸 수 있는 아이디까지 확인된 뒤에 눌리게 한다
+                || (authMode === 'register' && usernameState !== 'free')
+              }
               style={{ width: '100%', padding: '0.65rem', fontSize: '0.875rem' }}
             >
               {authMode === 'register' ? <UserPlus size={16} /> : <LogIn size={16} />}

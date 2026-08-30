@@ -121,6 +121,10 @@ async def init_db():
             # A photo the person uploaded here, which wins over the one the
             # identity provider supplied.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS avatar_s3_key VARCHAR(1024);",
+            # The language a person reads in, taken from their browser at sign-up.
+            # Everyone who was already here has been using it in Korean, so that
+            # is what they get rather than a guess or a blank.
+            "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS language VARCHAR(10) NOT NULL DEFAULT 'ko';",
             # `is_admin` sat next to a workspace's own "admin" role and read as
             # the same thing. This one is service-wide, so it says so.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",

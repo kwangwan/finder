@@ -8,6 +8,7 @@ import FileConflictModal from './components/upload/FileConflictModal';
 import NewFolderModal from './components/modals/NewFolderModal';
 import LoginModal from './components/auth/LoginModal';
 import PendingApprovalScreen from './components/auth/PendingApprovalScreen';
+import ChooseHandleScreen from './components/auth/ChooseHandleScreen';
 import AdminDashboard from './components/admin/AdminDashboard';
 import WorkspaceSettingsModal from './components/workspace/WorkspaceSettingsModal';
 import MediaPreviewModal from './components/modals/MediaPreviewModal';
@@ -2054,7 +2055,19 @@ export default function App() {
     );
   }
 
-  // 4. Admin Dashboard View
+  // 4. Approved, but with no handle yet — asked for one before anything else,
+  //    because it is the name every other screen shows this person by.
+  if (!currentUser.username && !currentUser.is_system) {
+    return (
+      <ChooseHandleScreen
+        user={currentUser}
+        onDone={setCurrentUser}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // 5. Admin Dashboard View
   if (activeView === 'admin') {
     return (
       <AdminDashboard
