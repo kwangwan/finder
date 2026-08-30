@@ -282,6 +282,23 @@ async def board_task_documents(db: AsyncSession, board_id) -> List[FileItem]:
     )).scalars().all())
 
 
+async def move_board_documents(db: AsyncSession, board: FileItem) -> int:
+    """
+    A board's 할 일 documents live where the board lives.
+
+    Moving the board and leaving them behind would scatter them into a folder
+    nobody associates with the 일정 — and, worse, put them somewhere they could
+    be caught by a deletion of that folder while their rows lived on.
+    """
+    if board.file_type != BOARD_FILE_TYPE:
+        return 0
+    documents = await board_task_documents(db, board.id)
+    for document in documents:
+        document.folder_id = board.folder_id
+        document.workspace_id = board.workspace_id
+    return len(documents)
+
+
 async def set_board_documents_trashed(db: AsyncSession, board: FileItem, trashed: bool) -> int:
     """
     A board's 할 일 documents follow the board into the trash and back out.

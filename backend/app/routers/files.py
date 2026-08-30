@@ -1041,6 +1041,8 @@ async def move_file(
             file_item.workspace_id = folder.workspace_id
 
     file_item.folder_id = req.folder_id
+    # A board's 할 일 documents go where it goes.
+    await board_service.move_board_documents(db, file_item)
     await db.commit()
     await db.refresh(file_item)
     return _to_file_response(file_item)
@@ -1066,14 +1068,16 @@ async def rename_file(
     await db.refresh(file_item)
     return _to_file_response(file_item)
 
-async def _refuse_if_task_document(db: AsyncSession, file_items) -> None:
+async def _refuse_if_task_document(db: AsyncSession, file_items, action: str = "delete") -> None:
     """
-    A 할 일's document is deleted from the 할 일, never from the document.
+    A 할 일's document is not separable from the 할 일.
 
-    Otherwise a board could be left with rows pointing at nothing, and the one
-    place that knows the document is part of something else — the board — would
-    never have been asked. Checked for the whole batch before anything is
-    written, so a mixed selection is refused as a whole rather than half done.
+    Deleting it happens from the 할 일, and it reaches or leaves the trash only
+    by being carried there by its board. Doing either from the document side
+    would leave a board holding a row whose document is gone, or a document
+    outside the trash whose board is still in it. Checked for the whole batch
+    before anything is written, so a mixed selection is refused as a whole
+    rather than half done.
     """
     items = [f for f in file_items if f is not None]
     owned = await link_service.owning_tasks(db, [f.id for f in items])
@@ -1081,13 +1085,12 @@ async def _refuse_if_task_document(db: AsyncSession, file_items) -> None:
         return
     names = [f.name for f in items if f.id in owned]
     shown = ", ".join(names[:3]) + ("…" if len(names) > 3 else "")
-    raise HTTPException(
-        status_code=400,
-        detail=(
-            f"{shown}은(는) 일정의 할 일에 연결된 문서입니다. "
-            "일정에서 해당 할 일을 삭제하면 문서도 함께 삭제됩니다."
-        ),
+    tail = (
+        "일정을 복구하면 함께 복구됩니다."
+        if action == "restore"
+        else "일정에서 해당 할 일을 삭제하면 문서도 함께 삭제됩니다."
     )
+    raise HTTPException(status_code=400, detail=f"{shown}은(는) 일정의 할 일에 연결된 문서입니다. {tail}")
 
 
 @router.put("/{file_id}/trash", response_model=FileResponse)
@@ -1132,6 +1135,10 @@ async def restore_file(
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
+
+    # A 할 일's document came here with its board and leaves the same way, so
+    # it is not restored on its own into a board that is still in the trash.
+    await _refuse_if_task_document(db, [file_item], action="restore")
 
     # If parent folder is still trashed, restore file to root
     if file_item.folder_id:
@@ -1309,6 +1316,7 @@ async def batch_move_files(
             skipped_no_permission += 1
             continue
         f.folder_id = req.folder_id
+        await board_service.move_board_documents(db, f)
         moved_count += 1
 
     await db.commit()

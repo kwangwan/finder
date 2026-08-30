@@ -4,14 +4,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, delete, func
+from sqlalchemy import select, and_, or_, delete, func, inspect as sql_inspect
 
 from app.core.database import get_db
 from app.models import Folder, FileItem, User, WorkspaceMember
+from app.models.board import BOARD_FILE_TYPE
 from app.core.security import get_current_approved_user
 from app.services.access_service import access_service
 from app.services import favorite_service
 from app.services import board_service
+from app.services import link_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
@@ -96,7 +98,11 @@ async def _auto_purge_expired(db: AsyncSession):
     expired_files_res = await db.execute(
         select(FileItem).where(and_(FileItem.is_trashed == True, FileItem.trashed_at < cutoff))
     )
-    for f in expired_files_res.scalars().all():
+    expired_files = list(expired_files_res.scalars().all())
+    expired_files.sort(key=lambda f: 0 if f.file_type == BOARD_FILE_TYPE else 1)
+    for f in expired_files:
+        if sql_inspect(f).deleted:
+            continue
         await _purge_file(db, f)
 
     # Purge expired folders
@@ -246,6 +252,26 @@ async def get_trash(
     )
 
 
+async def _refuse_if_task_document(db: AsyncSession, file_item: FileItem) -> None:
+    """
+    A 할 일's document is not separable from the 할 일.
+
+    It reaches the trash only by being carried there by its board, and it
+    leaves the same way. Purging or restoring it on its own would leave the
+    board holding a row whose document is gone, or a document showing outside
+    the board that is still in the trash.
+    """
+    if await link_service.owning_task(db, file_item.id) is None:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"'{file_item.name}'은(는) 일정의 할 일에 연결된 문서입니다. "
+            "일정을 복구하거나 영구 삭제하면 함께 처리됩니다."
+        ),
+    )
+
+
 @router.delete("/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def purge_file_item(
     file_id: uuid.UUID,
@@ -268,6 +294,7 @@ async def purge_file_item(
             detail="휴지통의 파일을 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
         )
 
+    await _refuse_if_task_document(db, file_item)
     await _purge_file(db, file_item)
     await db.commit()
     return None
@@ -319,9 +346,14 @@ async def empty_trash(
     elif not current_user.is_superadmin:
         raise HTTPException(status_code=403, detail="휴지통 비우기는 특정 워크스페이스의 소유자/관리자 또는 최고 관리자만 수행할 수 있습니다.")
 
-    # 1. Purge files
+    # 1. Purge files. Boards first, so each one takes its 할 일 documents with
+    #    it; the rest of the sweep then skips anything already gone.
     files_res = await db.execute(select(FileItem).where(and_(*file_conditions)))
-    for f in files_res.scalars().all():
+    trashed_files = list(files_res.scalars().all())
+    trashed_files.sort(key=lambda f: 0 if f.file_type == BOARD_FILE_TYPE else 1)
+    for f in trashed_files:
+        if sql_inspect(f).deleted:
+            continue
         await _purge_file(db, f)
 
     # 2. Purge folders
