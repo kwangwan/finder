@@ -168,10 +168,14 @@ function buildFolderPath(nodeList, targetId) {
 export default function App() {
   const { showAlert, showConfirm } = useDialog();
   const { showToast, updateToast, dismissToast } = useToast();
-  // 'system' follows the browser; 'dark'/'light' are a deliberate choice that
-  // outlives it. Nothing stored means system, which is what someone who has
-  // never touched the setting expects.
-  const [theme, setTheme] = useState(() => localStorage.getItem('kb_theme') || 'system');
+  // Two themes, so there is nothing to choose between them and the browser:
+  // until someone picks one, each load reads the browser's setting; after
+  // that, their pick is what is stored and what is used.
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('kb_theme');
+    if (saved === 'dark' || saved === 'light') return saved;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   
   // Auth State
@@ -401,34 +405,20 @@ export default function App() {
     setHasNewFilesInView(false);
   }, [activeFolderId, activeView]);
 
-  // Sync theme. On 'system' the browser decides, and keeps deciding — someone
-  // whose machine switches at sunset should switch with it while the app is
-  // open, without a reload.
+  // Applying it is all this does. Storing happens where the choice is made,
+  // so someone who has never picked keeps following their browser on the next
+  // load rather than being pinned to whatever it said the first time.
   useEffect(() => {
-    const choice = ['dark', 'light', 'system'].includes(theme) ? theme : 'system';
-    const media = window.matchMedia('(prefers-color-scheme: light)');
-    const apply = () => {
-      const resolved = choice === 'system' ? (media.matches ? 'light' : 'dark') : choice;
-      document.documentElement.setAttribute('data-theme', resolved);
-    };
-    apply();
-    localStorage.setItem('kb_theme', choice);
-    if (choice !== 'system') return undefined;
-    media.addEventListener('change', apply);
-    return () => media.removeEventListener('change', apply);
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
   }, [theme]);
 
-  const toggleTheme = () => {
-    setTheme(prev => {
-      if (prev === 'system') return 'dark';
-      if (prev === 'dark') return 'light';
-      return 'system';
-    });
+  const chooseTheme = (next) => {
+    const picked = next === 'light' ? 'light' : 'dark';
+    localStorage.setItem('kb_theme', picked);
+    setTheme(picked);
   };
 
-  const handleSetTheme = (newTheme) => {
-    setTheme(newTheme);
-  };
+  const toggleTheme = () => chooseTheme(theme === 'dark' ? 'light' : 'dark');
 
   // Check initial authentication
   const checkAuth = useCallback(async () => {
@@ -2137,7 +2127,6 @@ export default function App() {
           currentFolder={currentFolder}
           theme={theme}
           onToggleTheme={toggleTheme}
-          onSetTheme={handleSetTheme}
           onNavigateHome={() => {
             setActiveFolderId(null);
             setActiveView('all');

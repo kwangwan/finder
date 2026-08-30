@@ -15,8 +15,6 @@ import {
   Folder,
   User as UserIcon,
   HardDrive,
-  Palette,
-  Monitor,
   Edit3,
   Check,
   Camera,
@@ -43,7 +41,6 @@ export default function TopBar({
   currentFolder,
   theme,
   onToggleTheme,
-  onSetTheme,
   onNavigateHome,
   onOpenAdmin,
   onLogout,
@@ -125,6 +122,17 @@ export default function TopBar({
           title="지식 검색 (⌘K)"
         >
           <Search size={17} />
+        </button>
+
+        {/* Two themes, so one button: it shows what it will switch to, and
+            switches. A menu of two things a click away is a menu too many. */}
+        <button
+          className="btn-icon theme-toggle-btn"
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환'}
+          aria-label={theme === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환'}
+        >
+          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
         </button>
 
         {/* User Profile & More Actions Dropdown */}
@@ -292,52 +300,6 @@ export default function TopBar({
                     <span>최고 관리자 대시보드</span>
                   </button>
                 )}
-
-                <div style={{ padding: '0.6rem 0.85rem 0.35rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Palette size={13} />
-                  <span>테마</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, padding: '0.2rem 0.75rem 0.6rem' }}>
-                  {[
-                    { id: 'system', label: '시스템', Icon: Monitor },
-                    { id: 'dark', label: '다크', Icon: Moon },
-                    { id: 'light', label: '라이트', Icon: Sun }
-                  ].map(t => {
-                    const isActive = theme === t.id;
-                    const IconComponent = t.Icon;
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => {
-                          if (onSetTheme) onSetTheme(t.id);
-                          else onToggleTheme();
-                        }}
-                        style={{
-                          height: 34,
-                          padding: '0 0.25rem',
-                          background: isActive ? 'var(--accent-primary)' : 'var(--bg-tertiary)',
-                          color: isActive ? 'var(--on-accent)' : 'var(--text-secondary)',
-                          border: isActive ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                          borderRadius: 'var(--radius-md)',
-                          fontSize: '0.72rem',
-                          fontWeight: isActive ? 700 : 500,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 4,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <IconComponent size={13} style={{ flexShrink: 0 }} />
-                        <span>{t.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
 
                 <div className="dropdown-divider" />
 
