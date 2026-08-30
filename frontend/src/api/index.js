@@ -428,8 +428,18 @@ export async function deleteWorkspace(workspaceId) {
   return true;
 }
 
-export async function listWorkspaceMembers(workspaceId) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members`, {
+/**
+ * Who is in a workspace.
+ *
+ * Paged and searched on the server: the shared workspace's list is everybody
+ * with an account, which is not a list to fetch whole.
+ */
+export async function listWorkspaceMembers(workspaceId, { q = '', page = 1, pageSize = 10, paged = false } = {}) {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (paged) { params.set('paged', 'true'); params.set('page', String(page)); params.set('page_size', String(pageSize)); }
+  const suffix = params.toString() ? `?${params}` : '';
+  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members${suffix}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('멤버 목록 조회 실패');

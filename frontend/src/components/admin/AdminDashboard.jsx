@@ -24,7 +24,7 @@ import {
   Check,
   X as XIcon
 } from '../../utils/icons';
-import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs, getSharedWorkspaceInfo, setSharedWorkspaceQuota, setUserSharedWrite, getSharedPolicy, updateSharedPolicy } from '../../api';
+import { getAdminUsers, toggleApproveUser, toggleAdminUser, deleteAdminUser, getSystemStats, updateUserQuota, listAdminCopyJobs, getSharedWorkspaceInfo, setSharedWorkspaceQuota, getSharedPolicy, updateSharedPolicy } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 
 /** Format bytes to human-readable string */
@@ -560,7 +560,6 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                       <HardDrive size={13} /> 저장용량 할당
                     </div>
                   </th>
-                  <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>공용 쓰기</th>
                   <th style={{ padding: '0.9rem 1rem', fontWeight: 600, fontSize: '0.78rem' }}>가입일시</th>
                   <th style={{ padding: '0.9rem 1.5rem', textAlign: 'right', fontWeight: 600, fontSize: '0.78rem' }}>계정 관리</th>
                 </tr>
@@ -568,7 +567,7 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <td colSpan={6} style={{ padding: '3.5rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                       <Users size={32} style={{ margin: '0 auto 0.6rem', display: 'block', opacity: 0.5 }} />
                       일치하는 사용자가 없습니다.
                     </td>
@@ -757,55 +756,6 @@ export default function AdminDashboard({ currentUser, onBackToApp }) {
                                 }} />
                               </div>
                             </div>
-                          )}
-                        </td>
-
-                        {/* Shared workspace write access. Withdrawing it is how
-                            misuse is handled: the user keeps read access, because
-                            for someone without personal storage the shared space
-                            is their entire account. */}
-                        <td style={{ padding: '1rem 1rem' }}>
-                          {user.is_superadmin ? (
-                            <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>최고 관리자</span>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              disabled={actionLoadingId === user.id}
-                              onClick={async () => {
-                                const next = !(user.can_write_shared !== false);
-                                if (!next) {
-                                  const confirmed = await showConfirm({
-                                    title: '공용 워크스페이스 쓰기 권한 회수',
-                                    message: `'${user.email}' 사용자의 쓰기 권한을 회수하시겠습니까?\n읽기는 계속 가능하며, 새로 올리거나 수정·삭제할 수 없게 됩니다.`,
-                                    confirmText: '회수',
-                                    danger: true,
-                                  });
-                                  if (!confirmed) return;
-                                }
-                                setActionLoadingId(user.id);
-                                try {
-                                  await setUserSharedWrite(user.id, next);
-                                  await loadData();
-                                } catch (err) {
-                                  await showAlert({ title: '변경 실패', message: err.message, type: 'error' });
-                                } finally {
-                                  setActionLoadingId(null);
-                                }
-                              }}
-                              style={{
-                                padding: '0.3rem 0.6rem',
-                                fontSize: '0.75rem',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                color: user.can_write_shared === false ? 'var(--accent-rose)' : 'var(--accent-emerald)',
-                              }}
-                              title={user.can_write_shared === false ? '쓰기 권한 부여' : '쓰기 권한 회수 (읽기는 유지)'}
-                            >
-                              {user.can_write_shared === false ? <XIcon size={13} /> : <Check size={13} />}
-                              <span>{user.can_write_shared === false ? '읽기 전용' : '쓰기 가능'}</span>
-                            </button>
                           )}
                         </td>
 

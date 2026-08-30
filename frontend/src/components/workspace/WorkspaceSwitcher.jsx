@@ -230,7 +230,9 @@ export default function WorkspaceSwitcher({
               }}
             >
               <Settings size={14} />
-              <span>워크스페이스 관리 & 멤버 초대</span>
+              {/* Nobody is invited to the shared workspace — everyone is
+                  already in it — so there it is about what each may do. */}
+              <span>{activeWorkspace?.is_shared ? '워크스페이스 관리 & 멤버 권한' : '워크스페이스 관리 & 멤버 초대'}</span>
             </button>
 
             <button

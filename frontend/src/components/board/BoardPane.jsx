@@ -11,7 +11,7 @@ export {
   initialOf, colorForName, Avatar, PillSelect,
 } from './TaskRow';
 
-export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) {
+export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument, refreshToken = null }) {
   const { showConfirm, showAlert } = useDialog();
   const [board, setBoard] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,6 +43,16 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) 
   }, [file.id]);
 
   useEffect(() => { load(); }, [load]);
+  // A 할 일's name lives in its document's title, which can be changed from
+  // the document's own window. When that happens the board is reloaded rather
+  // than left showing the name the row was created with.
+  const externalToken = typeof refreshToken === 'object' && refreshToken ? refreshToken.n : refreshToken;
+  const firstToken = useRef(externalToken);
+  useEffect(() => {
+    if (externalToken === firstToken.current) return;
+    firstToken.current = externalToken;
+    load();
+  }, [externalToken, load]);
   useEffect(() => { setTitle(file.name); }, [file.name]);
   useEffect(() => {
     if (draftUnder === undefined) return undefined;
@@ -174,7 +184,7 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) 
     }
   };
 
-  const handleDrop = (target) => {
+  const handleDrop = (target, after) => {
     const source = tasks.find((t) => t.id === dragId);
     setDragId(null);
     setDropTarget(null);
@@ -185,7 +195,11 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) 
     const siblings = source.parent_task_id ? (childrenOf.get(source.parent_task_id) || []) : topLevel;
     const ids = siblings.map((t) => t.id).filter((id) => id !== source.id);
     const at = ids.indexOf(target.id);
-    ids.splice(at === -1 ? ids.length : at, 0, source.id);
+    // Dropped on the lower half of a row means "after it". Without this the
+    // last place was unreachable: every drop inserted before its target, so
+    // nothing could be moved past the final row.
+    const index = at === -1 ? ids.length : at + (after ? 1 : 0);
+    ids.splice(index, 0, source.id);
     commitOrder(source.parent_task_id || null, ids);
   };
 
@@ -203,13 +217,20 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) 
       if (!source || (source.parent_task_id || null) !== (task.parent_task_id || null)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      if (dropTarget !== task.id) setDropTarget(task.id);
+      const box = e.currentTarget.getBoundingClientRect();
+      const after = e.clientY > box.top + box.height / 2;
+      setDropTarget((prev) => (prev?.id === task.id && prev.after === after ? prev : { id: task.id, after }));
     },
     onDragLeave: (e) => {
       if (e.currentTarget.contains(e.relatedTarget)) return;
-      setDropTarget((prev) => (prev === task.id ? null : prev));
+      setDropTarget((prev) => (prev?.id === task.id ? null : prev));
     },
-    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); handleDrop(task); },
+    onDrop: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const box = e.currentTarget.getBoundingClientRect();
+      handleDrop(task, e.clientY > box.top + box.height / 2);
+    },
   } : {});
 
   const renderDraft = (parentId) => (
@@ -276,7 +297,7 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) 
           onAddSub={depth === 0 ? (t) => { setDraftUnder(t.id); setDraftName(''); } : undefined}
           dragProps={dragPropsFor(task)}
           isDragging={dragId === task.id}
-          isDropTarget={dropTarget === task.id}
+          isDropTarget={dropTarget?.id === task.id ? (dropTarget.after ? 'after' : 'before') : null}
         />
         {!isCollapsed && kids.map((kid) => renderTask(kid, 1))}
         {!isCollapsed && draftUnder === task.id && renderDraft(task.id)}

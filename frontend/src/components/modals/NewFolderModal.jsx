@@ -27,8 +27,11 @@ export default function NewFolderModal({
   isOpen,
   onClose,
   // In the shared workspace nothing may sit at the home, and other people's
-  // folders are theirs — so neither may be picked as the place to put this.
+  // folders are theirs — so the choice is your own folder and what is inside
+  // it. An administrator may write anywhere, but being offered everybody's
+  // folders here is a list of colleagues, not a list of places to work.
   isSharedWorkspace = false,
+  rootFolderId = null,
   parentFolderId,
   folders = [],
   onCreate
@@ -50,7 +53,15 @@ export default function NewFolderModal({
 
   if (!isOpen) return null;
 
-  const flatFolders = flattenFolderTree(folders);
+  const subtreeOf = (nodes, id) => {
+    for (const node of (nodes || [])) {
+      if (node.id === id) return [node];
+      const found = subtreeOf(node.children, id);
+      if (found.length) return found;
+    }
+    return [];
+  };
+  const flatFolders = flattenFolderTree(rootFolderId ? subtreeOf(folders, rootFolderId) : folders);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -462,8 +462,17 @@ async def list_workspace_tasks(
     children_by_root = {}
     for child in children_rows:
         children_by_root.setdefault(child.parent_task_id, []).append(child)
+    # Soonest first here too. This list answers "what is due", so a sub-item
+    # kept its board's manual order and arrived in an order that meant nothing
+    # on this screen — and no amount of dragging could fix it, because manual
+    # order is not what is being shown.
     for group in children_by_root.values():
-        group.sort(key=lambda t: (t.position, t.created_at))
+        group.sort(key=lambda t: (
+            1 if t.due_date is None else 0,
+            t.due_date or date.max,
+            PRIORITY_RANK.get(t.priority, len(PRIORITIES)),
+            t.position,
+        ))
 
     def group_key(root):
         """

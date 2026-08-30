@@ -298,6 +298,10 @@ async def purge_file_item(
             detail="휴지통의 파일을 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
         )
 
+    # Losing write in the shared workspace means losing it over your own
+    # uploads too — otherwise a withdrawn account can still empty out the
+    # material it left behind.
+    await access_service.require_write(db, current_user, file_item.workspace_id)
     await _refuse_if_task_document(db, file_item)
     await _purge_file(db, file_item)
     await db.commit()
@@ -326,6 +330,7 @@ async def purge_folder_item(
             detail="휴지통의 폴더를 영구 삭제할 권한이 없습니다. (작성자 본인 또는 워크스페이스 소유자/관리자만 가능)"
         )
 
+    await access_service.require_write(db, current_user, folder.workspace_id)
     await _purge_folder_recursive(db, folder)
     await db.commit()
     return None

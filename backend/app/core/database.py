@@ -79,7 +79,6 @@ async def init_db():
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS is_trashed BOOLEAN NOT NULL DEFAULT FALSE;",
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMP;",
             # Default (non-deletable, always-fallback) workspace per user
-            "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;",
             # The single organisation-wide workspace every approved user can use
             "ALTER TABLE kb_workspaces ADD COLUMN IF NOT EXISTS is_shared BOOLEAN NOT NULL DEFAULT FALSE;",
             # Holder account for the shared workspace's own storage pool
@@ -124,6 +123,11 @@ async def init_db():
             # The language a person reads in, taken from their browser at sign-up.
             # Added with 'ko' so everyone who was already here — all of them
             # Korean readers — keeps reading in Korean.
+            # The personal workspace made at signup is gone (see auth.py), and
+            # with it the flag that marked one workspace per owner as undeletable.
+            # The shared workspace is protected by is_shared, which is what it
+            # actually is.
+            "ALTER TABLE kb_workspaces DROP COLUMN IF EXISTS is_default;",
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS language VARCHAR(10) NOT NULL DEFAULT 'ko';",
             # From here on the fallback is English: 'ko' was right for the
             # people already here, not for a stranger whose browser asks for
@@ -340,29 +344,6 @@ async def init_db():
                 """))
         except Exception as e:
             print(f"[DB Migration Warning] Could not sync user storage_used_bytes: {e}")
-
-        # Backfill is_default for users whose workspace(s) predate that column:
-        # their single oldest owned workspace becomes the default. Idempotent —
-        # once an owner has any workspace marked default, this is a no-op for them.
-        try:
-            async with conn.begin_nested():
-                await conn.execute(text("""
-                WITH earliest AS (
-                    SELECT DISTINCT ON (owner_id) id, owner_id
-                    FROM kb_workspaces
-                    ORDER BY owner_id, created_at ASC
-                )
-                UPDATE kb_workspaces w
-                SET is_default = TRUE
-                FROM earliest e
-                WHERE w.id = e.id
-                AND NOT EXISTS (
-                    SELECT 1 FROM kb_workspaces w2
-                    WHERE w2.owner_id = w.owner_id AND w2.is_default = TRUE
-                );
-                """))
-        except Exception as e:
-            print(f"[DB Migration Warning] Could not backfill default workspaces: {e}")
 
         # Backfill last_edited_by for files that predate that column — nobody
         # has edited them since upload/creation, so the uploader/creator is

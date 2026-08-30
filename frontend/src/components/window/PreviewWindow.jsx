@@ -56,7 +56,9 @@ export default function PreviewWindow({
   onDeleteFile,
   onOpenFile,
   activeWorkspaceId,
-  currentUser
+  currentUser,
+  externalRefreshToken = { n: 0, keys: null },
+  onFileRenamed = null,
 }) {
   const { id, file, isMinimized, isMaximized, position, size, zIndex } = windowState;
 
@@ -193,12 +195,25 @@ export default function PreviewWindow({
   // bootstrap always seeds from the note's real content, never a stale/
   // partial `file` object passed in at window-open time (e.g. from a file
   // list response that omits `content`).
+  // The last title we told the rest of the app about, so an autosave that
+  // changed only the body does not set every list reloading.
+  const renamedNameRef = useRef(file?.name || '');
+
   const noteEditor = useNoteEditor({
     file: fileDetail,
     activeWorkspaceId,
     currentUser,
     enabled: isMarkdown && !isLoadingContent,
-    onFileUpdated: (updated) => onUpdateWindowFile(id, updated)
+    onFileUpdated: (updated) => {
+      onUpdateWindowFile(id, updated);
+      // The title of a 할 일's document is the 할 일's own name, so every
+      // other view showing it — the 일정 tab, the board this row belongs
+      // to — is told rather than left showing the old one.
+      if (updated?.name && updated.name !== renamedNameRef.current) {
+        renamedNameRef.current = updated.name;
+        onFileRenamed?.(updated.id || file?.id, updated.name);
+      }
+    }
   });
 
   const links = useFileLinks(file?.id, linksToken);
@@ -621,7 +636,8 @@ export default function PreviewWindow({
           <BoardPane
             file={resolvedFile}
             onDirty={() => onUpdateWindowFile(id, { updated_at: new Date().toISOString() })}
-            onRenamed={(name) => onUpdateWindowFile(id, { name })}
+            onRenamed={(name) => { onUpdateWindowFile(id, { name }); onFileRenamed?.(file?.id, name); }}
+            refreshToken={externalRefreshToken}
             onOpenDocument={onOpenFile}
           />
         ) : isImage ? (

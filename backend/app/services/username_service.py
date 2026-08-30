@@ -271,3 +271,34 @@ async def backfill_all(db: AsyncSession) -> int:
         await db.commit()
 
     return assigned
+
+
+async def display_name_available(db: AsyncSession, candidate: str, exclude_user_id=None) -> bool:
+    """Whether this display name is free. Names are unique, one person to one."""
+    stmt = select(User.id).where(func.lower(User.name) == (candidate or "").lower())
+    if exclude_user_id:
+        stmt = stmt.where(User.id != exclude_user_id)
+    return (await db.execute(stmt)).first() is None
+
+
+async def allocate_display_name(db: AsyncSession, base: str) -> str:
+    """
+    A free display name near `base`, for a signup that cannot be asked.
+
+    Google hands over whatever name the account carries, and two people really
+    can be called the same thing. Refusing the signup would leave them unable
+    to get in at all over a name they never chose, so the clash is settled by
+    numbering it and letting them rename themselves afterwards.
+    """
+    candidate = " ".join((base or "").split()) or "사용자"
+    try:
+        candidate = validate_display_name(candidate)
+    except ValueError:
+        candidate = "사용자"
+    if await display_name_available(db, candidate):
+        return candidate
+    for n in range(2, 100):
+        attempt = f"{candidate[:52]} ({n})"
+        if await display_name_available(db, attempt):
+            return attempt
+    return f"{candidate[:44]} ({uuid.uuid4().hex[:6]})"

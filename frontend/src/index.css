@@ -2214,6 +2214,73 @@ h1, h2, h3, h4, h5, h6,
   flex-wrap: wrap;
 }
 
+/* Finding one person among everybody, and saying which page of them this is. */
+.workspace-member-search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.workspace-member-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.workspace-member-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+/* A switch that says what it is now, not what pressing it would do — the
+   label is the current state and the title says what happens next. */
+.member-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.member-switch.on {
+  color: var(--accent-emerald);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.member-switch.off {
+  color: var(--accent-rose);
+  border-color: rgba(244, 63, 94, 0.35);
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.member-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 @media (max-width: 480px) {
   /* One column on a phone. Two columns left each card about 180px wide, which
      had to hold five controls — they ended up 26px with 2px between them, and
@@ -5287,7 +5354,10 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .bd-row:hover { background: var(--bg-card-hover); }
 .bd-row.is-open { background: var(--bg-tertiary); }
 .bd-row.is-dragging { opacity: 0.4; }
+/* The line shows which side the row will land on, so the last place is
+   reachable and "one further down" is visible before letting go. */
 .bd-row.is-drop { box-shadow: inset 0 2px 0 var(--accent-primary); }
+.bd-row.is-drop-after { box-shadow: inset 0 -2px 0 var(--accent-primary); }
 .bd-row.is-done .bd-name { text-decoration: line-through; color: var(--text-muted); }
 /* A sub-item is set in from the left *inside its name cell* and shaded, so
    every other column still lines up with the row above it. Indenting the whole

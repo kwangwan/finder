@@ -14,7 +14,6 @@ from app.schemas.invitation import CreateInvitationRequest, AcceptInvitationRequ
 from app.schemas.auth import TokenResponse
 from app.core.security import get_current_approved_user, get_current_user, create_access_token, hash_password
 from app.services.email_service import email_service
-from app.routers.auth import ensure_user_default_workspace
 
 router = APIRouter(prefix="/api/invitations", tags=["Invitations"])
 
@@ -270,9 +269,6 @@ async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Dep
     # Mark invitation accepted
     inv.status = "accepted"
     await db.commit()
-
-    # Ensure default workspace
-    await ensure_user_default_workspace(db, user)
 
     token_payload = {
         "sub": str(user.id),

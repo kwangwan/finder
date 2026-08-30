@@ -20,7 +20,8 @@ export default function WindowManager({
   onTransferItems,
   onUploadFiles,
   onUndo,
-  externalRefreshToken = { n: 0, keys: null }
+  externalRefreshToken = { n: 0, keys: null },
+  onFileRenamed = null
 }) {
   const {
     windows,
@@ -80,6 +81,8 @@ export default function WindowManager({
           onPositionChange={updateWindowPosition}
           onSizeChange={updateWindowSize}
           onUpdateWindowFile={updateWindowFile}
+          externalRefreshToken={externalRefreshToken}
+          onFileRenamed={onFileRenamed}
           onToggleFavorite={onToggleFavorite}
           onDeleteFile={onDeleteFile}
           onOpenFile={openWindow}

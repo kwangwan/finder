@@ -1117,11 +1117,10 @@ export default function App() {
       const urlWsId = urlParams.get('ws') || urlParams.get('workspace_id');
       const savedWsId = urlWsId || localStorage.getItem('kb_active_ws_id');
       const matched = wsList.find(w => w.id === savedWsId);
-      // Every user always owns exactly one non-deletable default workspace
-      // (see backend Workspace.is_default), so falling back to it — rather
-      // than just wsList[0] — means a stale/deleted saved workspace id never
-      // leaves the app without an active workspace to show.
-      const fallback = wsList.find(w => w.is_default) || wsList[0];
+      // The one space everybody has is the shared workspace, so falling back
+      // to it — rather than just wsList[0] — means a stale or deleted saved
+      // workspace id never leaves the app without one to show.
+      const fallback = wsList.find(w => w.is_shared) || wsList[0];
       const resolved = matched || fallback || null;
 
       setActiveWorkspace(resolved);
@@ -1748,8 +1747,24 @@ export default function App() {
     refreshFiles();
     refreshFoldersAndStats();
     bumpWindowRefresh();
+    // A renamed file may be a 할 일's document, whose title is that 할 일's
+    // own name — so the 일정 tab is told as well.
+    setScheduleRefreshToken((n) => n + 1);
     windowManager.updateWindowFile(id, { name: newName });
   };
+
+  /**
+   * Something in a window was renamed.
+   *
+   * The name of a 할 일 lives in its document's title, so a rename made in the
+   * document's window has to reach the board it belongs to and the 일정 tab —
+   * neither of which is looking at that window.
+   */
+  const handleFileRenamed = useCallback(() => {
+    refreshFiles();
+    bumpWindowRefresh();
+    setScheduleRefreshToken((n) => n + 1);
+  }, [refreshFiles, bumpWindowRefresh]);
 
   // Cut/copy/paste entries shared by the file, folder and background menus, so
   // the three stay in step and a selection is always acted on as a unit.
@@ -2420,6 +2435,7 @@ export default function App() {
         onClose={() => setIsNewFolderOpen(false)}
         parentFolderId={newFolderParentId ?? (activeWorkspace?.is_shared ? myPersonalFolderId() : null)}
         isSharedWorkspace={!!activeWorkspace?.is_shared}
+        rootFolderId={activeWorkspace?.is_shared ? myPersonalFolderId() : null}
         folders={folders}
         onCreate={handleCreateFolder}
       />
@@ -2474,6 +2490,7 @@ export default function App() {
         }}
         onUndo={runUndo}
         externalRefreshToken={windowRefreshToken}
+        onFileRenamed={handleFileRenamed}
       />
 
       <FolderShareModal

@@ -72,10 +72,14 @@ async def _get_workspace_with_member_check(
         )
     )
     member = member_res.scalar_one_or_none()
-    if not member:
+    # Nobody has a membership row in the shared workspace — being approved is
+    # the membership (see AccessService.is_workspace_member). A plain member is
+    # what that makes them, so anything asking for owner or admin still says no.
+    role = member.role if member else ("member" if workspace.is_shared else None)
+    if role is None:
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
-    if require_role and member.role not in require_role:
+    if require_role and role not in require_role:
         raise HTTPException(status_code=403, detail="이 작업을 수행할 권한이 없습니다.")
 
     return workspace
@@ -292,12 +296,6 @@ async def delete_workspace(
         db, workspace_id, current_user, require_role=["owner"]
     )
 
-    if workspace.is_default:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="기본 워크스페이스는 삭제할 수 없습니다."
-        )
-
     # Deleting it would take the only space some users have, along with
     # everything anyone had put in it.
     if workspace.is_shared:
@@ -330,19 +328,93 @@ async def delete_workspace(
 @router.get("/{workspace_id}/members")
 async def list_workspace_members(
     workspace_id: uuid.UUID,
+    q: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 10,
+    paged: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user)
 ):
-    """List all members of a workspace."""
-    await _get_workspace_with_member_check(db, workspace_id, current_user)
+    """
+    Who is in this workspace.
 
-    members_res = await db.execute(
-        select(WorkspaceMember).options(
-            selectinload(WorkspaceMember.user)
-        ).where(WorkspaceMember.workspace_id == workspace_id)
+    The shared workspace has no membership rows — everyone is in it by being
+    approved at all (see AccessService) — so listing its rows returns nothing
+    and the tab looks empty. There the answer is the list of people, built
+    from the accounts themselves, and since that is everybody it is searched
+    and paged rather than poured out at once.
+    """
+    workspace = await _get_workspace_with_member_check(db, workspace_id, current_user)
+
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+    term = (q or "").strip().lower()
+
+    if workspace.is_shared:
+        # This list is every account on the service, email addresses included.
+        # In a workspace of five people that is a member list; in this one it
+        # is a directory of everybody, so only an administrator may read it.
+        if not current_user.is_superadmin:
+            raise HTTPException(
+                status_code=403,
+                detail="공용 워크스페이스의 멤버 목록은 관리자만 볼 수 있습니다."
+            )
+        conditions = [User.is_system == False]  # noqa: E712
+        if term:
+            like = f"%{term}%"
+            conditions.append(or_(
+                func.lower(User.name).like(like),
+                func.lower(User.username).like(like),
+                func.lower(User.email).like(like),
+            ))
+        total = (await db.execute(select(func.count(User.id)).where(*conditions))).scalar() or 0
+        rows = (await db.execute(
+            select(User).where(*conditions)
+            .order_by(User.is_superadmin.desc(), func.lower(User.name))
+            .offset((page - 1) * page_size).limit(page_size)
+        )).scalars().all()
+        items = [{
+            # No membership row exists, so the account's own id names the entry.
+            "id": f"user-{u.id}",
+            "workspace_id": str(workspace_id),
+            "user_id": str(u.id),
+            "user_email": u.email,
+            "user_name": u.name,
+            "user_username": u.username,
+            "user_picture": u.picture,
+            "role": "admin" if u.is_superadmin else "member",
+            "is_superadmin": bool(u.is_superadmin),
+            "can_write_shared": bool(getattr(u, "can_write_shared", True)),
+            "implicit": True,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        } for u in rows]
+        if paged:
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
+        return items
+
+    stmt = select(WorkspaceMember).options(selectinload(WorkspaceMember.user)).where(
+        WorkspaceMember.workspace_id == workspace_id
     )
-    members = members_res.scalars().all()
-    return [m.to_dict() for m in members]
+    members = (await db.execute(stmt)).scalars().all()
+    if term:
+        def matches(m):
+            u = m.user
+            return u is not None and any(
+                term in (getattr(u, f) or "").lower() for f in ("name", "username", "email")
+            )
+        members = [m for m in members if matches(m)]
+    total = len(members)
+    window = members[(page - 1) * page_size: page * page_size] if paged else members
+    items = []
+    for m in window:
+        row = m.to_dict()
+        row["user_username"] = m.user.username if m.user else None
+        row["is_superadmin"] = bool(m.user.is_superadmin) if m.user else False
+        row["implicit"] = False
+        items.append(row)
+    if paged:
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return items
 
 
 @router.post("/{workspace_id}/members")
@@ -417,6 +489,12 @@ async def update_member_role(
         db, workspace_id, current_user, require_role=["owner"]
     )
 
+    if workspace.is_shared:
+        raise HTTPException(
+            status_code=400,
+            detail="공용 워크스페이스에는 멤버별 역할이 없습니다. 관리자 임명과 쓰기 권한으로 관리해 주세요."
+        )
+
     if workspace.owner_id == user_id:
         raise HTTPException(status_code=400, detail="워크스페이스 소유자의 역할은 변경할 수 없습니다.")
 
@@ -453,6 +531,16 @@ async def remove_member(
 ):
     """Remove a member from workspace or leave workspace."""
     workspace = await _get_workspace_with_member_check(db, workspace_id, current_user)
+
+    # Nobody leaves or is thrown out of the shared workspace: for a user with
+    # no storage of their own it is their whole account, and there is no
+    # membership row to remove anyway. Access there is managed by taking write
+    # away, which leaves them able to read.
+    if workspace.is_shared:
+        raise HTTPException(
+            status_code=400,
+            detail="공용 워크스페이스는 탈퇴하거나 추방할 수 없습니다. 쓰기 권한을 회수하는 방식으로 관리해 주세요."
+        )
 
     is_self = current_user.id == user_id
 

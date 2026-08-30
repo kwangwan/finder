@@ -80,7 +80,6 @@ async def ensure_shared_workspace(db: AsyncSession) -> Workspace:
                 owner_id=account.id,
                 icon="users",
                 is_shared=True,
-                is_default=False,
             )
             db.add(workspace)
         logger.info("[SharedWorkspace] shared workspace created")

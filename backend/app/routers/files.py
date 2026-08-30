@@ -772,6 +772,8 @@ async def update_markdown_note(
         content_changed = req.content is not None and req.content != (old_content or "")
         if req.name is not None:
             file_item.name = req.name
+            # A 할 일's document is the 할 일 — the board row follows its title.
+            await link_service.rename_owning_task(db, file_item)
         if req.folder_id is not None:
             file_item.folder_id = req.folder_id
         if req.workspace_id is not None:
@@ -1122,6 +1124,7 @@ async def rename_file(
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     file_item.name = req.name.strip()
+    await link_service.rename_owning_task(db, file_item)
     await db.commit()
     await db.refresh(file_item)
     return _to_file_response(file_item)

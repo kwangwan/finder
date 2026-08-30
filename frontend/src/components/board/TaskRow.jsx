@@ -224,12 +224,17 @@ export default function TaskRow({
 
   return (
     <div
-      className={`bd-row depth-${depth} tone-${tone} ${isOpen ? 'is-open' : ''} ${task.status === 'done' ? 'is-done' : ''} ${isDragging ? 'is-dragging' : ''} ${isDropTarget ? 'is-drop' : ''}`}
+      className={`bd-row depth-${depth} tone-${tone} ${isOpen ? 'is-open' : ''} ${task.status === 'done' ? 'is-done' : ''} ${isDragging ? 'is-dragging' : ''} ${isDropTarget === 'after' ? 'is-drop-after' : isDropTarget ? 'is-drop' : ''}`}
       onMouseEnter={onHover}
       {...dragProps}
     >
       <div className="bd-f-name">
-        {canWrite && <span className="bd-grip" title="끌어서 순서 변경"><GripVertical size={12} /></span>}
+        {/* Only where dragging actually reorders something. In the 일정 탭 the
+            order is the deadline, so a handle there promised a rearrangement
+            that could not happen. */}
+        {canWrite && dragProps?.draggable && (
+          <span className="bd-grip" title="끌어서 순서 변경"><GripVertical size={12} /></span>
+        )}
         {depth === 0 ? (
           <button
             type="button"

@@ -129,3 +129,21 @@ async def owning_tasks(db: AsyncSession, file_ids: Iterable[uuid.UUID]) -> Dict[
         select(BoardTask).where(BoardTask.document_id.in_(ids))
     )).scalars().all()
     return {row.document_id: row for row in rows}
+
+
+async def rename_owning_task(db: AsyncSession, file_item) -> bool:
+    """
+    Carry a 할 일 document's new title back to the 할 일 itself.
+
+    The two are one thing wearing two faces: the board row and the document
+    are created together and deleted together, and the name is the same name.
+    Renaming from the board already updated the document; without this, doing
+    it from the document left the board saying something else.
+    """
+    if file_item is None:
+        return False
+    task = (await owning_tasks(db, [file_item.id])).get(file_item.id)
+    if task is None or task.name == file_item.name:
+        return False
+    task.name = file_item.name
+    return True

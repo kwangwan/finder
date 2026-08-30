@@ -531,7 +531,10 @@ export default function FolderExplorer({
   }, [isRemoteFolderList, isFavoritesView, workspaceId, rootSearch, rootPage, hasNewFiles, favoriteRefreshToken]);
   // 홈에서는 아무것도 만들 수 없지만, 문서·일정·즐겨찾기 탭은 장소가 아니라
   // 질문이라 새로 만든 것은 본인 폴더로 들어간다 — 그래서 그곳에서는 열려 있다.
-  const canWriteHere = canWrite && !isSharedHomeListing;
+  // 그리고 남의 폴더를 열고 있을 때는, 그 폴더가 답한 권한을 따른다.
+  const canWriteHere = canWrite
+    && !isSharedHomeListing
+    && (currentFolder ? currentFolder.can_write !== false : true);
 
   // What an action triggered from `item` should apply to: the whole selection
   // when the item is part of it, otherwise just that item — the rule every
@@ -837,7 +840,16 @@ export default function FolderExplorer({
       onContextMenu={(e) => {
         if (e.target.closest('[data-select-id]') || isChromeTarget(e.target)) return;
         e.preventDefault();
-        if (onBackgroundContextMenu) onBackgroundContextMenu(e);
+        // Says whether this listing takes new things, so the menu offers
+        // creating only where it would be accepted — inside somebody else's
+        // folder it was offering four actions that all end in a refusal.
+        if (onBackgroundContextMenu) {
+          onBackgroundContextMenu(e, {
+            folderId: currentFolder?.id ?? null,
+            workspaceId,
+            canWrite: canWriteHere && (currentFolder ? currentFolder.can_write !== false : true),
+          });
+        }
       }}
     >
       {/* Download Floating Progress Bar */}
@@ -1170,12 +1182,17 @@ export default function FolderExplorer({
           <div style={{ marginBottom: '2rem' }}>
             <div className="skeleton-box" style={{ width: 100, height: 16, marginBottom: '0.85rem' }} />
             <div className="grid-folders">
-              {[1, 2, 3, 4].map(i => (
+              {/* The shared workspace's home is a list of people's folders and
+                  nothing else, so the placeholder is folders — a page of
+                  file-card outlines there promised a listing that never
+                  arrives. */}
+              {(isSharedHomeListing ? [1, 2, 3, 4, 5, 6, 7, 8] : [1, 2, 3, 4]).map(i => (
                 <div key={i} className="skeleton-box" style={{ height: 48, borderRadius: 'var(--radius-md)' }} />
               ))}
             </div>
           </div>
           {/* Files Skeleton */}
+          {!isSharedHomeListing && (
           <div>
             <div className="skeleton-box" style={{ width: 140, height: 16, marginBottom: '0.85rem' }} />
             <div className="grid-cards">
@@ -1184,6 +1201,7 @@ export default function FolderExplorer({
               ))}
             </div>
           </div>
+          )}
         </div>
       ) : (
         <div

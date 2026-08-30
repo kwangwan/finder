@@ -29,71 +29,6 @@ from app.core.security import (
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-async def ensure_user_default_workspace(db: AsyncSession, user: User):
-    """
-    Make sure the user has somewhere to work.
-
-    A new account no longer gets a personal workspace of its own: everyone
-    belongs to the shared workspace, which is the space a user has before an
-    administrator grants them any storage of their own. Creating a private
-    workspace per signup would hand each new user an empty space backed by a
-    personal quota they do not have yet, which is the situation this replaces.
-
-    Administrators are the exception, and only for a specific reason: legacy
-    folders and files that predate workspaces have to be adopted somewhere, and
-    that has always been the first admin's own workspace.
-    """
-    ws_res = await db.execute(
-        select(WorkspaceMember).where(WorkspaceMember.user_id == user.id)
-    )
-    has_membership = ws_res.first() is not None
-
-    if not user.is_superadmin:
-        # Membership in the shared workspace is implicit (see AccessService),
-        # so nothing needs to be written here at all.
-        return
-
-    if has_membership:
-        return
-
-    user_display = user.name or user.email.split("@")[0]
-    ws_name = f"{user_display}의 워크스페이스"
-    slug_base = re.sub(r'[^\w\s-]', '', ws_name.lower().strip())
-    slug_base = re.sub(r'[\s_]+', '-', slug_base)[:50] or "workspace"
-    slug = f"{slug_base}-{str(user.id)[:8]}"
-
-    ex = await db.execute(select(Workspace).where(Workspace.slug == slug))
-    if ex.scalar_one_or_none():
-        slug = f"{slug}-{uuid.uuid4().hex[:6]}"
-
-    workspace = Workspace(
-        name=ws_name,
-        description="개인 기본 워크스페이스",
-        slug=slug,
-        owner_id=user.id,
-        icon="briefcase",
-        is_default=True
-    )
-    db.add(workspace)
-    await db.commit()
-    await db.refresh(workspace)
-
-    member = WorkspaceMember(
-        workspace_id=workspace.id,
-        user_id=user.id,
-        role="owner"
-    )
-    db.add(member)
-
-    # Adopt folders and files that predate workspaces entirely.
-    await db.execute(
-        update(Folder).where(Folder.workspace_id.is_(None)).values(workspace_id=workspace.id, created_by=user.id)
-    )
-    await db.execute(
-        update(FileItem).where(FileItem.workspace_id.is_(None)).values(workspace_id=workspace.id, created_by=user.id)
-    )
-    await db.commit()
-
 async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token: str | None = None):
     """If a valid invitation token is provided OR if there are pending invitations for this user's email,
     apply workspace membership, mark invitation accepted, and auto-approve if invited by admin."""
@@ -315,6 +250,10 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         signup_name = _display.validate_display_name(signup_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Names are unique. Asked here rather than left to the unique index, which
+    # answers the same question as a 500.
+    if not await _display.display_name_available(db, signup_name):
+        raise HTTPException(status_code=409, detail="이미 사용 중인 이름입니다. 다른 이름을 입력해 주세요.")
 
     user = User(
         email=email,
@@ -339,9 +278,6 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
 
     # Process invitation token if any
     await process_invite_token_if_any(db, user, req.invite_token)
-
-    # Ensure default workspace
-    await ensure_user_default_workspace(db, user)
 
     token_payload = {
         "sub": str(user.id),
@@ -375,9 +311,6 @@ async def login_with_password(req: PasswordLoginRequest, db: AsyncSession = Depe
     await db.commit()
     await db.refresh(user)
 
-    # Ensure default workspace
-    await ensure_user_default_workspace(db, user)
-
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
@@ -391,6 +324,12 @@ async def login_with_password(req: PasswordLoginRequest, db: AsyncSession = Depe
         token_type="bearer",
         user=user.to_dict()
     )
+
+async def _google_display_name(db: AsyncSession, base: str) -> str:
+    """The name Google gave, made unique — the person did not choose it here."""
+    from app.services import username_service
+    return await username_service.allocate_display_name(db, base)
+
 
 @router.post("/google", response_model=TokenResponse)
 async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(get_db)):
@@ -422,7 +361,7 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
         user = User(
             email=email,
             username=None,
-            name=google_profile.get("name") or email.split("@")[0],
+            name=await _google_display_name(db, google_profile.get("name") or email.split("@")[0]),
             picture=google_profile.get("picture"),
             google_id=google_profile.get("google_id"),
             is_superadmin=is_first_user,
@@ -448,9 +387,6 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
 
     # Process invitation token if any
     await process_invite_token_if_any(db, user, req.invite_token)
-
-    # Ensure default workspace
-    await ensure_user_default_workspace(db, user)
 
     # Generate JWT
     token_payload = {
@@ -499,9 +435,6 @@ async def dev_login(req: DevLoginRequest, db: AsyncSession = Depends(get_db)):
             user.name = req.name
         await db.commit()
         await db.refresh(user)
-
-    # Ensure default workspace
-    await ensure_user_default_workspace(db, user)
 
     token_payload = {
         "sub": str(user.id),

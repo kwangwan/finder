@@ -344,6 +344,19 @@ async def complete_multipart_upload(
     current_user: User = Depends(get_current_approved_user)
 ):
     """Complete S3 multipart upload and save file metadata in PostgreSQL."""
+    # Where this lands is decided here, not at /multipart/initiate — the
+    # request carries its own folder_id, so a start in a folder you may write
+    # says nothing about the folder you are about to finish in. Asked before
+    # the object is finalised, so a refusal leaves nothing behind.
+    if req.folder_id and not await access_service.can_access_folder(db, current_user, req.folder_id):
+        raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
+    target_workspace_id = req.workspace_id
+    if req.folder_id and not target_workspace_id:
+        target_folder = await db.get(Folder, req.folder_id)
+        if target_folder:
+            target_workspace_id = target_folder.workspace_id
+    await access_service.require_write_at(db, current_user, target_workspace_id, req.folder_id)
+
     try:
         s3_service.complete_multipart_upload(
             s3_key=req.s3_key,
@@ -813,6 +826,11 @@ async def complete_chunk_upload(
     ETags collected in /chunk/part (no local merge — every part is already in
     MinIO), generate a thumbnail, extract text content, and record the file.
     """
+    # Asked before anything else: the destination arrives with this request, so
+    # a session started somewhere legitimate says nothing about where it is now
+    # being asked to land.
+    await access_service.require_write_at(db, current_user, req.workspace_id, req.folder_id)
+
     session_dir = TEMP_CHUNKS_DIR / req.upload_id
     meta = _read_chunk_session_meta(session_dir)
     if not meta:
@@ -890,6 +908,12 @@ async def complete_chunk_upload(
         await _fail_and_cleanup(403, "폴더에 접근할 권한이 없습니다.")
     if workspace_id and not await access_service.is_workspace_member(db, current_user, workspace_id):
         await _fail_and_cleanup(403, "이 워크스페이스에 접근할 권한이 없습니다.")
+    # The workspace may have been filled in from the folder since the early
+    # check above, so it is asked once more now that both are known.
+    try:
+        await access_service.require_write_at(db, current_user, workspace_id, folder_id)
+    except HTTPException as write_err:
+        await _fail_and_cleanup(write_err.status_code, write_err.detail)
     if folder_id:
         # A large upload's parts can take a while — long enough for the user
         # to trash the target folder before /chunk/complete runs. Without

@@ -19,6 +19,12 @@ import {
   Layers,
   Settings,
   AlertTriangle,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Check,
+  Ban,
 } from '../../utils/icons';
 import { 
   createWorkspace, 
@@ -27,7 +33,9 @@ import {
   listWorkspaceMembers, 
   inviteWorkspaceMember, 
   updateWorkspaceMemberRole, 
-  removeWorkspaceMember
+  removeWorkspaceMember,
+  setUserSharedWrite,
+  toggleAdminUser
 } from '../../api';
 import Select from '../common/Select';
 import { useDialog } from '../../context/DialogContext';
@@ -40,6 +48,10 @@ const ICONS = [
   { id: 'book', label: '연구', Icon: BookOpen },
   { id: 'layers', label: '프로젝트', Icon: Layers },
 ];
+
+// The shared workspace's rows carry the account's own flag; other workspaces
+// carry a per-workspace role. Both mean "runs this place".
+const member_isAdmin = (m) => !!m.is_superadmin || m.role === 'admin';
 
 export default function WorkspaceSettingsModal({
   isOpen,
@@ -59,8 +71,13 @@ export default function WorkspaceSettingsModal({
 
   // Members state
   const [members, setMembers] = useState([]);
+  const [memberTotal, setMemberTotal] = useState(0);
+  const [memberPage, setMemberPage] = useState(1);
+  const [memberQuery, setMemberQuery] = useState('');
+  const [memberBusy, setMemberBusy] = useState(null);   // user id whose switch is in flight
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
+  const MEMBER_PAGE_SIZE = 8;
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -79,23 +96,47 @@ export default function WorkspaceSettingsModal({
         setName(workspace.name || '');
         setDescription(workspace.description || '');
         setIcon(workspace.icon || 'briefcase');
-        loadMembers();
+        setMemberQuery('');
+        setMemberPage(1);
       }
     }
   }, [isOpen, isCreateMode, workspace?.id]);
 
-  const loadMembers = async () => {
+  const loadMembers = async (page = memberPage, q = memberQuery) => {
     if (!workspace?.id) return;
     try {
-      const list = await listWorkspaceMembers(workspace.id);
-      setMembers(list);
+      const res = await listWorkspaceMembers(workspace.id, {
+        q, page, pageSize: MEMBER_PAGE_SIZE, paged: true,
+      });
+      setMembers(res.items || []);
+      setMemberTotal(res.total || 0);
     } catch (err) {
       console.error('Failed to load workspace members:', err);
     }
   };
 
+  // Typing in the search box asks the server, so it waits for a pause rather
+  // than asking on every keystroke.
+  useEffect(() => {
+    if (activeTab === 'members' && workspace?.is_shared && !currentUser?.is_superadmin) setActiveTab('settings');
+  }, [activeTab, workspace?.is_shared, currentUser?.is_superadmin]);
+
+  useEffect(() => {
+    if (!isOpen || isCreateMode || !workspace?.id) return undefined;
+    if (workspace.is_shared && !currentUser?.is_superadmin) return undefined;
+    const timer = setTimeout(() => { loadMembers(memberPage, memberQuery); }, memberQuery ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [isOpen, isCreateMode, workspace?.id, memberPage, memberQuery]);
+
+  // A new search starts from the first page — page 3 of the old search is not
+  // a place in the new one.
+  useEffect(() => { setMemberPage(1); }, [memberQuery]);
+
   if (!isOpen) return null;
 
+  const isSharedWorkspace = !!workspace?.is_shared;
+  const isSuperadmin = !!currentUser?.is_superadmin;
+  const canSeeMembers = !isSharedWorkspace || isSuperadmin;
   const isOwner = isCreateMode || workspace?.owner_id === currentUser?.id || currentUser?.is_superadmin;
   const currentMember = members.find(m => m.user_id === currentUser?.id);
   const isAdminOrOwner = isOwner || currentMember?.role === 'admin';
@@ -181,6 +222,46 @@ export default function WorkspaceSettingsModal({
         type: 'error'
       });
     }
+  };
+
+  /**
+   * The two things that decide what somebody may do in the shared workspace.
+   *
+   * They used to live only in the administrator dashboard, which is a list of
+   * accounts — but "who may write in the shared workspace" is a fact about
+   * that workspace, and this is where it is managed.
+   */
+  const toggleSharedWrite = async (member) => {
+    const next = !(member.can_write_shared !== false);
+    setMemberBusy(member.user_id);
+    try {
+      await setUserSharedWrite(member.user_id, next);
+      setMembers((list) => list.map((m) => (m.user_id === member.user_id ? { ...m, can_write_shared: next } : m)));
+    } catch (err) {
+      await showAlert({ title: '쓰기 권한을 바꾸지 못했습니다', message: err.message, type: 'error' });
+    } finally { setMemberBusy(null); }
+  };
+
+  const toggleAdmin = async (member) => {
+    const next = !member.is_superadmin;
+    const ok = await showConfirm({
+      title: next ? '관리자로 임명합니다' : '관리자에서 해제합니다',
+      message: next
+        ? `'${member.user_name || member.user_email}'님이 모든 워크스페이스와 사용자 관리 권한을 갖게 됩니다.`
+        : `'${member.user_name || member.user_email}'님의 관리자 권한을 회수합니다.`,
+      confirmText: next ? '임명' : '해제',
+      cancelText: '취소',
+    });
+    if (!ok) return;
+    setMemberBusy(member.user_id);
+    try {
+      await toggleAdminUser(member.user_id, next);
+      setMembers((list) => list.map((m) => (
+        m.user_id === member.user_id ? { ...m, is_superadmin: next, role: next ? 'admin' : 'member' } : m
+      )));
+    } catch (err) {
+      await showAlert({ title: '관리자 권한을 바꾸지 못했습니다', message: err.message, type: 'error' });
+    } finally { setMemberBusy(null); }
   };
 
   const handleRemoveMember = async (userId, userEmail) => {
@@ -325,14 +406,20 @@ export default function WorkspaceSettingsModal({
               <span>워크스페이스 설정</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('members')}
-              className={`workspace-tab-btn ${activeTab === 'members' ? 'active' : ''}`}
-            >
-              <Users size={15} />
-              <span>멤버 관리 ({members.length})</span>
-            </button>
+            {/* In the shared workspace this list is everybody who has an
+                account, addresses and all — a directory, not a member list.
+                Only an administrator has any business reading it, and only an
+                administrator can change anything in it. */}
+            {canSeeMembers && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('members')}
+                className={`workspace-tab-btn ${activeTab === 'members' ? 'active' : ''}`}
+              >
+                <Users size={15} />
+                <span>멤버 관리{memberTotal || members.length ? ` (${memberTotal || members.length})` : ''}</span>
+              </button>
+            )}
           </div>
         )}
 
@@ -460,31 +547,31 @@ export default function WorkspaceSettingsModal({
               <div style={{ marginTop: '1.5rem', borderTop: '1px solid rgba(244, 63, 94, 0.2)', paddingTop: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: workspace.is_default ? 'var(--text-muted)' : 'var(--accent-rose)' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 700, color: workspace.is_shared ? 'var(--text-muted)' : 'var(--accent-rose)' }}>
                       워크스페이스 삭제
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      {workspace.is_default
-                        ? '기본 워크스페이스는 삭제할 수 없습니다.'
+                      {workspace.is_shared
+                        ? '공용 워크스페이스는 삭제할 수 없습니다.'
                         : '포함된 모든 데이터가 영구 삭제됩니다.'}
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={handleDeleteWorkspace}
-                    disabled={workspace.is_default}
-                    title={workspace.is_default ? '기본 워크스페이스는 삭제할 수 없습니다.' : undefined}
+                    disabled={workspace.is_shared}
+                    title={workspace.is_shared ? '공용 워크스페이스는 삭제할 수 없습니다.' : undefined}
                     style={{
-                      background: workspace.is_default ? 'var(--bg-tertiary)' : 'rgba(244, 63, 94, 0.15)',
-                      border: workspace.is_default ? '1px solid var(--border-subtle)' : '1px solid rgba(244, 63, 94, 0.3)',
+                      background: workspace.is_shared ? 'var(--bg-tertiary)' : 'rgba(244, 63, 94, 0.15)',
+                      border: workspace.is_shared ? '1px solid var(--border-subtle)' : '1px solid rgba(244, 63, 94, 0.3)',
                       borderRadius: 'var(--radius-md)',
-                      color: workspace.is_default ? 'var(--text-muted)' : 'var(--accent-rose)',
+                      color: workspace.is_shared ? 'var(--text-muted)' : 'var(--accent-rose)',
                       padding: '0.35rem 0.75rem',
                       fontSize: '0.78rem',
                       fontWeight: 600,
-                      cursor: workspace.is_default ? 'not-allowed' : 'pointer',
+                      cursor: workspace.is_shared ? 'not-allowed' : 'pointer',
                       whiteSpace: 'nowrap',
-                      opacity: workspace.is_default ? 0.7 : 1
+                      opacity: workspace.is_shared ? 0.7 : 1
                     }}
                   >
                     워크스페이스 삭제
@@ -498,8 +585,32 @@ export default function WorkspaceSettingsModal({
         {/* Tab 2: Members */}
         {!isCreateMode && activeTab === 'members' && (
           <div>
+            {isSharedWorkspace && (
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem', wordBreak: 'keep-all', lineHeight: 1.55 }}>
+                공용 워크스페이스는 승인된 모든 이용자가 함께 쓰는 공간입니다. 따로 사람을 넣거나 빼지 않고, 쓰기 권한으로 관리합니다.
+                쓰기 권한을 회수해도 읽기는 그대로 유지됩니다.
+              </div>
+            )}
+
+            {/* Search */}
+            <div className="workspace-member-search">
+              <Search size={14} color="var(--text-muted)" />
+              <input
+                type="text"
+                value={memberQuery}
+                onChange={(e) => setMemberQuery(e.target.value)}
+                placeholder="이름, 아이디, 메일 주소로 찾기"
+                aria-label="멤버 검색"
+              />
+              {memberQuery && (
+                <button type="button" className="btn-icon" onClick={() => setMemberQuery('')} title="지우기" style={{ padding: 2 }}>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
             {/* Invite Form */}
-            {isAdminOrOwner && (
+            {isAdminOrOwner && !isSharedWorkspace && (
               <>
                 <form onSubmit={handleInviteMember} className="workspace-member-invite-form">
                   <input
@@ -577,6 +688,7 @@ export default function WorkspaceSettingsModal({
                         <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {m.user_name || m.user_email?.split('@')[0]}
+                            {m.user_username ? ` (@${m.user_username})` : ''}
                           </span>
                           {isMemberOwner && <Crown size={12} color="var(--accent-amber)" style={{ flexShrink: 0 }} title="소유자" />}
                           {isSelf && <span style={{ fontSize: '0.68rem', color: 'var(--accent-primary)', flexShrink: 0 }}>(나)</span>}
@@ -588,8 +700,34 @@ export default function WorkspaceSettingsModal({
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
-                      {/* Role Selector or Badge */}
-                      {isOwner && !isMemberOwner ? (
+                      {/* The shared workspace: what this person may do here,
+                          set by an administrator and nobody else. */}
+                      {isSharedWorkspace ? (
+                        <>
+                          <button
+                            type="button"
+                            className={`member-switch ${member_isAdmin(m) ? 'on' : ''}`}
+                            disabled={!isSuperadmin || isSelf || memberBusy === m.user_id}
+                            onClick={() => toggleAdmin(m)}
+                            title={isSelf ? '본인의 관리자 권한은 여기서 바꿀 수 없습니다.' : (member_isAdmin(m) ? '관리자에서 해제' : '관리자로 임명')}
+                          >
+                            {memberBusy === m.user_id ? <Loader2 size={12} className="spin" /> : <ShieldCheck size={12} />}
+                            <span>{member_isAdmin(m) ? '관리자' : '일반'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`member-switch ${m.can_write_shared === false ? 'off' : 'on'}`}
+                            disabled={!isSuperadmin || member_isAdmin(m) || memberBusy === m.user_id}
+                            onClick={() => toggleSharedWrite(m)}
+                            title={member_isAdmin(m)
+                              ? '관리자는 항상 쓸 수 있습니다.'
+                              : (m.can_write_shared === false ? '쓰기 권한 부여' : '쓰기 권한 회수 (읽기는 유지)')}
+                          >
+                            {memberBusy === m.user_id ? <Loader2 size={12} className="spin" /> : (m.can_write_shared === false ? <Ban size={12} /> : <Check size={12} />)}
+                            <span>{m.can_write_shared === false ? '읽기 전용' : '쓰기 가능'}</span>
+                          </button>
+                        </>
+                      ) : isOwner && !isMemberOwner ? (
                         <Select
                           value={m.role}
                           onChange={(v) => handleRoleChange(m.user_id, v)}
@@ -614,7 +752,7 @@ export default function WorkspaceSettingsModal({
                       )}
 
                       {/* Remove or Leave Button */}
-                      {!isMemberOwner && (isSelf || isOwner || (isAdminOrOwner && m.role === 'member')) && (
+                      {!isSharedWorkspace && !isMemberOwner && (isSelf || isOwner || (isAdminOrOwner && m.role === 'member')) && (
                         <button
                           type="button"
                           className="btn-icon"
@@ -629,7 +767,44 @@ export default function WorkspaceSettingsModal({
                   </div>
                 );
               })}
+              {members.length === 0 && (
+                <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  {memberQuery ? `'${memberQuery}'와 맞는 사람이 없습니다.` : '표시할 멤버가 없습니다.'}
+                </div>
+              )}
             </div>
+
+            {memberTotal > 0 && (
+              <div className="workspace-member-pager">
+                {memberTotal > MEMBER_PAGE_SIZE && (
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    disabled={memberPage <= 1}
+                    onClick={() => setMemberPage((p) => Math.max(1, p - 1))}
+                    title="이전"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                )}
+                <span>
+                  {memberTotal > MEMBER_PAGE_SIZE
+                    ? `${memberPage} / ${Math.ceil(memberTotal / MEMBER_PAGE_SIZE)} 쪽 · 전체 ${memberTotal}명`
+                    : `전체 ${memberTotal}명`}
+                </span>
+                {memberTotal > MEMBER_PAGE_SIZE && (
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    disabled={memberPage >= Math.ceil(memberTotal / MEMBER_PAGE_SIZE)}
+                    onClick={() => setMemberPage((p) => p + 1)}
+                    title="다음"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
