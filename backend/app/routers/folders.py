@@ -173,6 +173,7 @@ async def list_folders(
         for folder, count in rows:
             resp = FolderResponse.model_validate(folder)
             resp.file_count = count
+            resp.can_write = await access_service.can_write_at(db, current_user, folder.workspace_id, folder.id)
             results.append(resp)
 
         total_pages = math.ceil(total_count / current_size) if current_size > 0 else 1
@@ -193,6 +194,7 @@ async def list_folders(
         for folder, count in rows:
             resp = FolderResponse.model_validate(folder)
             resp.file_count = count
+            resp.can_write = await access_service.can_write_at(db, current_user, folder.workspace_id, folder.id)
             results.append(resp)
         return results
 
@@ -244,6 +246,7 @@ async def get_folder_tree(
             created_at=folder.created_at,
             updated_at=folder.updated_at,
             file_count=count,
+            can_write=await access_service.can_write_at(db, current_user, folder.workspace_id, folder.id),
             children=[]
         )
         nodes_by_id[folder.id] = node
@@ -403,6 +406,10 @@ async def update_folder(
     if not folder or folder.is_trashed:
         raise HTTPException(status_code=404, detail="Folder not found")
     await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
+    # Colour is decoration and may be changed; the name and the place are what
+    # the workspace depends on.
+    if "name" in req.model_fields_set or "parent_id" in req.model_fields_set:
+        await _refuse_if_personal_folder(db, folder, "이름을 바꾸거나 옮길")
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 수정할 권한이 없습니다.")
@@ -505,6 +512,24 @@ async def rename_folder(
     return resp
 
 
+async def _refuse_if_personal_folder(db: AsyncSession, folder, action: str) -> None:
+    """
+    Somebody's own folder in the shared workspace is not an ordinary folder.
+
+    It is where their permission to write lives, it is named after their handle
+    and renamed with it, and the workspace makes it for them. Deleting it would
+    leave them with nowhere to put anything; renaming or moving it would break
+    the one place their name is expected to be.
+    """
+    from app.services.personal_folder_service import is_personal_folder
+
+    if await is_personal_folder(db, folder):
+        raise HTTPException(
+            status_code=400,
+            detail=f"공용 워크스페이스의 본인 폴더는 {action} 수 없습니다. 아이디를 바꾸면 폴더 이름도 함께 바뀝니다.",
+        )
+
+
 @router.put("/{folder_id}/trash", response_model=FolderResponse)
 async def trash_folder(
     folder_id: uuid.UUID,
@@ -516,6 +541,7 @@ async def trash_folder(
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
+    await _refuse_if_personal_folder(db, folder, "삭제할")
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")
@@ -597,6 +623,7 @@ async def delete_folder(
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     await access_service.require_write_at(db, current_user, folder.workspace_id, folder.parent_id or folder.id)
+    await _refuse_if_personal_folder(db, folder, "삭제할")
 
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더를 삭제할 권한이 없습니다.")

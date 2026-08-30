@@ -1567,12 +1567,40 @@ export default function App() {
     windowManager.openWindow(file);
   };
 
+  // Where a new thing goes when the screen is not a folder.
+  //
+  // The 문서 탭, 일정 탭 and 즐겨찾기 are queries across folders, not places —
+  // so "새 문서" there had nowhere to put it, and in the shared workspace,
+  // where the home holds nothing, it simply failed. It goes into your own
+  // folder, which is the only place in that workspace it could go.
+  const myPersonalFolderId = () => {
+    if (!activeWorkspace?.is_shared) return null;
+    const mine = folders.find((f) => f.owner_user_id === currentUser?.id)
+      || folders.find((f) => f.name === currentUser?.username);
+    return mine?.id ?? null;
+  };
+
+  const writeTargetFolderId = () => {
+    if (activeView === 'folder' && activeFolderId) return activeFolderId;
+    if (activeWorkspace?.is_shared) return myPersonalFolderId();
+    return activeFolderId ?? null;
+  };
+
+  const writeTargetProblem = () => {
+    if (activeWorkspace?.is_shared && !writeTargetFolderId()) {
+      return '공용 워크스페이스에서는 본인 폴더 안에서만 만들 수 있습니다. 홈에서 내 폴더를 먼저 만들어 주세요.';
+    }
+    return null;
+  };
+
   const handleNewNote = async () => {
+    const problem = writeTargetProblem();
+    if (problem) { showToast(problem, { type: 'warning' }); return; }
     try {
       const newNote = await createMarkdownNote({
         name: '제목 없는 문서',
         workspace_id: activeWorkspace?.id || null,
-        folder_id: activeFolderId,
+        folder_id: writeTargetFolderId(),
         content: '',
         tags: []
       });
@@ -1736,12 +1764,18 @@ export default function App() {
     const mod = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl+';
     const items = [];
     if (fileIds.length || folderIds.length) {
-      items.push(
-        { label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds, sourceWorkspaceId, sourceFolderId) },
-        { label: '복사', icon: Copy, shortcut: `${mod}C`, onClick: () => handleClipboardCopy(fileIds, folderIds, sourceWorkspaceId) },
-      );
+      // Cutting moves the original, so it belongs with the writes. Copying
+      // only reads, and reading other people's material is what the shared
+      // workspace is for.
+      if (ctx?.canWrite !== false) {
+        items.push({ label: '잘라내기', icon: Scissors, shortcut: `${mod}X`, onClick: () => handleClipboardCut(fileIds, folderIds, sourceWorkspaceId, sourceFolderId) });
+      }
+      items.push({ label: '복사', icon: Copy, shortcut: `${mod}C`, onClick: () => handleClipboardCopy(fileIds, folderIds, sourceWorkspaceId) });
     }
-    if (clipboardHasItems) {
+    // Pasting writes, so it is offered only where writing is allowed. The
+    // caller says whether this spot takes it; without an answer, the old
+    // behaviour (offer it) is kept for places that have not been taught yet.
+    if (clipboardHasItems && ctx?.canWrite !== false) {
       const count = clipboard.fileIds.length + clipboard.folderIds.length;
       const crossWorkspace = !!pasteWorkspaceId && clipboard.workspaceId !== pasteWorkspaceId;
       items.push({
@@ -1763,6 +1797,14 @@ export default function App() {
     const fileIds = selection?.fileIds ?? [];
     const folderIds = selection?.folderIds?.length ? selection.folderIds : [folder.id];
     const folderWorkspaceId = ctx?.workspaceId ?? folder.workspace_id ?? activeWorkspace?.id ?? null;
+    // The server says whether this reader may put things in this folder; the
+    // menu offers only what it would accept. Everything that writes was on
+    // offer inside other people's folders, and every one of them was refused.
+    const canWriteFolder = folder.can_write !== false;
+    // A personal folder in the shared workspace is made and named by the
+    // workspace itself, so it is not renamed or thrown away by hand.
+    const isPersonalFolder = !!folder.owner_user_id && !folder.parent_id
+      && workspaces.some(w => w.id === folderWorkspaceId && w.is_shared);
     setContextMenu({
       isOpen: true,
       x: e.clientX,
@@ -1790,15 +1832,15 @@ export default function App() {
           icon: Star,
           onClick: () => handleToggleFolderFavorite(folder),
         },
-        {
+        ...(canWriteFolder ? [{
           label: '하위 폴더 생성',
           icon: FolderPlus,
           onClick: () => {
             setNewFolderParentId(folder.id);
             setIsNewFolderOpen(true);
           },
-        },
-        {
+        }] : []),
+        ...(canWriteFolder ? [{
           label: '새 문서 작성',
           icon: Plus,
           onClick: async () => {
@@ -1822,31 +1864,42 @@ export default function App() {
               });
             }
           },
-        },
-        {
+        }] : []),
+        ...(canWriteFolder ? [{
           label: '새 일정',
           icon: CalendarCheck,
           onClick: () => handleCreateBoard(folder.id),
-        },
+        }] : []),
         {
           label: '폴더를 ZIP으로 다운로드',
           icon: FileArchive,
           onClick: () => startDownloadFolder(folder),
         },
         { divider: true },
-        ...clipboardMenuItems(fileIds, folderIds, folder.id, { ...ctx, workspaceId: folderWorkspaceId }),
-        { divider: true },
-        {
-          label: '이름 및 색상 변경',
-          icon: Edit3,
-          onClick: () => setRenameModal({ isOpen: true, item: { id: folder.id, name: folder.name, color: folder.color, type: 'folder' } }),
-        },
-        {
-          label: '휴지통으로 이동',
-          icon: Trash2,
-          danger: true,
-          onClick: () => handleTrashFolder(folder),
-        },
+        ...clipboardMenuItems(fileIds, folderIds, folder.id, { ...ctx, workspaceId: folderWorkspaceId, canWrite: canWriteFolder }),
+        ...(canWriteFolder && !isPersonalFolder ? [
+          { divider: true },
+          {
+            label: '이름 및 색상 변경',
+            icon: Edit3,
+            onClick: () => setRenameModal({ isOpen: true, item: { id: folder.id, name: folder.name, color: folder.color, type: 'folder' } }),
+          },
+          {
+            label: '휴지통으로 이동',
+            icon: Trash2,
+            danger: true,
+            onClick: () => handleTrashFolder(folder),
+          },
+        ] : []),
+        // The colour is decoration and stays available on your own folder.
+        ...(canWriteFolder && isPersonalFolder ? [
+          { divider: true },
+          {
+            label: '폴더 색상 변경',
+            icon: Edit3,
+            onClick: () => setRenameModal({ isOpen: true, item: { id: folder.id, name: folder.name, color: folder.color, type: 'folder', colorOnly: true } }),
+          },
+        ] : []),
       ]
     });
   };
@@ -1927,35 +1980,44 @@ export default function App() {
   };
 
   const handleBackgroundContextMenu = (e, ctx = null) => {
+    // Whether this background belongs to a place that takes new things. A
+    // folder window says so itself; in the main view it is the shared
+    // workspace's home that does not.
+    const here = ctx?.folderId !== undefined ? ctx.folderId : activeFolderId;
+    const canWriteHere = ctx?.canWrite !== undefined
+      ? ctx.canWrite
+      : !(activeWorkspace?.is_shared && !here);
     setContextMenu({
       isOpen: true,
       x: e.clientX,
       y: e.clientY,
       items: [
-        {
-          label: '새 문서 작성',
-          icon: Plus,
-          onClick: handleNewNote,
-        },
-        {
-          label: '새 일정',
-          icon: CalendarCheck,
-          onClick: () => handleCreateBoard(ctx?.folderId !== undefined ? ctx.folderId : activeFolderId),
-        },
-        {
-          label: '새 폴더 생성',
-          icon: FolderPlus,
-          onClick: () => {
-            setNewFolderParentId(activeFolderId);
-            setIsNewFolderOpen(true);
+        ...(canWriteHere ? [
+          {
+            label: '새 문서 작성',
+            icon: Plus,
+            onClick: handleNewNote,
           },
-        },
-        {
-          label: '파일 업로드',
-          icon: UploadCloud,
-          onClick: () => setIsUploadOpen(true),
-        },
-        ...(clipboardHasItems ? [{ divider: true }, ...clipboardMenuItems([], [], ctx?.folderId ?? activeFolderId, ctx)] : []),
+          {
+            label: '새 일정',
+            icon: CalendarCheck,
+            onClick: () => handleCreateBoard(here),
+          },
+          {
+            label: '새 폴더 생성',
+            icon: FolderPlus,
+            onClick: () => {
+              setNewFolderParentId(here);
+              setIsNewFolderOpen(true);
+            },
+          },
+          {
+            label: '파일 업로드',
+            icon: UploadCloud,
+            onClick: openUpload,
+          },
+        ] : []),
+        ...(clipboardHasItems ? [{ divider: true }, ...clipboardMenuItems([], [], here, { ...ctx, canWrite: canWriteHere })] : []),
         { divider: true },
         {
           label: '새로고침',
@@ -1994,7 +2056,11 @@ export default function App() {
   // A board is created where files are created, so it lands in the folder the
   // action was invoked from and inherits that folder's rules.
   const handleCreateBoard = useCallback(async (folderId = undefined) => {
-    const targetFolderId = folderId !== undefined ? folderId : activeFolderId;
+    const targetFolderId = folderId !== undefined ? folderId : writeTargetFolderId();
+    if (activeWorkspace?.is_shared && !targetFolderId) {
+      showToast('공용 워크스페이스에서는 본인 폴더 안에서만 만들 수 있습니다.', { type: 'warning' });
+      return;
+    }
     try {
       const board = await createBoard({
         name: '제목 없는 일정',
@@ -2021,11 +2087,28 @@ export default function App() {
     refreshFoldersAndStats();
   };
 
-  const handleDropFiles = (droppedFiles) => {
-    if (droppedFiles && droppedFiles.length > 0) {
-      uploadManager.checkAndQueueFiles(droppedFiles, activeFolderId, activeWorkspace?.id);
-      setIsUploadOpen(true);
+  // Nothing may be put at the shared workspace's home — the server refuses it,
+  // and an upload that starts anyway ends in a failure message that does not
+  // say why. Asked before anything is queued or any dialog opens.
+  const uploadTargetProblem = () => {
+    if (activeWorkspace?.is_shared && !writeTargetFolderId()) {
+      return '공용 워크스페이스에서는 본인 폴더 안에만 올릴 수 있습니다.';
     }
+    return null;
+  };
+
+  const openUpload = () => {
+    const problem = uploadTargetProblem();
+    if (problem) { showToast(problem, { type: 'warning' }); return; }
+    setIsUploadOpen(true);
+  };
+
+  const handleDropFiles = (droppedFiles) => {
+    if (!droppedFiles || droppedFiles.length === 0) return;
+    const problem = uploadTargetProblem();
+    if (problem) { showToast(problem, { type: 'warning' }); return; }
+    uploadManager.checkAndQueueFiles(droppedFiles, writeTargetFolderId(), activeWorkspace?.id);
+    setIsUploadOpen(true);
   };
 
   const handleLogout = () => {
@@ -2138,7 +2221,7 @@ export default function App() {
           setNewFolderParentId(parentId !== undefined ? parentId : activeFolderId);
           setIsNewFolderOpen(true);
         }}
-        onOpenUpload={() => setIsUploadOpen(true)}
+        onOpenUpload={openUpload}
         onFolderContextMenu={handleFolderContextMenu}
         onDirectMoveItems={handleDirectMoveItems}
         onTransferItems={handleTransferItems}
@@ -2154,7 +2237,7 @@ export default function App() {
           onToggleSidebar={() => setIsSidebarCollapsed(false)}
           onOpenSearch={() => setIsSearchOpen(true)}
           onNewNote={handleNewNote}
-          onOpenUpload={() => setIsUploadOpen(true)}
+          onOpenUpload={openUpload}
           onOpenInvitations={() => setIsInvitationModalOpen(true)}
           currentFolder={currentFolder}
           theme={theme}
@@ -2219,7 +2302,7 @@ export default function App() {
               setNewFolderParentId(parentId !== undefined ? parentId : activeFolderId);
               setIsNewFolderOpen(true);
             }}
-            onOpenUpload={() => setIsUploadOpen(true)}
+            onOpenUpload={openUpload}
             onDeleteFile={handleDeleteFile}
             onToggleFavorite={handleToggleFavorite}
             onDropFiles={handleDropFiles}
@@ -2335,7 +2418,8 @@ export default function App() {
       <NewFolderModal
         isOpen={isNewFolderOpen}
         onClose={() => setIsNewFolderOpen(false)}
-        parentFolderId={newFolderParentId}
+        parentFolderId={newFolderParentId ?? (activeWorkspace?.is_shared ? myPersonalFolderId() : null)}
+        isSharedWorkspace={!!activeWorkspace?.is_shared}
         folders={folders}
         onCreate={handleCreateFolder}
       />

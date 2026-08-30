@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Folder, FolderWriteGrant, User
+from app.models import Folder, FolderWriteGrant, User, Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,22 @@ async def rename_personal_folder(db: AsyncSession, user: User, new_name: str) ->
         f.name = new_name
     if folders:
         await db.commit()
+
+
+async def is_personal_folder(db: AsyncSession, folder) -> bool:
+    """
+    Whether this is somebody's own folder in the shared workspace.
+
+    It is not an ordinary folder: it is where that person's write permission
+    lives, it is named after their handle and follows it, and the workspace
+    creates it for them. Deleting or renaming it by hand would leave them with
+    nowhere to put anything, so those are refused wherever a folder can be
+    acted on.
+    """
+    if folder is None or folder.owner_user_id is None:
+        return False
+    ws = await db.get(Workspace, folder.workspace_id) if folder.workspace_id else None
+    return bool(ws and ws.is_shared and folder.parent_id is None)
 
 
 async def get_owning_personal_folder(db: AsyncSession, folder_id) -> Optional[Folder]:

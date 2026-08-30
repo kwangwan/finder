@@ -529,7 +529,9 @@ export default function FolderExplorer({
       .finally(() => { if (!cancelled) setIsRootLoading(false); });
     return () => { cancelled = true; };
   }, [isRemoteFolderList, isFavoritesView, workspaceId, rootSearch, rootPage, hasNewFiles, favoriteRefreshToken]);
-  const canWriteHere = canWrite && !isSharedRoot;
+  // 홈에서는 아무것도 만들 수 없지만, 문서·일정·즐겨찾기 탭은 장소가 아니라
+  // 질문이라 새로 만든 것은 본인 폴더로 들어간다 — 그래서 그곳에서는 열려 있다.
+  const canWriteHere = canWrite && !isSharedHomeListing;
 
   // What an action triggered from `item` should apply to: the whole selection
   // when the item is part of it, otherwise just that item — the rule every
@@ -1023,7 +1025,7 @@ export default function FolderExplorer({
             <ul className="shared-ws-notice-points">
               <li>가입한 모든 이용자가 열람하고 내려받을 수 있습니다.</li>
               <li>관리자가 사전 통보 없이 삭제할 수 있습니다.</li>
-              <li>파일은 본인 폴더 안에만 올릴 수 있습니다.</li>
+              <li>파일은 본인 폴더 안에만 올릴 수 있습니다. 내 폴더 이름은 내 아이디입니다.</li>
               {!canWrite && <li>현재 계정은 올리기·수정·삭제가 제한되어 있습니다.</li>}
             </ul>
           </div>
@@ -1051,6 +1053,11 @@ export default function FolderExplorer({
         </div>
       )}
 
+      {/* Nothing in this strip applies at the shared workspace's home: sorting
+          and paging are hidden there because the listing is a directory of
+          people, and selecting is pointless because nothing there can be
+          moved or deleted. What was left read as an empty bar. */}
+      {!isSharedHomeListing && (
       <div className="explorer-toolbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div className="explorer-toolbar-left" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           {files.length > 0 && (
@@ -1124,6 +1131,7 @@ export default function FolderExplorer({
         </div>
         )}
       </div>
+      )}
 
       {/* A file in this folder was added, edited, or removed elsewhere (e.g.
           an upload still running, or a document someone edited) — refresh is

@@ -185,11 +185,13 @@ async def get_presigned_upload_url(
 ):
     """Generate a single presigned PUT URL for files smaller than chunk size."""
     # Storage quota check on workspace owner
-    workspace_id = None
+    workspace_id = req.workspace_id
     if req.folder_id:
         folder = await db.get(Folder, req.folder_id)
         if folder:
             workspace_id = folder.workspace_id
+    if workspace_id and not await access_service.is_workspace_member(db, current_user, workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
     await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
     await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
     await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)

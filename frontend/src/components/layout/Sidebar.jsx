@@ -198,6 +198,23 @@ export default function Sidebar({
     }));
   };
 
+  // In the shared workspace the tree is a list of everybody's personal
+  // folders, which is a directory of colleagues rather than a place to work.
+  // Only your own is shown; the others are still reachable from 홈, where
+  // that listing is the point.
+  const isSharedWorkspace = !!activeWorkspace?.is_shared;
+  const myFolderName = currentUser?.username || null;
+  const visibleFolders = isSharedWorkspace
+    ? folders.filter((f) => f.name === myFolderName)
+    : folders;
+  const myFolder = isSharedWorkspace ? visibleFolders[0] : null;
+
+  // Nothing may be created at the shared workspace's home, so the button
+  // makes what it makes inside your own folder — and says so rather than
+  // failing after the fact.
+  const newFolderParent = isSharedWorkspace ? (activeFolderId || myFolder?.id || null) : activeFolderId;
+  const canCreateFolder = !isSharedWorkspace || !!newFolderParent;
+
   const renderFolderTreeNode = (folder) => {
     const isExpanded = expandedFolders[folder.id];
     const isSelected = activeFolderId === folder.id && activeView === 'folder';
@@ -235,6 +252,9 @@ export default function Sidebar({
           {folder.file_count > 0 && (
             <span className="menu-badge" style={{ marginLeft: 0 }}>{folder.file_count}</span>
           )}
+          {/* Offered only where the server would take it — this button sat on
+              other people's folders too, and every press was refused. */}
+          {folder.can_write !== false && (
           <button
             className="btn-icon tree-add-btn"
             onClick={(e) => {
@@ -252,6 +272,7 @@ export default function Sidebar({
           >
             <FolderPlus size={13} />
           </button>
+          )}
         </div>
 
         {hasChildren && isExpanded && (
@@ -381,13 +402,23 @@ export default function Sidebar({
 
       {/* Folders Hierarchy Tree */}
       <div className="sidebar-section" style={{ padding: '0.65rem 0.85rem 0.3rem' }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="폴더 목록">
-          폴더
+        <span
+          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={isSharedWorkspace
+            ? '공용 워크스페이스에서는 아이디로 된 내 폴더만 표시됩니다. 다른 사람의 폴더는 홈에서 볼 수 있습니다.'
+            : '폴더 목록'}
+        >
+          {isSharedWorkspace ? '내 폴더' : '폴더'}
         </span>
-        <button 
-          className="btn-icon" 
-          onClick={() => onNewFolder(activeFolderId)}
-          title="현재 폴더 아래 하위 폴더 생성"
+        <button
+          className="btn-icon"
+          disabled={!canCreateFolder}
+          onClick={() => canCreateFolder && onNewFolder(newFolderParent)}
+          title={canCreateFolder
+            ? (isSharedWorkspace && !activeFolderId
+              ? `내 폴더(${myFolderName}) 안에 하위 폴더 생성`
+              : '현재 폴더 아래 하위 폴더 생성')
+            : '공용 워크스페이스에서는 본인 폴더 안에서만 폴더를 만들 수 있습니다'}
         >
           <FolderPlus size={14} />
         </button>
@@ -401,12 +432,14 @@ export default function Sidebar({
                 <div key={i} className="skeleton-box" style={{ height: 28, borderRadius: 'var(--radius-sm)' }} />
               ))}
             </div>
-          ) : folders.length === 0 ? (
-            <div style={{ padding: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-              생성된 폴더가 없습니다.
+          ) : visibleFolders.length === 0 ? (
+            <div style={{ padding: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center', lineHeight: 1.5 }}>
+              {isSharedWorkspace
+                ? '내 폴더가 아직 없습니다. 홈에서 파일을 올리면 아이디로 된 폴더가 만들어집니다.'
+                : '생성된 폴더가 없습니다.'}
             </div>
           ) : (
-            folders.map(folder => renderFolderTreeNode(folder))
+            visibleFolders.map(folder => renderFolderTreeNode(folder))
           )}
         </div>
       </div>

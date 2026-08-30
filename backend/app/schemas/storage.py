@@ -10,6 +10,10 @@ class StorageConfigResponse(BaseModel):
 class PresignedUploadRequest(BaseModel):
     filename: str
     folder_id: Optional[uuid.UUID] = None
+    # Needed even when there is no folder: without it an upload aimed at a
+    # workspace root was checked against no workspace at all, and the shared
+    # workspace's "only inside your own folder" rule never ran.
+    workspace_id: Optional[uuid.UUID] = None
     content_type: str = "application/octet-stream"
     size_bytes: int
 

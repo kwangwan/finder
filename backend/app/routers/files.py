@@ -1033,7 +1033,10 @@ async def create_file_metadata(
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
-    await access_service.require_write(db, current_user, workspace_id)
+    # The location rule, not just the workspace one: an upload that arrives
+    # with no folder was being registered at the shared workspace's home,
+    # where nothing may be put.
+    await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
     await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.name)
 
     file_item = FileItem(

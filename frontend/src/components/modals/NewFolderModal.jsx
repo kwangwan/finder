@@ -13,6 +13,7 @@ function flattenFolderTree(nodeList, depth = 0) {
       id: node.id,
       name: node.name,
       displayName: `${indent}${node.name}`,
+      canWrite: node.can_write !== false,
       depth
     });
     if (node.children && node.children.length > 0) {
@@ -25,6 +26,9 @@ function flattenFolderTree(nodeList, depth = 0) {
 export default function NewFolderModal({
   isOpen,
   onClose,
+  // In the shared workspace nothing may sit at the home, and other people's
+  // folders are theirs — so neither may be picked as the place to put this.
+  isSharedWorkspace = false,
   parentFolderId,
   folders = [],
   onCreate
@@ -152,8 +156,10 @@ export default function NewFolderModal({
               value={selectedParent}
               onChange={setSelectedParent}
               options={[
-                { value: '', label: <><Home size={13} style={{ verticalAlign: -2, marginRight: 6 }} />홈 (최상위 폴더)</> },
-                ...flatFolders.map(f => ({ value: f.id, label: f.displayName })),
+                ...(isSharedWorkspace
+                  ? []
+                  : [{ value: '', label: <><Home size={13} style={{ verticalAlign: -2, marginRight: 6 }} />홈 (최상위 폴더)</> }]),
+                ...flatFolders.filter(f => f.canWrite).map(f => ({ value: f.id, label: f.displayName })),
               ]}
             />
           </div>

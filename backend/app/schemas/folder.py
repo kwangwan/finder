@@ -31,6 +31,11 @@ class FolderResponse(FolderBase):
     created_at: datetime
     updated_at: datetime
     file_count: Optional[int] = 0
+    # Whether *this* reader may put things in this folder. Sent with the folder
+    # because every menu and button that offers a write needs the answer, and
+    # working it out on the client meant guessing at rules the server owns —
+    # which is how "새 폴더" ended up offered inside somebody else's folder.
+    can_write: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
