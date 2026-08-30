@@ -53,6 +53,12 @@ const ICONS = [
 // carry a per-workspace role. Both mean "runs this place".
 const member_isAdmin = (m) => !!m.is_superadmin || m.role === 'admin';
 
+// An administrator writes wherever they like — the server does not consult
+// can_write_shared for them (AccessService.can_write_workspace). Showing the
+// stored flag anyway made an administrator whose flag happened to be off read
+// as locked out of the workspace they run.
+const member_canWrite = (m) => member_isAdmin(m) || m.can_write_shared !== false;
+
 export default function WorkspaceSettingsModal({
   isOpen,
   onClose,
@@ -716,15 +722,15 @@ export default function WorkspaceSettingsModal({
                           </button>
                           <button
                             type="button"
-                            className={`member-switch ${m.can_write_shared === false ? 'off' : 'on'}`}
+                            className={`member-switch ${member_canWrite(m) ? 'on' : 'off'}`}
                             disabled={!isSuperadmin || member_isAdmin(m) || memberBusy === m.user_id}
                             onClick={() => toggleSharedWrite(m)}
                             title={member_isAdmin(m)
                               ? '관리자는 항상 쓸 수 있습니다.'
-                              : (m.can_write_shared === false ? '쓰기 권한 부여' : '쓰기 권한 회수 (읽기는 유지)')}
+                              : (member_canWrite(m) ? '쓰기 권한 회수 (읽기는 유지)' : '쓰기 권한 부여')}
                           >
-                            {memberBusy === m.user_id ? <Loader2 size={12} className="spin" /> : (m.can_write_shared === false ? <Ban size={12} /> : <Check size={12} />)}
-                            <span>{m.can_write_shared === false ? '읽기 전용' : '쓰기 가능'}</span>
+                            {memberBusy === m.user_id ? <Loader2 size={12} className="spin" /> : (member_canWrite(m) ? <Check size={12} /> : <Ban size={12} />)}
+                            <span>{member_canWrite(m) ? '쓰기 가능' : '읽기 전용'}</span>
                           </button>
                         </>
                       ) : isOwner && !isMemberOwner ? (
