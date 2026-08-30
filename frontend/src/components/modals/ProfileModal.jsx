@@ -50,7 +50,12 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
         const res = await checkNameAvailable(next);
         setNameState(res.available ? 'free' : 'taken');
         setNameMessage(res.reason || '');
-      } catch (e) { setNameState('idle'); }
+      } catch (e) {
+        // The server decides anyway; a failed pre-check must not leave the
+        // button dead with nothing said.
+        setNameState('unknown');
+        setNameMessage('지금은 확인할 수 없습니다. 저장을 눌러 시도해 보세요.');
+      }
     }, 350);
     return () => clearTimeout(timer);
   }, [name, isOpen, currentUser?.name]);
@@ -65,16 +70,24 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
         const res = await checkMyUsernameAvailable(next);
         setHandleState(res.available ? 'free' : 'taken');
         setHandleMessage(res.reason || '');
-      } catch (e) { setHandleState('idle'); }
+      } catch (e) {
+        setHandleState('unknown');
+        setHandleMessage('지금은 확인할 수 없습니다. 저장을 눌러 시도해 보세요.');
+      }
     }, 350);
     return () => clearTimeout(timer);
   }, [handle, isOpen, currentUser?.username]);
 
   if (!isOpen) return null;
 
+  const nameChanged = name.trim() && name.trim() !== (currentUser?.name || '');
+  const handleChanged = handle.trim() && handle.trim() !== (currentUser?.username || '');
+  const canSaveName = nameChanged && nameState !== 'taken' && nameState !== 'checking';
+  const canSaveHandle = handleChanged && handleState !== 'taken' && handleState !== 'checking';
+
   const saveName = async () => {
     const next = name.trim();
-    if (!next || next === (currentUser?.name || '') || nameState === 'taken') return;
+    if (!canSaveName) return;
     setIsBusy('name');
     try {
       const res = await updateMyName(next);
@@ -88,7 +101,7 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
 
   const saveHandle = async () => {
     const next = handle.trim();
-    if (!next || next === (currentUser?.username || '') || handleState !== 'free') return;
+    if (!canSaveHandle) return;
     const ok = await showConfirm({
       title: '아이디를 바꿉니다',
       message: `앞으로 올리는 파일과 할 일에 '@${next}'로 표시되고, 공용 워크스페이스의 내 폴더 이름도 함께 바뀝니다.`,
@@ -139,9 +152,10 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
   };
 
   const hint = (state, message, okText) => {
-    if (state === 'taken') return <span className="pf-hint bad">{message || '사용할 수 없습니다.'}</span>;
+    if (state === 'taken') return <span className="pf-hint bad">{message || '이미 다른 분이 쓰고 있습니다.'}</span>;
     if (state === 'free') return <span className="pf-hint good">{okText}</span>;
     if (state === 'saved') return <span className="pf-hint good">저장했습니다.</span>;
+    if (state === 'unknown') return <span className="pf-hint">{message}</span>;
     return null;
   };
 
@@ -204,7 +218,7 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
               <button
                 type="button"
                 className="btn-secondary pf-save"
-                disabled={handleState !== 'free' || isBusy === 'handle'}
+                disabled={!canSaveHandle || isBusy === 'handle'}
                 onClick={saveHandle}
               >
                 {isBusy === 'handle' ? <Loader2 size={13} className="spin" /> : <Check size={13} />}<span>저장</span>
@@ -230,7 +244,7 @@ export default function ProfileModal({ isOpen, currentUser, onClose, onUserUpdat
               <button
                 type="button"
                 className="btn-secondary pf-save"
-                disabled={nameState !== 'free' || isBusy === 'name'}
+                disabled={!canSaveName || isBusy === 'name'}
                 onClick={saveName}
               >
                 {isBusy === 'name' ? <Loader2 size={13} className="spin" /> : <Check size={13} />}<span>저장</span>

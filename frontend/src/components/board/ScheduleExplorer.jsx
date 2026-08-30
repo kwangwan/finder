@@ -154,6 +154,13 @@ export default function ScheduleExplorer({
     return () => { cancelled = true; };
   }, [data.items, peopleByBoard]);
 
+  // A change to one of these can move a 할 일 out of what this screen is
+  // showing — marking it 완료 while 완료 is hidden, taking yourself off it
+  // while only your own are listed. The row is updated in place either way,
+  // and then the list is re-read so what is on screen still answers the
+  // question the filters asked.
+  const AFFECTS_MEMBERSHIP = ['status', 'assignee_ids', 'priority', 'start_date', 'due_date'];
+
   const patch = async (task, payload) => {
     setBusyId(task.id);
     try {
@@ -166,6 +173,7 @@ export default function ScheduleExplorer({
           children: (t.children || []).map(apply),
         })),
       }));
+      if (Object.keys(payload).some((k) => AFFECTS_MEMBERSHIP.includes(k))) load();
     } catch (e) {
       await showAlert({ title: '저장하지 못했습니다', message: e.message, type: 'error' });
       load();

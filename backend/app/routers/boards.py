@@ -383,10 +383,14 @@ async def create_task(
         raise HTTPException(status_code=400, detail="시작일이 종료일보다 뒤일 수 없습니다.")
 
     assignees = await board_service.assert_assignable(db, current_user, board.workspace_id, req.assignee_ids)
-    # In the shared workspace a person may only assign themselves, so there is
-    # nothing to choose: whoever adds the 할 일 is its 담당자, set here rather
-    # than offered as a menu of one.
-    if not assignees and await shared_policy_service.is_shared_workspace(db, board.workspace_id):
+    # Whoever adds a 할 일 is its 담당자 unless they said otherwise.
+    #
+    # In the shared workspace there is nothing else it could be. Elsewhere it
+    # is a default rather than a rule — the picker still opens — but the same
+    # default, because a 할 일 added by someone is nearly always theirs, and
+    # one created with nobody on it vanishes the moment the 일정 탭 is showing
+    # "내 담당만", which is what it shows by default.
+    if not assignees and "assignee_ids" not in req.model_fields_set:
         assignees = [current_user.id]
     name = req.name.strip()
     # Its document, made with it and in the same folder, so everything a
