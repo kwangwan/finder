@@ -240,7 +240,11 @@ async def get_auth_config():
     }
 
 SUPPORTED_LANGUAGES = ["ko", "en", "ja", "zh"]
-DEFAULT_LANGUAGE = "ko"
+# English for anyone this app has no translation for: it is the language most
+# likely to be readable by someone whose own is not on the list. Korean is what
+# the people who were already here read, and they were backfilled with it once
+# — it is not a guess to apply to strangers.
+DEFAULT_LANGUAGE = "en"
 
 
 def normalize_language(value: Optional[str]) -> str:

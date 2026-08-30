@@ -122,9 +122,13 @@ async def init_db():
             # identity provider supplied.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS avatar_s3_key VARCHAR(1024);",
             # The language a person reads in, taken from their browser at sign-up.
-            # Everyone who was already here has been using it in Korean, so that
-            # is what they get rather than a guess or a blank.
+            # Added with 'ko' so everyone who was already here — all of them
+            # Korean readers — keeps reading in Korean.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS language VARCHAR(10) NOT NULL DEFAULT 'ko';",
+            # From here on the fallback is English: 'ko' was right for the
+            # people already here, not for a stranger whose browser asks for
+            # something this app has no translation for.
+            "ALTER TABLE kb_users ALTER COLUMN language SET DEFAULT 'en';",
             # `is_admin` sat next to a workspace's own "admin" role and read as
             # the same thing. This one is service-wide, so it says so.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",

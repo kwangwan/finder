@@ -30,7 +30,10 @@ class User(Base):
     # The language this person reads in, taken from their browser when they
     # sign up and changeable afterwards. Stored as a BCP-47 primary subtag
     # ("ko", "en", "ja"), which is what a translation layer will ask for.
-    language = Column(String(10), nullable=False, default="ko")
+    # English when the browser asks for something this app has no translation
+    # for; the accounts that predate the column were set to Korean once,
+    # because that is what those people actually read.
+    language = Column(String(10), nullable=False, default="en")
     is_superadmin = Column(Boolean, default=False, nullable=False)
     # Not a person. Holds the shared workspace's storage quota so that pool is
     # separate from any real user's, and is hidden from the user list and from
