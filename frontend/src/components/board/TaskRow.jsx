@@ -276,7 +276,11 @@ export default function TaskRow({
           title={task.assignees.map((a) => a.name).join(', ') || '담당자 지정'}
         >
           {task.assignees.length === 0
-            ? <span className="bd-avatar is-empty" style={{ width: 22, height: 22 }}>+</span>
+            ? (
+              // An icon rather than a "+" character: the glyph centres on the
+              // font's maths axis, which left it sitting low in the circle.
+              <span className="bd-avatar is-empty" style={{ width: 22, height: 22 }}><Plus size={11} /></span>
+            )
             : task.assignees.slice(0, AVATARS_SHOWN).map((a) => <Avatar key={a.id} person={a} />)}
           {task.assignees.length > AVATARS_SHOWN && (
             <span className="bd-avatar is-more" style={{ width: 22, height: 22 }}>

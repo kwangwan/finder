@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck, Search, X, Loader2, ChevronLeft, ChevronRight, RefreshCw, Settings,
-  Folder as FolderIcon, Clock, Plus,
+  Folder as FolderIcon, Clock, Plus, Filter,
 } from '../../utils/icons';
 import {
   listWorkspaceTasks, updateBoardTask, deleteBoardTask, createBoardTask,
@@ -10,7 +10,7 @@ import {
 import { useDialog } from '../../context/DialogContext';
 import TaskRow from './TaskRow';
 import DigestSettingsModal from './DigestSettingsModal';
-import { Dropdown, DateRangeField, Toggle } from './controls';
+import ScheduleFilterModal, { DEFAULT_FILTERS, activeFilters } from './ScheduleFilterModal';
 
 const PAGE_SIZE = 40;
 
@@ -26,12 +26,6 @@ function formatInZone(date, timeZone) {
     return date.toLocaleString('ko-KR');
   }
 }
-
-const GROUPINGS = [
-  { value: 'urgency', label: '기한순' },
-  { value: 'board', label: '일정별' },
-  { value: 'status', label: '상태별' },
-];
 
 /**
  * Everything in this workspace, managed in one place.
@@ -52,11 +46,11 @@ export default function ScheduleExplorer({
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [includeDone, setIncludeDone] = useState(false);
-  const [mineOnly, setMineOnly] = useState(false);
-  const [priority, setPriority] = useState('');
-  const [status, setStatus] = useState('');
-  const [grouping, setGrouping] = useState('urgency');
+  // One object, because they are one thing: how this list is being looked at.
+  // Starts on the answer most people want first — what is mine and not done.
+  const [filters, setFilters] = useState({ ...DEFAULT_FILTERS });
+  const { includeDone, mineOnly, priority, status, grouping, fromDate, toDate } = filters;
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsRefresh, setSettingsRefresh] = useState(0);
   const [busyId, setBusyId] = useState(null);
@@ -81,8 +75,6 @@ export default function ScheduleExplorer({
     const id = setTimeout(() => draftRef.current?.focus(), 30);
     return () => clearTimeout(id);
   }, [draft]);
-  const [fromDate, setFromDate] = useState(null);
-  const [toDate, setToDate] = useState(null);
   // The reference clock everything on a board is read against. Shown so nobody
   // has to guess which day the app thinks it is.
   const [zone, setZone] = useState({ timezone: null, label: '' });
@@ -316,22 +308,28 @@ export default function ScheduleExplorer({
         .map((st) => ({ key: st, label: labels[st], items: items.filter((t) => t.status === st) }))
         .filter((g) => g.items.length);
     } else {
+      // A finished 할 일 is not late, whatever its date said — it is done, and
+      // listing it under 기한 지남 would make a closed thing look outstanding.
+      // The 할 일 itself decides: its sub-items follow it.
+      const isDone = (t) => t.status === 'done';
       const buckets = [
-        { key: 'overdue', label: '기한 지남', test: (d) => d !== null && d < 0 },
-        { key: 'today', label: '오늘', test: (d) => d === 0 },
-        { key: 'week', label: '7일 이내', test: (d) => d > 0 && d <= 7 },
-        { key: 'month', label: '30일 이내', test: (d) => d > 7 && d <= 30 },
-        { key: 'later', label: '그 이후', test: (d) => d > 30 },
-        { key: 'none', label: '기간 없음', test: (d) => d === null },
+        { key: 'overdue', label: '기한 지남', test: (t, d) => !isDone(t) && d !== null && d < 0 },
+        { key: 'today', label: '오늘', test: (t, d) => !isDone(t) && d === 0 },
+        { key: 'week', label: '7일 이내', test: (t, d) => !isDone(t) && d > 0 && d <= 7 },
+        { key: 'month', label: '30일 이내', test: (t, d) => !isDone(t) && d > 7 && d <= 30 },
+        { key: 'later', label: '그 이후', test: (t, d) => !isDone(t) && d > 30 },
+        { key: 'none', label: '기간 없음', test: (t, d) => !isDone(t) && d === null },
+        { key: 'done', label: '완료', test: (t) => isDone(t) },
       ];
       outer = buckets
-        .map((b) => ({ key: b.key, label: b.label, items: items.filter((t) => b.test(soonest(t))) }))
+        .map((b) => ({ key: b.key, label: b.label, items: items.filter((t) => b.test(t, soonest(t))) }))
         .filter((g) => g.items.length);
     }
     return outer.map((g) => ({ ...g, boards: byBoard(g.items) }));
   }, [data.items, grouping]);
 
-  const hasFilter = !!(search || includeDone || mineOnly || priority || status || fromDate || toDate);
+  const chips = activeFilters(filters);
+  const hasFilter = !!search || chips.length > 0;
 
   return (
     <div className="sc-explorer">
@@ -368,60 +366,30 @@ export default function ScheduleExplorer({
           {query && <button type="button" onClick={() => setQuery('')} title="검색어 지우기"><X size={13} /></button>}
         </div>
 
-        <div className="sc-groupby" role="group" aria-label="묶는 기준">
-          {GROUPINGS.map((g) => (
-            <button
-              key={g.value}
-              type="button"
-              className={grouping === g.value ? 'on' : ''}
-              onClick={() => setGrouping(g.value)}
-            >
-              {g.label}
-            </button>
-          ))}
-        </div>
+        <button
+          type="button"
+          className={`btn-secondary sc-filter-btn ${chips.length ? 'on' : ''}`}
+          onClick={() => setFiltersOpen(true)}
+          title="보기 설정"
+        >
+          <Filter size={14} />
+          <span>보기 설정</span>
+          {chips.length > 0 && <span className="sc-filter-count">{chips.length}</span>}
+        </button>
 
-        <Dropdown
-          value={priority}
-          label="중요도로 거르기"
-          options={[
-            { value: '', label: '중요도 전체' },
-            { value: 'urgent', label: '긴급' }, { value: 'high', label: '높음' },
-            { value: 'normal', label: '보통' }, { value: 'low', label: '낮음' },
-          ]}
-          onChange={setPriority}
-        />
-        <Dropdown
-          value={status}
-          label="진행 상태로 거르기"
-          options={[
-            { value: '', label: '상태 전체' },
-            { value: 'todo', label: '대기' }, { value: 'in_progress', label: '진행 중' },
-            { value: 'review', label: '검토' }, { value: 'done', label: '완료' },
-            { value: 'hold', label: '보류' },
-          ]}
-          onChange={setStatus}
-        />
-
-        {/* Matches anything whose period touches the range, so a long-running
-            item still shows up in a week it is actually running through. */}
-        <DateRangeField
-          start={fromDate}
-          end={toDate}
-          placeholder="기간 전체"
-          onChange={(a, b) => { setFromDate(a); setToDate(b); }}
-        />
-
-        <Toggle
-          on={mineOnly} onChange={setMineOnly}
-          onLabel="내 담당만 보는 중" offLabel="모든 담당자"
-          title="나에게 배정된 것만 볼지"
-        />
-        <Toggle
-          on={includeDone} onChange={setIncludeDone}
-          onLabel="완료도 함께 보는 중" offLabel="완료는 숨김"
-          title="완료한 할 일을 목록에 포함할지"
-        />
+        {/* What is on, said back — the settings are put away, not hidden. */}
+        {chips.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            className="sc-chip"
+            onClick={() => setFilters((prev) => ({ ...prev, ...c.reset }))}
+            title="이 조건 끄기"
+          >
+            <span>{c.label}</span>
+            <X size={11} />
+          </button>
+        ))}
       </div>
 
       {isLoading && data.items.length === 0 ? (
@@ -547,6 +515,13 @@ export default function ScheduleExplorer({
         workspaceName={workspaceName}
         isOpen={settingsOpen}
         onClose={() => { setSettingsOpen(false); setSettingsRefresh((n) => n + 1); }}
+      />
+
+      <ScheduleFilterModal
+        isOpen={filtersOpen}
+        filters={filters}
+        onChange={setFilters}
+        onClose={() => setFiltersOpen(false)}
       />
 
     </div>

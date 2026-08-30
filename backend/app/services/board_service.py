@@ -388,8 +388,14 @@ async def list_workspace_tasks(
         FileItem.is_trashed == False,  # noqa: E712
         FileItem.file_type == BOARD_FILE_TYPE,
     ]
-    if not include_done:
-        conds.append(BoardTask.status != DONE_STATUS)
+    # Whether something is done is decided by the top-level 할 일: a sub-item
+    # left unticked under a finished parent is finished with it. So the
+    # condition is not applied to the rows here — it is applied to the groups
+    # further down, once each row's parent is known.
+    #
+    # Asking for the done status explicitly is asking to see them, whatever
+    # the toggle says.
+    show_done = include_done or status == DONE_STATUS
     if status:
         conds.append(BoardTask.status == status)
     if priority:
@@ -444,6 +450,9 @@ async def list_workspace_tasks(
         )).scalars().all():
             roots[parent.id] = parent
 
+    if not show_done:
+        roots = {tid: root for tid, root in roots.items() if root.status != DONE_STATUS}
+
     if not roots:
         return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 1}
 
@@ -466,6 +475,9 @@ async def list_workspace_tasks(
         members = [root] + children_by_root.get(root.id, [])
         dues = [m.due_date for m in members if m.due_date]
         soonest = min(dues) if dues else None
+        # Same deadline, more important first — taking the rank of the most
+        # important thing in the group, so a group carrying something urgent
+        # rises to where it will be seen.
         rank = min(PRIORITY_RANK.get(m.priority, len(PRIORITIES)) for m in members)
         return (1 if soonest is None else 0, soonest or date.max, rank, root.created_at)
 

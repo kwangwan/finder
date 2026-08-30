@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -308,6 +309,16 @@ async def collect_for_workspace(db: AsyncSession, workspace_id, config: dict) ->
     horizons = config["horizons"]
     furthest = max((bounds[h] for h in horizons), default=today)
 
+    # Done is decided by the top-level 할 일: a sub-item still showing 대기
+    # under a finished parent is finished with it, and a reminder about it
+    # would be a reminder to do something already done.
+    parent = aliased(BoardTask)
+    parent_done = (
+        select(parent.id)
+        .where(parent.id == BoardTask.parent_task_id, parent.status == DONE_STATUS)
+        .exists()
+    )
+
     rows = (await db.execute(
         select(BoardTask, FileItem)
         .join(FileItem, FileItem.id == BoardTask.file_id)
@@ -316,6 +327,7 @@ async def collect_for_workspace(db: AsyncSession, workspace_id, config: dict) ->
             FileItem.is_trashed == False,          # noqa: E712
             FileItem.file_type == BOARD_FILE_TYPE,
             BoardTask.status != DONE_STATUS,
+            ~parent_done,
             BoardTask.due_date.isnot(None),
             BoardTask.due_date <= furthest,
         )
