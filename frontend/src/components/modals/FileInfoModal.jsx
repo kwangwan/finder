@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import UsernameHistoryModal from './UsernameHistoryModal';
 import { Info, X } from '../../utils/icons';
 
 function formatBytes(bytes) {
@@ -16,27 +17,42 @@ function formatDate(isoString) {
 }
 
 export default function FileInfoModal({ file, onClose }) {
+  // Which person's handle history is open, if any. The handle is how work is
+  // attributed here, so it is a link to the record of what it used to be.
+  const [historyUserId, setHistoryUserId] = useState(null);
+
   if (!file) return null;
 
   const isMarkdown = file.is_markdown;
 
-  // The handle identifies; the display name is how people know each other.
-  // Two people may share a name, so the handle comes first and the name sits
-  // beside it — and it is left out when it says nothing the handle didn't.
+  // One person, written as one thing. "@jhkim · 김지현" read as two people
+  // separated by a dot, which is exactly what a middle dot means everywhere
+  // else in this app — so the name leads and the handle qualifies it.
   const who = (handle, name) => {
     if (!handle && !name) return '알 수 없음';
     if (!handle) return name;
     if (!name || name === handle) return `@${handle}`;
-    return `@${handle} · ${name}`;
+    return `${name} (@${handle})`;
   };
+
+  const person = (handle, name, userId) => (
+    userId ? (
+      <button type="button" className="fi-person" onClick={() => setHistoryUserId(userId)} title="아이디 변경 이력 보기">
+        {who(handle, name)}
+      </button>
+    ) : who(handle, name)
+  );
 
   const rows = [
     { label: '종류', value: isMarkdown ? '문서' : (file.file_type ? file.file_type.toUpperCase() : '-') },
     { label: '크기', value: formatBytes(file.size_bytes) },
-    { label: '업로드한 사람', value: who(file.creator_name, file.creator_display_name) },
+    { label: '업로드한 사람', value: person(file.creator_name, file.creator_display_name, file.created_by) },
   ];
   if (isMarkdown) {
-    rows.push({ label: '최종 수정자', value: who(file.last_editor_name, file.last_editor_display_name) });
+    rows.push({
+      label: '최종 수정자',
+      value: person(file.last_editor_name, file.last_editor_display_name, file.last_edited_by),
+    });
   }
   rows.push({ label: '생성일', value: formatDate(file.created_at) });
   rows.push({ label: '수정일', value: formatDate(file.updated_at) });
@@ -162,6 +178,12 @@ export default function FileInfoModal({ file, onClose }) {
           </button>
         </div>
       </div>
+
+      <UsernameHistoryModal
+        userId={historyUserId}
+        isOpen={!!historyUserId}
+        onClose={() => setHistoryUserId(null)}
+      />
     </div>
   );
 }

@@ -13,6 +13,7 @@ from app.models.sharing import FolderWriteGrant, ContentReport
 from app.models.favorite import Favorite
 from app.models.board import BoardTask, BoardTaskAssignee
 from app.models.file_link import FileLink
+from app.models.username_history import UsernameHistory
 
 __all__ = [
     "Folder",
@@ -34,4 +35,5 @@ __all__ = [
     "BoardTask",
     "BoardTaskAssignee",
     "FileLink",
+    "UsernameHistory",
 ]

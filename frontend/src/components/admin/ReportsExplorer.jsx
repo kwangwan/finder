@@ -145,12 +145,12 @@ export default function ReportsExplorer({ onOpenFile, onResolved }) {
                 <div className="report-meta">
                   <span>
                     <UserIcon size={12} />
-                    {/* Handle first, name beside it: two people can share a
-                        name, and this screen is where knowing which one
-                        matters most. */}
-                    {r.file?.uploader}
+                    {/* One person, written as one thing: the name leads and the
+                        handle qualifies it, because a middle dot between them
+                        read as two different people. */}
                     {r.file?.uploader_display_name && r.file.uploader_display_name !== r.file.uploader
-                      && <span className="report-who-name"> · {r.file.uploader_display_name}</span>}
+                      ? <>{r.file.uploader_display_name}<span className="report-who-name"> (@{r.file.uploader})</span></>
+                      : <>@{r.file?.uploader}</>}
                   </span>
                   {r.file?.folder_name && <span><FolderIcon size={12} /> {r.file.folder_name}</span>}
                   {r.file?.size_bytes ? <span>{formatSize(r.file.size_bytes)}</span> : null}

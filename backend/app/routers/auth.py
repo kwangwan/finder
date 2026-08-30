@@ -146,7 +146,9 @@ async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token
         await db.refresh(user)
 
 
-MAX_AVATAR_BYTES = 2 * 1024 * 1024
+# What may be sent. What is stored is the 256px WebP made from it, so a
+# generous limit here costs nothing but the upload itself.
+MAX_AVATAR_BYTES = 5 * 1024 * 1024
 ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
@@ -169,10 +171,19 @@ async def upload_avatar(
     if not data:
         raise HTTPException(status_code=400, detail="빈 파일입니다.")
     if len(data) > MAX_AVATAR_BYTES:
-        raise HTTPException(status_code=413, detail="이미지는 2MB 이하만 올릴 수 있습니다.")
+        raise HTTPException(status_code=413, detail="이미지는 5MB 이하만 올릴 수 있습니다.")
 
-    key = build_storage_key("avatars", current_user.id, file.filename or "avatar")
-    stored = await run_in_threadpool(s3_service.put_object, key, data, file.content_type)
+    # Resized before it is stored, not just accepted: what is kept is what gets
+    # drawn, and an avatar is drawn small and often. The limit above is on what
+    # may be sent, which is a different question.
+    from app.services.thumbnail_service import thumbnail_service
+    prepared = await run_in_threadpool(thumbnail_service.generate_avatar, data)
+    if prepared is None:
+        raise HTTPException(status_code=400, detail="이미지를 읽지 못했습니다. 다른 파일로 시도해 주세요.")
+    data, content_type = prepared
+
+    key = build_storage_key("avatars", current_user.id, "avatar.webp")
+    stored = await run_in_threadpool(s3_service.put_object, key, data, content_type)
     if not stored:
         raise HTTPException(status_code=500, detail="이미지를 저장하지 못했습니다.")
 
@@ -308,6 +319,9 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         last_login_at=datetime.now(timezone.utc)
     )
     db.add(user)
+    await db.flush()
+    # The handle chosen at sign-up is the first entry in its own history.
+    await username_service.record_taken(db, user.id, desired)
     await db.commit()
     await db.refresh(user)
 
@@ -403,6 +417,8 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             last_login_at=datetime.now(timezone.utc)
         )
         db.add(user)
+        await db.flush()
+        await _uns.record_taken(db, user.id, google_handle)
         await db.commit()
         await db.refresh(user)
     else:
@@ -632,7 +648,21 @@ async def update_my_username(
 
     if desired != (current_user.username or ""):
         if not await username_service.is_available(db, desired, exclude_user_id=current_user.id):
-            raise HTTPException(status_code=409, detail="이미 사용 중이거나 기존 아이디와 혼동되는 아이디입니다.")
+            raise HTTPException(
+                status_code=409,
+                detail="이미 사용 중이거나, 다른 분이 최근까지 쓰던 아이디입니다. 다른 아이디를 골라 주세요.",
+            )
+        # Attribution is only as stable as the name it is written in, so a
+        # handle cannot be swapped every day.
+        allowed_at = await username_service.change_allowed_at(db, current_user.id)
+        if allowed_at is not None and datetime.now(timezone.utc) < allowed_at:
+            when = allowed_at.strftime("%Y년 %-m월 %-d일")
+            raise HTTPException(
+                status_code=429,
+                detail=f"아이디는 {username_service.HANDLE_CHANGE_COOLDOWN_DAYS}일에 한 번 바꿀 수 있습니다. {when}부터 다시 바꿀 수 있습니다.",
+            )
+        await username_service.release_current(db, current_user.id)
+        await username_service.record_taken(db, current_user.id, desired)
 
     current_user.username = desired
     try:
@@ -650,6 +680,63 @@ async def update_my_username(
         pass
 
     return {"id": str(current_user.id), "username": current_user.username}
+
+
+@router.get("/users/{user_id}/username-history")
+async def username_history(
+    user_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 10,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Every handle this account has held, newest first.
+
+    Open to anyone signed in, on purpose: a handle is how work is attributed,
+    so "who is @jhkim, and were they always called that" is a question anybody
+    looking at an upload is entitled to ask. Paged, because somebody who
+    changes it often would otherwise push the useful entries off the end.
+    """
+    from app.models import UsernameHistory
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="이용자를 찾을 수 없습니다.")
+
+    page = max(1, page)
+    page_size = max(1, min(50, page_size))
+    total = (await db.execute(
+        select(func.count(UsernameHistory.id)).where(UsernameHistory.user_id == user_id)
+    )).scalar_one_or_none() or 0
+    rows = (await db.execute(
+        select(UsernameHistory)
+        .where(UsernameHistory.user_id == user_id)
+        .order_by(UsernameHistory.taken_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )).scalars().all()
+
+    return {
+        "user": {
+            "id": str(user.id),
+            "username": user.username,
+            "name": user.name,
+        },
+        "items": [
+            {
+                "username": r.username,
+                "taken_at": r.taken_at,
+                "released_at": r.released_at,
+                "is_current": r.released_at is None,
+            }
+            for r in rows
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": max(1, (total + page_size - 1) // page_size),
+    }
 
 
 @router.get("/username-available")

@@ -230,17 +230,27 @@ class S3Service:
         except Exception as e:
             print(f"[S3 Error] abort_multipart_upload: {e}")
 
-    def put_object(self, s3_key: str, data: bytes, content_type: str = "text/markdown; charset=utf-8"):
-        """Directly upload bytes to local storage and MinIO."""
+    def put_object(self, s3_key: str, data: bytes, content_type: str = "text/markdown; charset=utf-8") -> bool:
+        """
+        Directly upload bytes to local storage and MinIO.
+
+        Returns whether the bytes ended up somewhere they can be read back
+        from. It used to return nothing at all, so a caller asking "did that
+        work" — the avatar upload did — read the None as failure and refused
+        every image it had just stored correctly.
+        """
+        local_ok = False
         # 1. Save to local storage cache
         try:
             local_path = self._get_local_path(s3_key)
             with open(local_path, "wb") as f:
                 f.write(data)
+            local_ok = True
         except Exception as e:
             print(f"[Local Storage Warning] Could not save to local path: {e}")
 
         # 2. Upload to MinIO if client is available
+        remote_ok = False
         if self.client:
             try:
                 self.client.put_object(
@@ -249,8 +259,11 @@ class S3Service:
                     Body=data,
                     ContentType=content_type
                 )
+                remote_ok = True
             except Exception as e:
                 print(f"[S3 Warning] put_object to S3 failed (saved locally): {e}")
+
+        return local_ok or remote_ok
 
     def get_object_content(self, s3_key: str) -> Optional[bytes]:
         """Download object content from S3 or local cache."""

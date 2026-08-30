@@ -254,6 +254,23 @@ async def init_db():
             except Exception as e:
                 print(f"[DB Migration Warning] Could not backfill document attachments: {e}")
 
+        # Every handle an account has held. The accounts that predate the
+        # table get one row for the handle they are using now, dated from when
+        # they signed up — which is when they took it.
+        try:
+            async with conn.begin_nested():
+                await conn.execute(text("""
+                    INSERT INTO kb_username_history (id, user_id, username, taken_at, released_at)
+                    SELECT uuid_generate_v4(), u.id, u.username, u.created_at, NULL
+                    FROM kb_users u
+                    WHERE u.username IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM kb_username_history h WHERE h.user_id = u.id
+                      );
+                """))
+        except Exception as e:
+            print(f"[DB Migration Warning] Could not backfill username history: {e}")
+
         # Create HNSW index on embeddings if not exists
         try:
             async with conn.begin_nested():

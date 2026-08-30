@@ -1041,6 +1041,7 @@ export default function App() {
     }
     await refreshFiles();
     await refreshFoldersAndStats();
+    setFavoriteRefreshToken((n) => n + 1);
     bumpWindowRefresh();
     updateToast(toastId, {
       message: failed
@@ -1637,6 +1638,9 @@ export default function App() {
       windowManager.closeWindow(file.id);
       refreshFiles();
       refreshFoldersAndStats();
+      // Something deleted here may have been on somebody's 즐겨찾기 list, and
+      // that list is built from its own request — it has to be asked again.
+      setFavoriteRefreshToken((n) => n + 1);
       bumpWindowRefresh();
       updateToast(toastId, { message: `'${file.name}' 파일이 휴지통으로 이동되었습니다.`, type: 'success' });
     } catch (err) {
@@ -1662,6 +1666,7 @@ export default function App() {
         windowManager.closeWindow(fileId);
         refreshFiles();
         refreshFoldersAndStats();
+        setFavoriteRefreshToken((n) => n + 1);
         bumpWindowRefresh();
       } catch (err) {
         await showAlert({
@@ -1693,6 +1698,7 @@ export default function App() {
       }
       refreshFiles();
       refreshFoldersAndStats();
+      setFavoriteRefreshToken((n) => n + 1);
       bumpWindowRefresh();
       updateToast(toastId, { message: `'${folder.name}' 폴더가 휴지통으로 이동되었습니다.`, type: 'success' });
     } catch (err) {
@@ -1973,8 +1979,13 @@ export default function App() {
       // their own folder.
       await setFavorite('file', file.id, on);
       windowManager.updateWindowFile(file.id, { is_favorite: on });
+      // The star is the only thing that changed anywhere else, so it is
+      // changed in place rather than by refetching the whole listing: a
+      // bookmark does not move a file, rename it, or alter any count.
+      setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, is_favorite: on } : f)));
       setFavoriteRefreshToken((n) => n + 1);
-      refreshFiles();
+      // Except here, where it decides whether the row belongs on screen at all.
+      if (activeView === 'favorites') refreshFiles();
     } catch (err) {
       showToast(err.message || '즐겨찾기를 변경하지 못했습니다.', { type: 'error' });
     }

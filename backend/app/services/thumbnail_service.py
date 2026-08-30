@@ -2,13 +2,18 @@ import io
 import os
 import tempfile
 from typing import Optional
-from PIL import Image
+from PIL import Image, ImageOps
 import cv2
 from app.services.s3_service import s3_service
 
 THUMBNAIL_MAX_SIZE = (400, 400)
 THUMBNAIL_FORMAT = "WEBP"
 THUMBNAIL_MIME = "image/webp"
+
+# What a profile photo is ever drawn at, with room for a high-density screen.
+AVATAR_SIZE = (256, 256)
+AVATAR_FORMAT = "WEBP"
+AVATAR_MIME = "image/webp"
 
 class ThumbnailService:
     def generate_image_thumbnail(self, image_bytes: bytes) -> Optional[bytes]:
@@ -28,6 +33,33 @@ class ThumbnailService:
                 return out_io.getvalue()
         except Exception as e:
             print(f"[ThumbnailService Warning] Failed to generate image thumbnail: {e}")
+            return None
+
+    def generate_avatar(self, image_bytes: bytes) -> Optional[tuple]:
+        """
+        A profile photo cut down to what a profile photo is ever drawn at.
+
+        Avatars appear dozens of times on a single screen — every 할 일 row,
+        every people picker — so storing the original meant sending a phone
+        camera's several megabytes to draw a 22-pixel circle. Squared off from
+        the centre, because that is how every place here displays it, and
+        re-encoded to WebP.
+        """
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as img:
+                # A photo taken sideways carries its rotation in EXIF; without
+                # this the face arrives on its side.
+                img = ImageOps.exif_transpose(img)
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    img = img.convert("RGBA")
+                else:
+                    img = img.convert("RGB")
+                img = ImageOps.fit(img, AVATAR_SIZE, Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+                out = io.BytesIO()
+                img.save(out, format=AVATAR_FORMAT, quality=82, method=4)
+                return out.getvalue(), AVATAR_MIME
+        except Exception as e:
+            print(f"[ThumbnailService Warning] Failed to prepare avatar: {e}")
             return None
 
     def generate_video_thumbnail(self, video_bytes: bytes) -> Optional[bytes]:

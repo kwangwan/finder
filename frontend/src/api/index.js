@@ -1848,6 +1848,16 @@ export async function uploadNoteImage(file, workspaceId = null, folderId = null)
  * reload and follows the user to another browser. Only which files are open
  * and whether each is minimized — geometry stays local to each screen.
  */
+/** Every handle an account has held, newest first. Paged. */
+export async function getUsernameHistory(userId, page = 1, pageSize = 10) {
+  const res = await fetch(
+    `${API_BASE}/auth/users/${userId}/username-history?page=${page}&page_size=${pageSize}`,
+    { headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error('아이디 변경 이력을 불러오지 못했습니다.');
+  return res.json();
+}
+
 /** Change your handle. The personal folder in the shared workspace follows it. */
 export async function updateMyUsername(username) {
   const res = await fetch(`${API_BASE}/auth/me/username`, {

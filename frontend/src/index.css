@@ -6643,3 +6643,149 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 /* The display name beside a handle — quieter, because the handle is the one
    that identifies. */
 .report-who-name { color: var(--text-muted); }
+
+/* --- 계정 메뉴의 신원 표시 (읽기 전용) ------------------------------------- */
+
+.tb-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.tb-identity-photo {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tb-identity-photo img { width: 100%; height: 100%; object-fit: cover; }
+.tb-identity-fallback { font-weight: 800; color: var(--text-secondary); }
+
+.tb-identity-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.tb-identity-name { font-weight: 700; font-size: 0.88rem; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-identity-handle { font-size: 0.76rem; font-weight: 600; color: var(--accent-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-identity-email { font-size: 0.71rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tb-profile-btn { width: 100%; margin-top: 0.75rem; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 0.8rem; }
+
+/* --- 내 프로필 ------------------------------------------------------------ */
+
+.pf-modal { width: min(470px, 94vw); max-height: 86vh; padding: 0; display: flex; flex-direction: column; }
+.pf-head { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--border-subtle); }
+.pf-head h2 { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
+
+.pf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 1.05rem 1.15rem; display: flex; flex-direction: column; gap: 1.15rem; }
+
+.pf-avatar-row { display: flex; align-items: flex-start; gap: 14px; }
+
+.pf-avatar {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pf-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.pf-avatar-fallback { font-size: 1.4rem; font-weight: 800; color: var(--text-secondary); }
+.pf-avatar-busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); color: #fff; }
+
+.pf-avatar-actions { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pf-avatar-buttons { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.pf-avatar-buttons .btn-secondary { flex: 0 0 auto; height: 28px; padding: 0 0.6rem; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 4px; }
+
+.pf-field { display: flex; flex-direction: column; gap: 4px; }
+.pf-label { display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; font-weight: 700; color: var(--text-primary); }
+.pf-desc { font-size: 0.74rem; line-height: 1.5; color: var(--text-muted); }
+
+.pf-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 0.35rem 0.4rem 0.35rem 0.6rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+}
+
+.pf-input input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--text-primary); font-family: inherit; font-size: 0.85rem; }
+.pf-input.state-free { border-color: var(--accent-emerald); }
+.pf-input.state-taken { border-color: var(--accent-rose); }
+.pf-save { flex: 0 0 auto; height: 26px; padding: 0 0.55rem; font-size: 0.74rem; display: inline-flex; align-items: center; gap: 4px; }
+
+.pf-hint { font-size: 0.73rem; }
+.pf-hint.good { color: var(--accent-emerald); }
+.pf-hint.bad { color: var(--accent-rose); }
+
+.pf-select {
+  align-self: flex-start;
+  margin-top: 4px;
+  height: 30px;
+  padding: 0 0.5rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.pf-static { font-size: 0.82rem; color: var(--text-secondary); }
+.pf-actions { display: flex; justify-content: flex-end; padding: 0.8rem 1.15rem; border-top: 1px solid var(--border-subtle); }
+.pf-actions .btn-secondary { flex: 0 0 auto; }
+
+/* A person's handle is a link to what it used to be — attribution should be
+   checkable, not merely displayed. */
+.fi-person {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent-primary);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fi-person:hover { text-decoration: underline; }
+
+.uh-modal { width: min(460px, 94vw); padding: 0; display: flex; flex-direction: column; max-height: 80vh; }
+.uh-head { display: flex; align-items: center; gap: 8px; padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border-subtle); }
+.uh-title { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.uh-title span { font-size: 0.92rem; font-weight: 700; color: var(--text-primary); }
+.uh-title small { font-size: 0.74rem; color: var(--text-muted); }
+
+.uh-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0.6rem 1.1rem; display: flex; flex-direction: column; }
+.uh-empty { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 2rem; color: var(--text-muted); font-size: 0.84rem; }
+
+.uh-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0.6rem 0; border-bottom: 1px solid var(--border-subtle); }
+.uh-row:last-child { border-bottom: none; }
+.uh-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 0.86rem; color: var(--text-primary); }
+.uh-row.is-current .uh-name { color: var(--accent-primary); }
+
+.uh-badge {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  color: var(--accent-primary);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.uh-when { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 0.73rem; color: var(--text-muted); text-align: right; }
+
+.uh-pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0.5rem; font-size: 0.78rem; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); }
+
+.uh-actions { display: flex; align-items: center; gap: 10px; padding: 0.75rem 1.1rem; border-top: 1px solid var(--border-subtle); }
+.uh-note { flex: 1; font-size: 0.71rem; line-height: 1.45; color: var(--text-muted); }
+.uh-actions .btn-secondary { flex: 0 0 auto; }
