@@ -150,7 +150,13 @@ async def list_files(
     current_user: User = Depends(get_current_approved_user)
 ):
     """List accessible non-trashed files in a workspace with flexible sorting and pagination."""
+    # A 할 일's document is reached from its 일정, and from knowledge search —
+    # not by browsing the folder its board sits in. The exception is the
+    # favourites view: someone who starred one asked for it by name, and a
+    # list that silently drops what was put on it is worse than a longer one.
     conditions = [FileItem.is_trashed == False]
+    if not is_favorite:
+        conditions.append(link_service.not_task_document())
 
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
@@ -278,6 +284,8 @@ async def get_files_watermark(
     stay registered before /{file_id} or "watermark" gets parsed as a file id.
     """
     conditions = [FileItem.is_trashed == False]
+    if not is_favorite:
+        conditions.append(link_service.not_task_document())
 
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
@@ -333,6 +341,8 @@ async def list_file_ids(
     "here" is.
     """
     conditions = [FileItem.is_trashed == False]  # noqa: E712
+    if not is_favorite:
+        conditions.append(link_service.not_task_document())
 
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):
@@ -1027,6 +1037,9 @@ async def move_file(
         raise HTTPException(status_code=404, detail="File not found")
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
     await access_service.require_write_at(db, current_user, file_item.workspace_id, req.folder_id)
+    # A 할 일's document lives where its 일정 lives, so it is moved by moving
+    # the 일정 — never on its own, which would separate the two.
+    await _refuse_if_task_document(db, [file_item], action="move")
 
     if req.folder_id:
         if not await access_service.can_access_folder(db, current_user, req.folder_id):
@@ -1085,11 +1098,10 @@ async def _refuse_if_task_document(db: AsyncSession, file_items, action: str = "
         return
     names = [f.name for f in items if f.id in owned]
     shown = ", ".join(names[:3]) + ("…" if len(names) > 3 else "")
-    tail = (
-        "일정을 복구하면 함께 복구됩니다."
-        if action == "restore"
-        else "일정에서 해당 할 일을 삭제하면 문서도 함께 삭제됩니다."
-    )
+    tail = {
+        "restore": "일정을 복구하면 함께 복구됩니다.",
+        "move": "일정을 옮기면 문서도 함께 옮겨집니다.",
+    }.get(action, "일정에서 해당 할 일을 삭제하면 문서도 함께 삭제됩니다.")
     raise HTTPException(status_code=400, detail=f"{shown}은(는) 일정의 할 일에 연결된 문서입니다. {tail}")
 
 
@@ -1303,6 +1315,9 @@ async def batch_move_files(
     )
     files_res = await db.execute(files_q)
     files_to_move = files_res.scalars().all()
+    # Checked for the whole selection first: moving some and refusing the rest
+    # is not what anyone means by moving what they selected.
+    await _refuse_if_task_document(db, files_to_move, action="move")
 
     moved_count = 0
     skipped_no_permission = 0

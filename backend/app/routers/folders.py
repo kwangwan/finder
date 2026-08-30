@@ -21,6 +21,7 @@ from app.schemas.folder import (
 )
 from app.schemas.file import FileRenameRequest
 from app.services.access_service import access_service
+from app.services import link_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
@@ -93,7 +94,11 @@ async def list_folders(
     current_user: User = Depends(get_current_approved_user)
 ):
     """List non-trashed folders in a workspace with file count, sorting and pagination."""
-    file_count_expr = func.count(FileItem.id).filter(FileItem.is_trashed == False).label("file_count")
+    # 할 일 documents are left out of the count for the same reason they are
+    # left out of the listing: they are reached from their 일정, not here.
+    file_count_expr = func.count(FileItem.id).filter(
+        FileItem.is_trashed == False, link_service.not_task_document(),
+    ).label("file_count")
     
     sort_column_map = {
         "name": Folder.name,
@@ -201,7 +206,9 @@ async def get_folder_tree(
     """Get the full non-trashed nested recursive folder tree for a workspace."""
     stmt = select(
         Folder,
-        func.count(FileItem.id).filter(FileItem.is_trashed == False).label("file_count")
+        func.count(FileItem.id).filter(
+            FileItem.is_trashed == False, link_service.not_task_document(),
+        ).label("file_count")
     ).outerjoin(FileItem, FileItem.folder_id == Folder.id).group_by(Folder.id).order_by(Folder.name.asc())
     
     conditions = [Folder.is_trashed == False]
@@ -458,7 +465,9 @@ async def update_folder(
     await db.commit()
     await db.refresh(folder)
 
-    count_res = await db.execute(select(func.count(FileItem.id)).where(and_(FileItem.folder_id == folder.id, FileItem.is_trashed == False)))
+    count_res = await db.execute(select(func.count(FileItem.id)).where(and_(
+        FileItem.folder_id == folder.id, FileItem.is_trashed == False, link_service.not_task_document(),
+    )))
     file_count = count_res.scalar_one_or_none() or 0
 
     resp = FolderResponse.model_validate(folder)
@@ -486,7 +495,9 @@ async def rename_folder(
     await db.commit()
     await db.refresh(folder)
 
-    count_res = await db.execute(select(func.count(FileItem.id)).where(and_(FileItem.folder_id == folder.id, FileItem.is_trashed == False)))
+    count_res = await db.execute(select(func.count(FileItem.id)).where(and_(
+        FileItem.folder_id == folder.id, FileItem.is_trashed == False, link_service.not_task_document(),
+    )))
     file_count = count_res.scalar_one_or_none() or 0
 
     resp = FolderResponse.model_validate(folder)
@@ -543,7 +554,9 @@ async def restore_folder(
     await db.commit()
     await db.refresh(folder)
 
-    count_res = await db.execute(select(func.count(FileItem.id)).where(and_(FileItem.folder_id == folder.id, FileItem.is_trashed == False)))
+    count_res = await db.execute(select(func.count(FileItem.id)).where(and_(
+        FileItem.folder_id == folder.id, FileItem.is_trashed == False, link_service.not_task_document(),
+    )))
     file_count = count_res.scalar_one_or_none() or 0
 
     resp = FolderResponse.model_validate(folder)
@@ -716,10 +729,16 @@ async def _collect_folder_files_recursive(
     """Recursively collect (FileItem, relative_archive_path) for all files in folder and subfolders."""
     items = []
     
-    # 1. Direct files in this folder
+    # 1. Direct files in this folder. 할 일 documents are left out: they are
+    #    not part of what this folder shows, and a copy of the board makes its
+    #    own, so including them would both duplicate and surprise.
     files_res = await db.execute(
         select(FileItem).where(
-            and_(FileItem.folder_id == folder_id, FileItem.is_trashed == False)
+            and_(
+                FileItem.folder_id == folder_id,
+                FileItem.is_trashed == False,
+                link_service.not_task_document(),
+            )
         )
     )
     for f in files_res.scalars().all():

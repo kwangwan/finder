@@ -131,6 +131,18 @@ async def missing_attachment_count(db: AsyncSession, document: FileItem) -> int:
     return len(referenced - alive)
 
 
+def not_task_document():
+    """
+    A condition for listings: leave out documents that belong to a 할 일.
+
+    They are real documents — searched, embedded, opened in a window like any
+    other — but they are reached through their 일정, not by browsing the folder
+    the board happens to sit in. A board of thirty 할 일 would otherwise bury
+    everything else in the folder it lives in.
+    """
+    return ~select(BoardTask.id).where(BoardTask.document_id == FileItem.id).exists()
+
+
 async def owning_task(db: AsyncSession, file_id: uuid.UUID) -> Optional[BoardTask]:
     """The 할 일 this document belongs to, if it is one's document."""
     return (await db.execute(

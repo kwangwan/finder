@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.models import Folder, FileItem, DocumentChunk, User
 from app.core.security import get_current_approved_user
 from app.services.access_service import access_service
+from app.services import link_service
 from app.services.s3_service import s3_service
 
 router = APIRouter(prefix="/api/system", tags=["System & Stats"])
@@ -27,7 +28,9 @@ async def get_system_stats(
         - Non-admin users see aggregate stats across only their accessible workspaces.
     """
     folder_conditions = [Folder.is_trashed == False]
-    file_conditions = [FileItem.is_trashed == False]
+    # 할 일 documents are not part of what the sidebar counts, because they are
+    # not part of what it lists.
+    file_conditions = [FileItem.is_trashed == False, link_service.not_task_document()]
 
     if workspace_id:
         if not await access_service.is_workspace_member(db, current_user, workspace_id):

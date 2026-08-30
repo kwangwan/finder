@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     BoardTask,
     BoardTaskAssignee,
+    DocumentChunk,
+    FileLink,
     FileItem,
     User,
     Workspace,
@@ -507,7 +509,7 @@ async def list_workspace_tasks(
     }
 
 
-async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: User) -> int:
+async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: User) -> dict:
     """
     Reproduce a board's rows onto a copy of it.
 
@@ -519,15 +521,16 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
         select(BoardTask).where(BoardTask.file_id == source_file_id).order_by(BoardTask.position.asc())
     )).scalars().all()
     if not rows:
-        return 0
+        return {"tasks": 0, "documents": 0, "bytes": 0}
 
     target_board = await db.get(FileItem, target_file_id)
     if target_board is None:
-        return 0
+        return {"tasks": 0, "documents": 0, "bytes": 0}
     by_task = await assignees_by_task(db, [r.id for r in rows])
     sources = await documents_by_id(db, [r.document_id for r in rows])
 
     id_map = {}
+    copied_bytes = 0
     # Parents before children, so a sub-item always finds its new parent id.
     ordered = sorted(rows, key=lambda t: (t.parent_task_id is not None, t.position))
     for task in ordered:
@@ -542,6 +545,32 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
             document.size_bytes = len((document.content or "").encode("utf-8"))
         db.add(document)
         await db.flush()
+        copied_bytes += document.size_bytes or 0
+
+        # The copy has to be findable the same way the original was — a 할 일
+        # document is reached through search, so an unindexed copy would be a
+        # document nobody can get to. The content is identical, so the vectors
+        # are cloned rather than paid for again.
+        if source_document is not None and source_document.is_embedded:
+            chunks = (await db.execute(
+                select(DocumentChunk).where(DocumentChunk.file_id == source_document.id)
+            )).scalars().all()
+            for chunk in chunks:
+                db.add(DocumentChunk(
+                    file_id=document.id,
+                    chunk_index=chunk.chunk_index,
+                    content=chunk.content,
+                    embedding=chunk.embedding,
+                ))
+            document.is_embedded = True
+            document.embedded_chunks_count = len(chunks)
+
+        # And what it had attached comes along: the copy points at the same
+        # files, which is what attaching to several documents already means.
+        for link in (await db.execute(
+            select(FileLink).where(FileLink.document_id == source_document.id)
+        )).scalars().all() if source_document is not None else []:
+            db.add(FileLink(document_id=document.id, target_file_id=link.target_file_id))
 
         db.add(BoardTask(
             id=new_id,
@@ -560,4 +589,4 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
         for uid in by_task.get(task.id, []):
             db.add(BoardTaskAssignee(task_id=new_id, user_id=uid))
     await db.flush()
-    return len(rows)
+    return {"tasks": len(rows), "documents": len(rows), "bytes": copied_bytes}

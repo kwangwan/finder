@@ -193,7 +193,11 @@ async def get_trash(
         days_passed = (now - trashed_time).days
         days_rem = max(0, 30 - days_passed)
         
-        count_res = await db.execute(select(func.count(FileItem.id)).where(FileItem.folder_id == f.id))
+        # Counted the way every other file count is: 할 일 documents are not
+        # listed, so they are not part of "how many files are in here".
+        count_res = await db.execute(select(func.count(FileItem.id)).where(
+            FileItem.folder_id == f.id, link_service.not_task_document(),
+        ))
         count = count_res.scalar_one_or_none() or 0
 
         folder_items.append(TrashFolderItem(

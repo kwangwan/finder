@@ -197,9 +197,15 @@ async def get_shared_workspace_info(
     account = await get_quota_account(db)
 
     from app.models import FileItem
+    from app.services import link_service
+    # The same count the workspace itself shows: 할 일 documents are not listed
+    # anywhere here, so counting them would report more files than anyone can
+    # find. Storage below still includes their bytes, which are real.
     file_count = (await db.execute(
         select(func.count(FileItem.id)).where(
-            FileItem.workspace_id == ws.id, FileItem.is_trashed == False  # noqa: E712
+            FileItem.workspace_id == ws.id,
+            FileItem.is_trashed == False,  # noqa: E712
+            link_service.not_task_document(),
         )
     )).scalar_one() or 0
 

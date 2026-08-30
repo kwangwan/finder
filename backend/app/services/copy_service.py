@@ -14,6 +14,7 @@ from app.services.s3_service import s3_service, build_storage_key
 from app.services.quota_service import quota_service
 from app.services import folder_limit_service
 from app.services import board_service
+from app.services import link_service
 from app.models.board import BOARD_FILE_TYPE
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,16 @@ async def _unique_copy_name(
         if candidate not in existing:
             return candidate
     return f"{stem} - 복사본 {uuid.uuid4().hex[:6]}{suffix}"
+
+
+# Bytes written by a copy beyond the file's own size — a board's 할 일
+# documents, which are created by copy_tasks rather than copied one by one.
+# Keyed by the new file's id and read by whoever is counting the job.
+copy_extra_bytes: dict = {}
+
+
+def take_extra_bytes(file_id) -> int:
+    return copy_extra_bytes.pop(file_id, 0)
 
 
 async def _copy_one_file(
@@ -151,9 +162,14 @@ async def _copy_one_file(
         copy.embedded_chunks_count = len(chunks)
 
     # A board's rows are not in the file record, so a copy would otherwise
-    # arrive as an empty board.
+    # arrive as an empty board. Each copied 할 일 gets a document of its own,
+    # in the copy's folder — the board and its documents are copied as one
+    # thing, the way they are moved and deleted as one thing.
     if src.file_type == BOARD_FILE_TYPE:
-        await board_service.copy_tasks(db, src.id, copy.id, user)
+        copied = await board_service.copy_tasks(db, src.id, copy.id, user)
+        # Those documents are real bytes in the destination, so they are
+        # counted like any other copied file rather than arriving for free.
+        copy_extra_bytes[copy.id] = copied.get("bytes", 0)
 
     return copy
 
@@ -192,14 +208,22 @@ async def _copy_folder_recursive(
     await db.flush()
     counters["folders"] += 1
 
+    # 할 일 documents are skipped here: copying the board already makes fresh
+    # documents for the copied rows (see board_service.copy_tasks), so copying
+    # them again as ordinary files would leave the copy holding two of each.
     child_files = (await db.execute(
-        select(FileItem).where(FileItem.folder_id == src.id, FileItem.is_trashed == False)  # noqa: E712
+        select(FileItem).where(
+            FileItem.folder_id == src.id,
+            FileItem.is_trashed == False,  # noqa: E712
+            link_service.not_task_document(),
+        )
     )).scalars().all()
     for f in child_files:
         # Names inside a freshly created folder cannot collide with anything.
-        if await _copy_one_file(db, f, new_folder.id, workspace_id, user, rename=False):
+        made = await _copy_one_file(db, f, new_folder.id, workspace_id, user, rename=False)
+        if made:
             counters["files"] += 1
-            counters["bytes"] += f.size_bytes or 0
+            counters["bytes"] += (f.size_bytes or 0) + take_extra_bytes(made.id)
         else:
             counters["skipped"] += 1
         # Same yield as the top-level loop: a deep tree must not copy in one
@@ -384,7 +408,7 @@ class CopyService:
                     ok = await _copy_one_file(db, f, job.target_folder_id, job.target_workspace_id, user, rename=True)
                     if ok:
                         counters["files"] += 1
-                        counters["bytes"] += f.size_bytes or 0
+                        counters["bytes"] += (f.size_bytes or 0) + take_extra_bytes(ok.id)
                     else:
                         counters["skipped"] += 1
                     # Progress is committed as it goes, so a client polling
@@ -431,6 +455,10 @@ class CopyService:
                     for f in src_files:
                         f.is_trashed = True
                         f.trashed_at = now
+                        # A board takes its 할 일 documents with it, here as
+                        # everywhere else — they are never left behind alive
+                        # while the board they belong to is in the trash.
+                        await board_service.set_board_documents_trashed(db, f, True)
                         job.trashed_files += 1
                     for folder in src_folders:
                         await _set_folder_trash_recursive(db, folder, is_trashed=True, trashed_at=now)
