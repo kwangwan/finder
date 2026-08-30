@@ -9,7 +9,6 @@ import {
 } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import TaskRow from './TaskRow';
-import TaskDetailDrawer from './TaskDetailDrawer';
 import DigestSettingsModal from './DigestSettingsModal';
 import { Dropdown, DateRangeField, Toggle } from './controls';
 
@@ -60,7 +59,6 @@ export default function ScheduleExplorer({
   const [grouping, setGrouping] = useState('urgency');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsRefresh, setSettingsRefresh] = useState(0);
-  const [openTask, setOpenTask] = useState(null);
   const [busyId, setBusyId] = useState(null);
   // Who may be assigned differs per board (the shared workspace allows only
   // yourself), so it is fetched for the board a task actually belongs to.
@@ -164,7 +162,6 @@ export default function ScheduleExplorer({
           children: (t.children || []).map(apply),
         })),
       }));
-      setOpenTask((prev) => (prev && prev.id === task.id ? { ...prev, ...updated, board: prev.board } : prev));
     } catch (e) {
       await showAlert({ title: '저장하지 못했습니다', message: e.message, type: 'error' });
       load();
@@ -192,7 +189,6 @@ export default function ScheduleExplorer({
           .map((t) => ({ ...t, children: (t.children || []).filter((c) => c.id !== task.id) })),
         total: task.parent_task_id ? prev.total : prev.total - 1,
       }));
-      if (openTask?.id === task.id) setOpenTask(null);
     } catch (e) {
       await showAlert({ title: '삭제하지 못했습니다', message: e.message, type: 'error' });
     }
@@ -243,6 +239,20 @@ export default function ScheduleExplorer({
       </div>
     </div>
   );
+
+  // The 할 일's own document, opened as a document — the same window, the
+  // same editor, the same history as anything else written here.
+  const openDocument = (task) => {
+    if (!task.document_id) return;
+    onOpenBoard?.({
+      id: task.document_id,
+      name: task.name,
+      file_type: 'note',
+      is_markdown: true,
+      folder_id: task.board?.folder_id || null,
+      workspace_id: task.board?.workspace_id || null,
+    });
+  };
 
   const openBoard = async (task) => {
     if (!task.board?.id) return;
@@ -473,9 +483,8 @@ export default function ScheduleExplorer({
                           collapsed={collapsed.has(task.id)}
                           busy={busyId === task.id}
                           people={peopleByBoard[task.board?.id] || []}
-                          isOpen={openTask?.id === task.id}
                           onToggleCollapse={toggleCollapse}
-                          onOpen={(t) => setOpenTask(t)}
+                          onOpen={openDocument}
                           onPatch={patch}
                           onDelete={removeTask}
                           onAddSub={(t) => { setDraft({ fileId: t.file_id, parentTaskId: t.id }); setDraftName(''); }}
@@ -491,8 +500,7 @@ export default function ScheduleExplorer({
                             depth={1}
                             busy={busyId === child.id}
                             people={peopleByBoard[child.board?.id] || []}
-                            isOpen={openTask?.id === child.id}
-                            onOpen={(t) => setOpenTask(t)}
+                            onOpen={openDocument}
                             onPatch={patch}
                             onDelete={removeTask}
                           />
@@ -541,26 +549,6 @@ export default function ScheduleExplorer({
         onClose={() => { setSettingsOpen(false); setSettingsRefresh((n) => n + 1); }}
       />
 
-      {openTask && (
-        <TaskDetailDrawer
-          boardFile={{
-            id: openTask.file_id,
-            folder_id: openTask.board?.folder_id,
-            workspace_id: openTask.board?.workspace_id,
-          }}
-          task={openTask}
-          canWrite
-          assignableUsers={peopleByBoard[openTask.board?.id] || []}
-          onClose={() => setOpenTask(null)}
-          onSaved={(updated) => {
-            setData((prev) => ({
-              ...prev,
-              items: prev.items.map((t) => (t.id === updated.id ? { ...t, ...updated, board: t.board } : t)),
-            }));
-            setOpenTask((prev) => (prev ? { ...prev, ...updated, board: prev.board } : prev));
-          }}
-        />
-      )}
     </div>
   );
 }

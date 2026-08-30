@@ -124,6 +124,18 @@ async def init_db():
             # `is_admin` sat next to a workspace's own "admin" role and read as
             # the same thing. This one is service-wide, so it says so.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
+            # 일정 rebuilt: every 할 일 now owns a document, so the boards
+            # saved under the old shape have no documents to point at and are
+            # cleared out rather than half-migrated. Tasks and assignees go
+            # with the board file's own CASCADE.
+            "DELETE FROM kb_files WHERE file_type = 'board';",
+            "ALTER TABLE kb_board_tasks ADD COLUMN IF NOT EXISTS document_id UUID "
+            "REFERENCES kb_files(id) ON DELETE SET NULL;",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_board_task_document "
+            "ON kb_board_tasks (document_id) WHERE document_id IS NOT NULL;",
+            # The notes moved into that document, which keeps its own history.
+            "ALTER TABLE kb_board_tasks DROP COLUMN IF EXISTS detail;",
+            "DROP TABLE IF EXISTS kb_board_task_versions;",
             # Carry the old values over once, then drop the column so nothing
             # can keep writing to a flag nobody reads. Inside a DO block
             # because a plain UPDATE naming `is_admin` fails to parse once the
@@ -189,6 +201,36 @@ async def init_db():
                     await conn.execute(text(sql))
             except Exception as e:
                 print(f"[DB Migration Warning] {e}")
+
+        # What each document has attached, read out of the document itself.
+        # Runs every start: it only ever adds what the content already says,
+        # so it also repairs anything an older save path never recorded.
+        # Written with capturing groups rather than (?:…) because a colon in a
+        # text() statement is read as a bind parameter.
+        for attachment_pattern, group in (
+            ("/api/storage/(preview|download|presigned-download)/"
+             "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", 2),
+            ("/api/files/"
+             "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/download", 1),
+        ):
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(
+                        text("""
+                            INSERT INTO kb_file_links (id, document_id, target_file_id, created_at)
+                            SELECT uuid_generate_v4(), f.id, t.id, NOW()
+                            FROM kb_files f
+                            CROSS JOIN LATERAL (
+                                SELECT DISTINCT (regexp_matches(f.content, :pattern, 'g'))[:group] AS ref
+                            ) m
+                            JOIN kb_files t ON t.id = m.ref::uuid
+                            WHERE f.is_markdown = TRUE AND f.content IS NOT NULL AND t.id <> f.id
+                            ON CONFLICT (document_id, target_file_id) DO NOTHING;
+                        """.replace(":group", str(group))),
+                        {"pattern": attachment_pattern},
+                    )
+            except Exception as e:
+                print(f"[DB Migration Warning] Could not backfill document attachments: {e}")
 
         # Create HNSW index on embeddings if not exists
         try:

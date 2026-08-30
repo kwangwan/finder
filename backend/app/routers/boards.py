@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_approved_user
-from app.models import BoardTask, BoardTaskVersion, FileItem, Folder, User, Workspace, WorkspaceMember
+from app.models import BoardTask, FileItem, Folder, User, Workspace, WorkspaceMember
 from app.models.board import (
     BOARD_FILE_TYPE,
     PRIORITIES,
@@ -18,6 +18,7 @@ from app.models.board import (
     STATUS_LABELS,
 )
 from app.services import board_service
+from app.services import link_service
 from app.services import board_digest_service
 from app.services.email_service import email_service
 from app.services.access_service import access_service
@@ -32,7 +33,6 @@ class TaskCreate(BaseModel):
     status: Optional[str] = None
     start_date: Optional[date] = None
     due_date: Optional[date] = None
-    detail: Optional[str] = None
     assignee_ids: Optional[List[uuid.UUID]] = None
 
 
@@ -42,7 +42,6 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     start_date: Optional[date] = None
     due_date: Optional[date] = None
-    detail: Optional[str] = None
     assignee_ids: Optional[List[uuid.UUID]] = None
     position: Optional[int] = None
 
@@ -344,16 +343,16 @@ async def get_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
-    """One task with its notes — fetched separately so a board listing does not
-    carry every task's full detail."""
+    """One 할 일, with where its document lives."""
     board = await board_service.get_board(db, file_id)
     await _require_read(db, current_user, board)
     task = await db.get(BoardTask, task_id)
     if task is None or task.file_id != file_id:
-        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
     by_task = await board_service.assignees_by_task(db, [task.id])
     names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
-    return board_service.task_to_dict(task, names, by_task, board=board, include_detail=True)
+    documents = await board_service.documents_by_id(db, [task.document_id])
+    return board_service.task_to_dict(task, names, by_task, board=board, documents=documents)
 
 
 @router.post("/{file_id}/tasks", status_code=status.HTTP_201_CREATED)
@@ -379,15 +378,23 @@ async def create_task(
         raise HTTPException(status_code=400, detail="시작일이 종료일보다 뒤일 수 없습니다.")
 
     assignees = await board_service.assert_assignable(db, current_user, board.workspace_id, req.assignee_ids)
+    name = req.name.strip()
+    # Its document, made with it and in the same folder, so everything a
+    # document can do — writing, attaching, history, search — is what a 할
+    # 일's record is, rather than a second, poorer version of it.
+    document = board_service.new_task_document(board, name, current_user)
+    db.add(document)
+    await db.flush()
+
     task = BoardTask(
         file_id=file_id,
         parent_task_id=req.parent_task_id,
-        name=req.name.strip(),
+        name=name,
         priority=board_service.validate_priority(req.priority),
         status=board_service.validate_status(req.status),
         start_date=req.start_date,
         due_date=req.due_date,
-        detail=req.detail,
+        document_id=document.id,
         position=await board_service.next_position(db, file_id, req.parent_task_id),
         created_by=current_user.id,
         last_edited_by=current_user.id,
@@ -398,7 +405,7 @@ async def create_task(
     await db.commit()
     await db.refresh(task)
     names = await board_service.user_names(db, [task.created_by] + assignees)
-    return board_service.task_to_dict(task, names, {task.id: assignees}, include_detail=True)
+    return board_service.task_to_dict(task, names, {task.id: assignees}, documents={document.id: document})
 
 
 @router.put("/{file_id}/tasks/{task_id}")
@@ -416,8 +423,12 @@ async def update_task(
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
 
     sent = req.model_fields_set
+    document = await db.get(FileItem, task.document_id) if task.document_id else None
     if "name" in sent and req.name is not None:
         task.name = req.name.strip()
+        # The document is the 할 일, so it is not left under the old name.
+        if document is not None and document.name != task.name:
+            document.name = task.name
     if "priority" in sent:
         task.priority = board_service.validate_priority(req.priority)
     if "status" in sent:
@@ -428,12 +439,6 @@ async def update_task(
         task.start_date = req.start_date
     if "due_date" in sent:
         task.due_date = req.due_date
-    if "detail" in sent:
-        # The notes have their own history — a 할 일's record of what happened
-        # is worth as much as a document's, and just as easy to overwrite.
-        if (req.detail or "") != (task.detail or ""):
-            await board_service.record_detail_version(db, task, current_user.id, req.detail or "")
-        task.detail = req.detail
     if "position" in sent and req.position is not None:
         task.position = req.position
     if "assignee_ids" in sent:
@@ -448,104 +453,8 @@ async def update_task(
     await db.refresh(task)
     by_task = await board_service.assignees_by_task(db, [task.id])
     names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
-    return board_service.task_to_dict(task, names, by_task, include_detail=True)
-
-
-@router.get("/{file_id}/tasks/{task_id}/versions")
-async def list_task_versions(
-    file_id: uuid.UUID,
-    task_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user),
-):
-    """What the notes have said before, newest first."""
-    board = await board_service.get_board(db, file_id)
-    await _require_read(db, current_user, board)
-    task = await db.get(BoardTask, task_id)
-    if task is None or task.file_id != file_id:
-        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
-    return await board_service.list_detail_versions(db, task_id)
-
-
-@router.post("/{file_id}/tasks/{task_id}/versions/close", status_code=status.HTTP_204_NO_CONTENT)
-async def close_task_version(
-    file_id: uuid.UUID,
-    task_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user),
-):
-    """
-    End the current sitting of writing.
-
-    Sent when the 할 일 is closed. Without it, coming back an hour later would
-    still roll the same entry forward, and the state it was left in last time
-    would never become something to go back to.
-    """
-    board = await board_service.get_board(db, file_id)
-    await _require_write(db, current_user, board)
-    task = await db.get(BoardTask, task_id)
-    if task is None or task.file_id != file_id:
-        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
-    await board_service.close_detail_version(db, task_id)
-    await db.commit()
-
-
-@router.get("/{file_id}/tasks/{task_id}/versions/{version_id}")
-async def get_task_version(
-    file_id: uuid.UUID,
-    task_id: uuid.UUID,
-    version_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user),
-):
-    board = await board_service.get_board(db, file_id)
-    await _require_read(db, current_user, board)
-    version = await db.get(BoardTaskVersion, version_id)
-    if version is None or version.task_id != task_id:
-        raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다.")
-    task = await db.get(BoardTask, task_id)
-    if task is None or task.file_id != file_id:
-        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
-    names = await board_service.user_names(db, [version.edited_by])
-    return {
-        "id": str(version.id),
-        "created_at": version.created_at.isoformat() if version.created_at else None,
-        "editor_name": (names.get(version.edited_by) or {}).get("name"),
-        "is_open": version.is_open,
-        "content": version.content,
-    }
-
-
-@router.post("/{file_id}/tasks/{task_id}/versions/{version_id}/restore")
-async def restore_task_version(
-    file_id: uuid.UUID,
-    task_id: uuid.UUID,
-    version_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user),
-):
-    board = await board_service.get_board(db, file_id)
-    await _require_write(db, current_user, board)
-    task = await db.get(BoardTask, task_id)
-    if task is None or task.file_id != file_id:
-        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
-    version = await db.get(BoardTaskVersion, version_id)
-    if version is None or version.task_id != task_id:
-        raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다.")
-
-    # What is being replaced is kept first, so going back is itself undoable,
-    # and the restore starts a sitting of its own rather than being folded
-    # into whatever was open.
-    if (task.detail or "") != version.content:
-        await board_service.record_detail_version(db, task, current_user.id, task.detail or "")
-    await board_service.close_detail_version(db, task_id)
-    task.detail = version.content
-    task.last_edited_by = current_user.id
-    await db.commit()
-    await db.refresh(task)
-    by_task = await board_service.assignees_by_task(db, [task.id])
-    names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
-    return board_service.task_to_dict(task, names, by_task, board=board, include_detail=True)
+    documents = {document.id: document} if document is not None else {}
+    return board_service.task_to_dict(task, names, by_task, documents=documents)
 
 
 @router.put("/{file_id}/reorder")
@@ -594,21 +503,24 @@ async def delete_task(
     current_user: User = Depends(get_current_approved_user),
 ):
     """
-    Remove a task and its sub-items.
+    Remove a 할 일, its sub-items, and the documents they own.
 
-    Deleted outright rather than moved to the trash: a row on a board is not a
-    file, there is nowhere for it to sit, and the board it belongs to is itself
-    recoverable from the trash if the whole thing was a mistake.
+    The row itself is deleted outright — a row on a board is not a file and
+    has nowhere to sit — but its document goes to the trash, the same as any
+    other document deleted here, so a mistake is recoverable for as long as
+    the trash keeps it.
     """
     board = await board_service.get_board(db, file_id)
     await _require_write(db, current_user, board)
     task = await db.get(BoardTask, task_id)
     if task is None or task.file_id != file_id:
-        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
 
     children = (await db.execute(
         select(BoardTask).where(BoardTask.parent_task_id == task_id)
     )).scalars().all()
+    going = [task] + list(children)
+    await board_service.trash_task_documents(db, going, current_user)
     for child in children:
         await db.delete(child)
     await db.delete(task)

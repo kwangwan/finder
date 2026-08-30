@@ -11,6 +11,7 @@ from app.models import Folder, FileItem, User, WorkspaceMember
 from app.core.security import get_current_approved_user
 from app.services.access_service import access_service
 from app.services import favorite_service
+from app.services import board_service
 from app.services.s3_service import s3_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
@@ -56,9 +57,21 @@ async def _purge_file(db: AsyncSession, file_item: FileItem):
     immediately. This is the actual permanent-delete choke point every real
     deletion path (manual purge from trash, the 30-day auto-purge) goes
     through — a note's own delete button only soft-trashes it first.
-    enqueue_file also cleans up any images/video/files this note's editor
-    uploaded directly into its own content — see DeletionService's
-    _cleanup_note_embedded_media."""
+    Files attached to a document are not touched by deleting the document:
+    they can be attached to several, and each one is deleted from the folder
+    it lives in like any other file."""
+    # A board's 할 일 documents are owned by rows that cascade away with it,
+    # so they are purged here rather than left behind unreachable.
+    for document in await board_service.board_task_documents(db, file_item.id):
+        await deletion_service.enqueue_file(db, document)
+        await quota_service.record_storage_freed(
+            db=db,
+            workspace_id=document.workspace_id,
+            creator_id=document.created_by,
+            bytes_freed=document.size_bytes or 0,
+        )
+        await favorite_service.drop_favorites(db, favorite_service.FILE, [document.id])
+        await db.delete(document)
     await deletion_service.enqueue_file(db, file_item)
     await quota_service.record_storage_freed(
         db=db,

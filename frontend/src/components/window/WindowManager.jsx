@@ -82,6 +82,7 @@ export default function WindowManager({
           onUpdateWindowFile={updateWindowFile}
           onToggleFavorite={onToggleFavorite}
           onDeleteFile={onDeleteFile}
+          onOpenFile={openWindow}
           activeWorkspaceId={activeWorkspaceId}
           currentUser={currentUser}
         />

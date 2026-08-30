@@ -69,6 +69,7 @@ import {
   getSystemStats,
   uploadFileChunked,
   moveToTrashFile,
+  getFilesAttachedTo,
   restoreFile,
   moveToTrashFolder,
   restoreFolder,
@@ -1000,11 +1001,12 @@ export default function App() {
     const what = [];
     if (folderIds.length) what.push(`폴더 ${folderIds.length}개`);
     if (fileIds.length) what.push(`파일 ${fileIds.length}개`);
+    const warning = await attachmentWarning(fileIds);
     const confirmed = await showConfirm({
       title: folderIds.length ? '선택 항목 일괄 삭제' : '파일 일괄 삭제',
-      message: folderIds.length
+      message: (folderIds.length
         ? `선택한 ${what.join(', ')}를 휴지통으로 이동하시겠습니까?\n폴더 안의 파일·하위 폴더도 함께 이동되며, 30일 후 자동 영구 삭제됩니다.`
-        : `선택한 ${fileIds.length}개 파일을 휴지통으로 이동하시겠습니까?`,
+        : `선택한 ${fileIds.length}개 파일을 휴지통으로 이동하시겠습니까?`) + warning,
       confirmText: '삭제',
       danger: true,
     });
@@ -1584,10 +1586,38 @@ export default function App() {
     }
   };
 
+  /**
+   * What a deletion would break, in words, before it happens.
+   *
+   * A file can be attached to several documents, and those documents keep
+   * showing it. Deleting is still allowed — it is the person's file — but not
+   * silently: the documents holding it are named first, and the deletion is
+   * confirmed a second time.
+   */
+  const attachmentWarning = async (fileIds) => {
+    if (!fileIds.length) return '';
+    let byFile = {};
+    try {
+      byFile = await getFilesAttachedTo(fileIds);
+    } catch (e) {
+      return '';
+    }
+    const documents = new Map();
+    for (const rows of Object.values(byFile)) {
+      for (const doc of rows) documents.set(doc.id, doc);
+    }
+    if (documents.size === 0) return '';
+    const names = [...documents.values()].map((d) => d.name);
+    const shown = names.slice(0, 5).map((n) => `· ${n}`).join('\n');
+    const rest = names.length > 5 ? `\n· 외 ${names.length - 5}개` : '';
+    return `\n\n이 파일은 다음 문서에 첨부되어 있습니다:\n${shown}${rest}\n삭제하면 해당 문서에서 삭제된 첨부로 표시됩니다.`;
+  };
+
   const handleTrashFile = async (file, onConfirmed) => {
+    const warning = await attachmentWarning([file.id]);
     const confirmed = await showConfirm({
       title: '휴지통으로 이동',
-      message: `'${file.name}' 파일을 휴지통으로 이동하시겠습니까?\n휴지통에서 언제든 복구할 수 있으며 30일 후 자동 영구 삭제됩니다.`,
+      message: `'${file.name}' 파일을 휴지통으로 이동하시겠습니까?\n휴지통에서 언제든 복구할 수 있으며 30일 후 자동 영구 삭제됩니다.${warning}`,
       type: 'danger',
       confirmText: '휴지통으로 이동',
       cancelText: '취소'

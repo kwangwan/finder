@@ -1334,38 +1334,30 @@ export async function getBoard(fileId) {
   return res.json();
 }
 
+/**
+ * Everything a file is joined to: the documents holding it, what it holds,
+ * and the 할 일 it belongs to. One call so no view invents its own answer.
+ */
+export async function getFileLinks(fileId) {
+  const res = await fetch(`${API_BASE}/files/${fileId}/links`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('연결 정보를 불러오지 못했습니다.');
+  return res.json();
+}
+
+/** For several files at once — asked before a delete so it can name names. */
+export async function getFilesAttachedTo(fileIds) {
+  const res = await fetch(`${API_BASE}/files/links/attached-to`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ file_ids: fileIds }),
+  });
+  if (!res.ok) throw new Error('연결 정보를 불러오지 못했습니다.');
+  return res.json();
+}
+
 export async function getBoardTask(fileId, taskId) {
   const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('작업을 불러오지 못했습니다.');
-  return res.json();
-}
-
-export async function listBoardTaskVersions(fileId, taskId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions`, { headers: authHeaders() });
-  if (!res.ok) throw new Error('기록을 불러오지 못했습니다.');
-  return res.json();
-}
-
-export async function getBoardTaskVersion(fileId, taskId, versionId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions/${versionId}`, { headers: authHeaders() });
-  if (!res.ok) throw new Error('기록을 불러오지 못했습니다.');
-  return res.json();
-}
-
-export async function closeBoardTaskVersion(fileId, taskId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions/close`, {
-    method: 'POST',
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error('기록을 마무리하지 못했습니다.');
-}
-
-export async function restoreBoardTaskVersion(fileId, taskId, versionId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}/versions/${versionId}/restore`, {
-    method: 'POST',
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error('되돌리지 못했습니다.');
   return res.json();
 }
 

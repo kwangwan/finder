@@ -1,131 +1,129 @@
-import React, { useState, useEffect } from 'react';
-import { Search, FileText, X, Plus } from '../../utils/icons';
-import { listFiles } from '../../api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Search, FileText, X, Plus, Image as ImageIcon, Video, Music, Loader2,
+} from '../../utils/icons';
+import { listFiles, getThumbnailUrl } from '../../api';
 
-// Lets the user pick a file already stored elsewhere in the workspace and
-// insert a download-link card for it — distinct from BlockNote's own
-// image/video/file upload blocks, which upload a NEW file. This one refers
-// to an existing file the note doesn't own, so it's a plain download link +
-// folder shortcut, not a note-owned media block (see deletion_service.py's
-// _cleanup_note_embedded_media, which deliberately skips links in this
-// format when deleting a note).
-export default function AttachExistingFileModal({ isOpen, onClose, onInsertMarkdown }) {
+const KINDS = [
+  { key: 'all', label: '전체' },
+  { key: 'image', label: '이미지' },
+  { key: 'video', label: '동영상' },
+  { key: 'audio', label: '오디오' },
+  { key: 'other', label: '문서 · 기타' },
+];
+
+function kindOf(file) {
+  if (file.file_type === 'image' || file.file_type === 'video' || file.file_type === 'audio') return file.file_type;
+  return 'other';
+}
+
+function iconFor(file) {
+  if (file.file_type === 'image') return <ImageIcon size={16} color="var(--accent-primary)" />;
+  if (file.file_type === 'video') return <Video size={16} color="var(--accent-primary)" />;
+  if (file.file_type === 'audio') return <Music size={16} color="var(--accent-primary)" />;
+  return <FileText size={16} color="var(--accent-primary)" />;
+}
+
+/**
+ * Attach a file that is already stored here.
+ *
+ * It goes in as what it is — a picture as a picture, a video as a player, a
+ * document as a file card — rather than as a download link for everything.
+ * Nothing is uploaded or copied: the same file can be attached to as many
+ * documents as it belongs in, and each document keeps its own link to it.
+ */
+export default function AttachExistingFileModal({ isOpen, onClose, onInsertFile, workspaceId }) {
   const [files, setFiles] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [kind, setKind] = useState('all');
 
   useEffect(() => {
-    if (isOpen) {
-      listFiles().then(setFiles).catch(console.error);
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    setIsLoading(true);
+    setSearchTerm('');
+    listFiles(workspaceId ? { workspace_id: workspaceId } : undefined)
+      .then((res) => setFiles(Array.isArray(res) ? res : (res?.items || [])))
+      .catch(() => setFiles([]))
+      .finally(() => setIsLoading(false));
+  }, [isOpen, workspaceId]);
+
+  const shown = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return files
+      // A board has no content to embed, and a document attaching itself is
+      // a loop nobody means.
+      .filter((f) => f.file_type !== 'board' && !f.is_markdown && !f.is_trashed)
+      .filter((f) => (kind === 'all' ? true : kindOf(f) === kind))
+      .filter((f) => (term ? (f.name || '').toLowerCase().includes(term) : true))
+      .slice(0, 200);
+  }, [files, searchTerm, kind]);
 
   if (!isOpen) return null;
 
-  const handleInsertFile = (file) => {
-    const folderId = file.folder_id || 'root';
-    const snippet = `\n\n> 📦 **첨부 파일:** [📥 ${file.name} 다운로드](/api/storage/presigned-download/${file.id}) | [📁 저장된 폴더 바로가기](folder:${folderId})\n\n`;
-    onInsertMarkdown(snippet);
-    onClose();
-  };
-
-  const filteredFiles = files.filter(f =>
-    f.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 540 }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: '1px solid var(--border-subtle)',
-          padding: '0.9rem 1.25rem'
-        }}>
-          <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
-            보관함 파일 첨부
-          </span>
-          <button className="btn-icon" onClick={onClose}>
-            <X size={18} />
-          </button>
+  return createPortal(
+    <div className="modal-overlay" style={{ zIndex: 1500 }} onClick={onClose}>
+      <div className="modal-content modal-self-padded at-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="at-head">
+          <span className="at-title">파일 첨부</span>
+          <button type="button" className="btn-icon" onClick={onClose} title="닫기"><X size={17} /></button>
         </div>
 
-        <div style={{ padding: '1.25rem' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            background: 'var(--bg-tertiary)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-md)',
-            padding: '0.45rem 0.75rem',
-            marginBottom: '1rem'
-          }}>
+        <div className="at-tools">
+          <span className="at-search">
             <Search size={15} color="var(--text-muted)" />
             <input
               type="text"
               autoFocus
-              placeholder="삽입할 파일 검색..."
+              placeholder="이름으로 찾기"
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: 'var(--text-primary)',
-                fontSize: '0.875rem',
-                width: '100%'
-              }}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
-          </div>
+          </span>
+          <span className="at-kinds">
+            {KINDS.map((k) => (
+              <button
+                key={k.key}
+                type="button"
+                className={`at-kind ${kind === k.key ? 'on' : ''}`}
+                onClick={() => setKind(k.key)}
+              >
+                {k.label}
+              </button>
+            ))}
+          </span>
+        </div>
 
-          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-            {filteredFiles.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                첨부 가능한 파일이 없습니다.
-              </div>
-            ) : (
-              filteredFiles.map(f => (
-                <div
-                  key={f.id}
-                  onClick={() => handleInsertFile(f)}
-                  style={{
-                    padding: '0.65rem 0.85rem',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--bg-tertiary)',
-                    marginBottom: '0.4rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    border: '1px solid transparent',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <FileText size={16} color="var(--accent-primary)" />
-                    <div>
-                      <div style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {f.name}
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                        {f.file_type} • {Math.round(f.size_bytes / 1024)} KB
-                      </div>
-                    </div>
-                  </div>
-
-                  <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}>
-                    <Plus size={13} />
-                    <span>삽입</span>
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
+        <div className="at-list">
+          {isLoading ? (
+            <div className="at-empty"><Loader2 size={16} className="spin" /><span>불러오는 중...</span></div>
+          ) : shown.length === 0 ? (
+            <div className="at-empty"><span>첨부할 수 있는 파일이 없습니다.</span></div>
+          ) : shown.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className="at-item"
+              onClick={() => { onInsertFile?.(f); onClose(); }}
+            >
+              <span className="at-item-icon">
+                {f.file_type === 'image' && f.thumbnail_s3_key
+                  ? <img src={getThumbnailUrl(f.id)} alt="" />
+                  : iconFor(f)}
+              </span>
+              <span className="at-item-body">
+                <span className="at-item-name">{f.name}</span>
+                <span className="at-item-meta">
+                  {f.file_type} · {Math.max(1, Math.round((f.size_bytes || 0) / 1024))} KB
+                </span>
+              </span>
+              <span className="at-item-add"><Plus size={13} /><span>첨부</span></span>
+            </button>
+          ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

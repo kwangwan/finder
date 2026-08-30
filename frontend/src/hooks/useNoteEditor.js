@@ -624,10 +624,26 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     scheduleIdleCheckpoint();
   };
 
-  const handleInsertAttachedFile = (snippet) => {
-    const blocks = editor.tryParseMarkdownToBlocks(snippet);
+  /**
+   * Attach a file that is already in the workspace.
+   *
+   * Inserted as the block its type deserves — a picture as a picture, a video
+   * as a player — rather than as a download link for everything, which is
+   * what "첨부" used to mean here. The same file can be attached to as many
+   * documents as it is useful in; nothing is copied and nothing is moved.
+   */
+  const handleInsertExistingFile = (picked) => {
+    if (!picked?.id) return;
+    const url = getMediaPreviewUrl(picked.id);
+    const type = picked.file_type === 'image' ? 'image'
+      : picked.file_type === 'video' ? 'video'
+        : picked.file_type === 'audio' ? 'audio' : 'file';
     const cursor = editor.getTextCursorPosition();
-    editor.insertBlocks(blocks, cursor.block, 'after');
+    editor.insertBlocks(
+      [{ type, props: type === 'video' ? { url } : { url, name: picked.name } }],
+      cursor.block,
+      'after',
+    );
     handleEditorChange();
   };
 
@@ -681,7 +697,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     setIsAttachModalOpen,
     isHistoryModalOpen,
     setIsHistoryModalOpen,
-    handleInsertAttachedFile,
+    handleInsertExistingFile,
     handleVersionRestored,
     handleExportMarkdown,
     handleExportPdf

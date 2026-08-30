@@ -5,20 +5,18 @@ import {
 } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import TaskRow from './TaskRow';
-import TaskDetailDrawer from './TaskDetailDrawer';
 
 export {
   PRIORITIES, STATUSES, dueTone, remainingText, periodText, shortStamp, fullStamp,
   initialOf, colorForName, Avatar, PillSelect,
 } from './TaskRow';
 
-export default function BoardPane({ file, onDirty, onRenamed }) {
+export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument }) {
   const { showConfirm, showAlert } = useDialog();
   const [board, setBoard] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [collapsed, setCollapsed] = useState(() => new Set());
-  const [openTaskId, setOpenTaskId] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   // `null` means the row being typed sits at the end of the board; a task id
@@ -131,7 +129,6 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
         ...prev,
         tasks: prev.tasks.filter((t) => t.id !== task.id && t.parent_task_id !== task.id),
       }));
-      if (openTaskId === task.id) setOpenTaskId(null);
       onDirty?.();
     } catch (e) {
       await showAlert({ title: '삭제하지 못했습니다', message: e.message, type: 'error' });
@@ -243,6 +240,21 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
     </div>
   );
 
+  // A 할 일 is its document: opening one opens that document in a window of
+  // its own, with everything a document can do, rather than a smaller editor
+  // built into the board.
+  const openDocument = (task) => {
+    if (!task.document_id) return;
+    onOpenDocument?.({
+      id: task.document_id,
+      name: task.name,
+      file_type: 'note',
+      is_markdown: true,
+      folder_id: file.folder_id,
+      workspace_id: file.workspace_id,
+    });
+  };
+
   const renderTask = (task, depth) => {
     const kids = childrenOf.get(task.id) || [];
     const isCollapsed = collapsed.has(task.id);
@@ -256,9 +268,8 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
           canWrite={canWrite}
           busy={busyId === task.id}
           people={people}
-          isOpen={openTaskId === task.id}
           onToggleCollapse={toggleCollapse}
-          onOpen={(t) => setOpenTaskId(t.id)}
+          onOpen={openDocument}
           onPatch={patch}
           onDelete={removeTask}
           onAddSub={depth === 0 ? (t) => { setDraftUnder(t.id); setDraftName(''); } : undefined}
@@ -275,7 +286,6 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
   if (isLoading) return <div className="bd-empty"><Loader2 size={18} className="spin" /><span>불러오는 중...</span></div>;
   if (error) return <div className="bd-empty"><span>{error}</span></div>;
 
-  const openTask = tasks.find((t) => t.id === openTaskId) || null;
   const doneCount = tasks.filter((t) => t.status === 'done').length;
   // A flat total counted a sub-item as another 할 일, so a board of two things
   // with four steps each read as ten.
@@ -339,22 +349,6 @@ export default function BoardPane({ file, onDirty, onRenamed }) {
         {!canWrite && <div className="bd-readonly">읽기 전용입니다. 이 폴더에 쓰기 권한이 없습니다.</div>}
       </div>
 
-      {openTask && (
-        <TaskDetailDrawer
-          boardFile={file}
-          task={openTask}
-          canWrite={canWrite}
-          assignableUsers={people}
-          onClose={() => setOpenTaskId(null)}
-          onSaved={(updated) => {
-            setBoard((prev) => ({
-              ...prev,
-              tasks: prev.tasks.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)),
-            }));
-            onDirty?.();
-          }}
-        />
-      )}
     </div>
   );
 }

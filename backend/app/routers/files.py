@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, or_, and_, desc, asc, func
 import urllib.parse
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from app.core.database import get_db
 from app.models import CopyJob, DocumentChunk, FileItem, FileVersion, Folder, User, WorkspaceMember
 from app.core.security import get_current_approved_user
@@ -27,6 +28,8 @@ from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services import shared_policy_service
 from app.services import favorite_service
+from app.services import link_service
+from app.services import board_service
 from app.services import folder_limit_service
 from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
@@ -123,6 +126,10 @@ def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, dow
     resp.creator_name = creator_name
     resp.last_editor_name = last_editor_name
     return resp
+
+class AttachedToRequest(BaseModel):
+    file_ids: List[uuid.UUID] = Field(default_factory=list, max_length=500)
+
 
 @router.get("", response_model=Union[PagedFileResponse, List[FileResponse]])
 async def list_files(
@@ -497,6 +504,104 @@ async def get_file_detail(
         is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
     )
 
+def _link_row(item: FileItem) -> dict:
+    return {
+        "id": str(item.id),
+        "name": item.name,
+        "file_type": item.file_type,
+        "is_markdown": item.is_markdown,
+        "is_trashed": item.is_trashed,
+        "folder_id": str(item.folder_id) if item.folder_id else None,
+        "workspace_id": str(item.workspace_id) if item.workspace_id else None,
+    }
+
+
+@router.get("/{file_id}/links")
+async def file_links(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Everything this file is joined to.
+
+    One call, both directions: the documents that have this file attached, the
+    files this document has attached and what state each is in, and the 할 일
+    this document belongs to if it is one's. Every view that has to show a
+    connection — the file window, the document window, the delete warning —
+    reads the same answer, so they cannot disagree.
+    """
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+    file_item = await db.get(FileItem, file_id)
+    if not file_item:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    attached_to = [_link_row(d) for d in await link_service.documents_referencing(db, file_id)]
+
+    attachments = []
+    if file_item.is_markdown:
+        referenced = link_service.referenced_file_ids(file_item.content)
+        referenced.discard(file_item.id)
+        alive = {
+            f.id: f for f in (await db.execute(
+                select(FileItem).where(FileItem.id.in_(referenced))
+            )).scalars().all()
+        } if referenced else {}
+        for ref_id in referenced:
+            found = alive.get(ref_id)
+            if found is None:
+                # Deleted for good. Said plainly rather than left as a blank
+                # space in the document.
+                attachments.append({
+                    "id": str(ref_id), "name": None, "file_type": None,
+                    "is_markdown": False, "is_trashed": False, "state": "deleted",
+                    "folder_id": None, "workspace_id": None,
+                })
+            else:
+                row = _link_row(found)
+                row["state"] = "trashed" if found.is_trashed else "ok"
+                attachments.append(row)
+        attachments.sort(key=lambda a: (a["state"] != "ok", (a["name"] or "")))
+
+    task = await link_service.owning_task(db, file_id)
+    board_task = None
+    if task is not None:
+        board = await db.get(FileItem, task.file_id)
+        board_task = {
+            "task_id": str(task.id),
+            "task_name": task.name,
+            "board_id": str(task.file_id),
+            "board_name": board.name if board else None,
+            "board_folder_id": str(board.folder_id) if board and board.folder_id else None,
+            "board_workspace_id": str(board.workspace_id) if board and board.workspace_id else None,
+        }
+
+    return {
+        "file_id": str(file_id),
+        "attached_to": attached_to,
+        "attachments": attachments,
+        "board_task": board_task,
+    }
+
+
+@router.post("/links/attached-to")
+async def files_attached_to(
+    req: AttachedToRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    For a set of files, which documents hold each — asked before deleting, so
+    the warning can name them instead of saying "something may break".
+    """
+    by_file = await link_service.documents_referencing_many(db, req.file_ids)
+    return {
+        str(file_id): [_link_row(d) for d in documents]
+        for file_id, documents in by_file.items()
+    }
+
+
 @router.post("/notes", response_model=FileDetailResponse, status_code=status.HTTP_201_CREATED)
 async def create_markdown_note(
     req: NoteCreate, 
@@ -543,6 +648,8 @@ async def create_markdown_note(
         tags=req.tags or []
     )
     db.add(file_item)
+    await db.flush()
+    await link_service.sync_document_links(db, file_item)
     await db.commit()
     await db.refresh(file_item)
 
@@ -648,6 +755,16 @@ async def update_markdown_note(
 
         if content_changed:
             await _roll_open_version(db, file_item, old_content, old_name, old_last_edited_by)
+            # What this document has attached is whatever it now points at —
+            # attaching and detaching are content changes and nothing else.
+            await link_service.sync_document_links(db, file_item)
+
+        # A 할 일's document is the 할 일: renaming one renames the other, so
+        # the board never shows a name the document has stopped using.
+        if req.name is not None and req.name != old_name:
+            task = await link_service.owning_task(db, file_item.id)
+            if task is not None:
+                task.name = file_item.name
 
         try:
             await db.commit()
@@ -815,6 +932,9 @@ async def restore_file_version(
     file_item.content = version.content
     file_item.size_bytes = new_size
     file_item.last_edited_by = current_user.id
+    # Going back to an older version puts back what it had attached, and drops
+    # what was attached after it.
+    await link_service.sync_document_links(db, file_item)
     await db.commit()
     await db.refresh(file_item)
 
@@ -946,6 +1066,30 @@ async def rename_file(
     await db.refresh(file_item)
     return _to_file_response(file_item)
 
+async def _refuse_if_task_document(db: AsyncSession, file_items) -> None:
+    """
+    A 할 일's document is deleted from the 할 일, never from the document.
+
+    Otherwise a board could be left with rows pointing at nothing, and the one
+    place that knows the document is part of something else — the board — would
+    never have been asked. Checked for the whole batch before anything is
+    written, so a mixed selection is refused as a whole rather than half done.
+    """
+    items = [f for f in file_items if f is not None]
+    owned = await link_service.owning_tasks(db, [f.id for f in items])
+    if not owned:
+        return
+    names = [f.name for f in items if f.id in owned]
+    shown = ", ".join(names[:3]) + ("…" if len(names) > 3 else "")
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"{shown}은(는) 일정의 할 일에 연결된 문서입니다. "
+            "일정에서 해당 할 일을 삭제하면 문서도 함께 삭제됩니다."
+        ),
+    )
+
+
 @router.put("/{file_id}/trash", response_model=FileResponse)
 async def trash_file(
     file_id: uuid.UUID,
@@ -960,9 +1104,13 @@ async def trash_file(
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
+    await _refuse_if_task_document(db, [file_item])
 
     file_item.is_trashed = True
     file_item.trashed_at = datetime.now(timezone.utc)
+    # A board takes its 할 일 documents with it: they belong to rows that are
+    # about to be out of reach, and they cannot be trashed on their own.
+    await board_service.set_board_documents_trashed(db, file_item, True)
     await db.commit()
     await db.refresh(file_item)
     # The notice says this can happen without warning, which is the honest
@@ -993,6 +1141,7 @@ async def restore_file(
 
     file_item.is_trashed = False
     file_item.trashed_at = None
+    await board_service.set_board_documents_trashed(db, file_item, False)
     await db.commit()
     await db.refresh(file_item)
     return _to_file_response(file_item)
@@ -1011,11 +1160,24 @@ async def delete_file(
     if not file_item:
         raise HTTPException(status_code=404, detail="File not found")
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
+    await _refuse_if_task_document(db, [file_item])
 
-    # enqueue_file also cleans up any images/video/files this note's editor
-    # uploaded directly into its own content — see DeletionService's
-    # _cleanup_note_embedded_media.
+    # Files attached to this document are left alone — they can be attached to
+    # other documents too, and they live in a folder of their own. Only this
+    # document's link rows go, which the foreign key does.
     await deletion_service.enqueue_file(db, file_item)
+    # A board's 할 일 documents go with it: the rows that own them cascade away
+    # with the board, and a document nobody owns could never be deleted after.
+    for document in await board_service.board_task_documents(db, file_item.id):
+        await deletion_service.enqueue_file(db, document)
+        await quota_service.record_storage_freed(
+            db=db,
+            workspace_id=document.workspace_id,
+            creator_id=document.created_by,
+            bytes_freed=document.size_bytes or 0,
+        )
+        await favorite_service.drop_favorites(db, favorite_service.FILE, [document.id])
+        await db.delete(document)
 
     # Reclaim storage quota from workspace owner immediately
     await quota_service.record_storage_freed(

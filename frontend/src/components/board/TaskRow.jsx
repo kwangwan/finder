@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import {
-  Plus, Trash2, ChevronRight, ChevronDown, Calendar, GripVertical, Check, MessageSquare,
+  Plus, Trash2, ChevronRight, ChevronDown, Calendar, GripVertical, Check, FileText,
   ExternalLink, FolderOpen,
 } from '../../utils/icons';
 import { DateRangePicker, Popover } from './controls';
@@ -221,21 +221,25 @@ export default function TaskRow({
             {childCount ? (collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />) : null}
           </button>
         ) : <span className="bd-twisty is-empty" />}
-        <button type="button" className="bd-name" onClick={() => onOpen?.(task)} title={task.name}>
+        <button
+          type="button"
+          className="bd-name"
+          onClick={() => onOpen?.(task)}
+          title={`${task.name} — 이 할 일의 문서 열기`}
+        >
           {task.name}
         </button>
         {childCount > 0 && <span className="bd-subcount" title={`하위 할 일 ${childCount}개`}>{childCount}</span>}
 
-        {/* Always here, filled once there is something written. The editor was
-            only reachable by clicking the name, which nothing said would open
-            it — so it read as a missing feature rather than a hidden one. */}
+        {/* Every 할 일 has a document. Filled in once something is written in
+            it, so a glance down the column says which ones have a record. */}
         <button
           type="button"
           className={`bd-note ${task.has_detail ? 'has' : ''}`}
           onClick={() => onOpen?.(task)}
-          title={task.has_detail ? '기록 열기' : '기록 남기기'}
+          title={task.has_detail ? '이 할 일의 문서 열기' : '이 할 일의 문서에 기록 남기기'}
         >
-          <MessageSquare size={12} />
+          <FileText size={12} />
         </button>
 
         {canWrite && depth === 0 && onAddSub && (

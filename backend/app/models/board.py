@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index,
+    Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, Index,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -65,9 +65,12 @@ class BoardTask(Base):
     # makes it shift across time zones for no reason.
     start_date = Column(Date, nullable=True)
     due_date = Column(Date, nullable=True)
-    # The task's own notes, as markdown — the same format the document editor
-    # reads and writes, so the same editor renders it.
-    detail = Column(Text, nullable=True)
+    # Every 할 일 has a document of its own, created with it. The notes, the
+    # attachments, the version history and everything else a document can do
+    # are then simply what a document does — none of it rebuilt here. Deleting
+    # the 할 일 takes the document with it, and the document cannot be deleted
+    # on its own, so this never points at nothing while the 할 일 is alive.
+    document_id = Column(UUID(as_uuid=True), ForeignKey("kb_files.id", ondelete="SET NULL"), nullable=True, unique=True)
     # Manual order within a parent. Sparse, so a row can be dropped between two
     # others without renumbering the rest.
     position = Column(Integer, nullable=False, default=0)
@@ -111,29 +114,3 @@ class BoardTaskAssignee(Base):
         UniqueConstraint("task_id", "user_id", name="uq_board_task_assignee"),
     )
 
-
-class BoardTaskVersion(Base):
-    """
-    A past state of one 할 일's notes.
-
-    The notes are edited the same way a document is — a debounced autosave
-    every second or so of typing — so one row per save would be thousands of
-    near-identical rows and a history nobody could read. `is_open` marks the
-    row that the current sitting is still rolling forward in place: the same
-    person continuing to type updates it, and it is closed once somebody else
-    edits or the sitting goes quiet, at which point it becomes a permanent
-    entry. This mirrors kb_file_versions, for the same reason.
-    """
-
-    __tablename__ = "kb_board_task_versions"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("kb_board_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    content = Column(Text, nullable=False)
-    edited_by = Column(UUID(as_uuid=True), ForeignKey("kb_users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
-    is_open = Column(Boolean, nullable=False, default=False)
-
-    __table_args__ = (
-        Index("ix_board_task_version_task_time", "task_id", "created_at"),
-    )

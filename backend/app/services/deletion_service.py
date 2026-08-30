@@ -1,7 +1,5 @@
 import asyncio
 import logging
-import re
-import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi.concurrency import run_in_threadpool
@@ -15,52 +13,20 @@ from app.services.quota_service import quota_service
 
 logger = logging.getLogger("deletion_service")
 
-# A note's content only ever links to a FileItem it "owns" (uploaded through
-# the editor's own image/video/audio/file block, not an existing file
-# attached by reference) via this exact preview-URL shape — see
-# getMediaPreviewUrl in the frontend.
-NOTE_MEDIA_FILE_ID_RE = re.compile(r"/api/storage/preview/([0-9a-fA-F-]{36})")
+# Deleting a document used to delete every file its editor had uploaded into
+# it. That was wrong once a file could be attached to more than one document:
+# the same file is now shared, and throwing it away with one document would
+# empty the others. A document's deletion takes only its own link rows with
+# it (kb_file_links CASCADEs on document_id); the files stay where they are,
+# in the folder, and are deleted from there like anything else.
 
 class DeletionService:
     def __init__(self):
         self._stop_event = asyncio.Event()
         self._worker_task: Optional[asyncio.Task] = None
 
-    async def _cleanup_note_embedded_media(self, db: AsyncSession, file_item: FileItem):
-        """A note's editor uploads images/video/audio/generic files directly
-        into its own content as regular FileItem rows (see uploadNoteImage on
-        the frontend) — nothing else cascades those away, so without this
-        they'd become orphaned rows that still count against quota. Only
-        files referenced this way (uploaded through the note) are cleaned up
-        — a file attached by reference to something uploaded elsewhere is
-        left alone, since the note doesn't own it. Called from enqueue_file
-        itself so every deletion path (a note's own delete, a trash purge, a
-        whole folder being purged) gets this for free."""
-        if not (file_item.is_markdown and file_item.content):
-            return
-        referenced_ids = set(NOTE_MEDIA_FILE_ID_RE.findall(file_item.content))
-        for ref_id_str in referenced_ids:
-            try:
-                ref_id = uuid.UUID(ref_id_str)
-            except ValueError:
-                continue
-            if ref_id == file_item.id:
-                continue
-            ref_file = await db.get(FileItem, ref_id)
-            if not ref_file or ref_file.is_trashed:
-                continue
-            await self.enqueue_file(db, ref_file)
-            await quota_service.record_storage_freed(
-                db=db,
-                workspace_id=ref_file.workspace_id,
-                creator_id=ref_file.created_by,
-                bytes_freed=ref_file.size_bytes or 0
-            )
-            await db.delete(ref_file)
-
     async def enqueue_file(self, db: AsyncSession, file_item: FileItem) -> DeletionQueueItem:
         """Enqueue a single file for asynchronous permanent deletion."""
-        await self._cleanup_note_embedded_media(db, file_item)
         queue_item = DeletionQueueItem(
             s3_key=file_item.s3_key,
             thumbnail_s3_key=file_item.thumbnail_s3_key,
@@ -90,11 +56,8 @@ class DeletionService:
         files_res = await db.execute(select(FileItem).where(FileItem.folder_id == folder.id))
         files = files_res.scalars().all()
         for f in files:
-            # A note earlier in this same list may have already enqueued+
-            # deleted this exact file via _cleanup_note_embedded_media (e.g.
-            # an image sitting in the same folder as the note that embeds
-            # it) — inspecting the object's session state avoids double-
-            # freeing its quota or re-deleting an already-removed row.
+            # Defensive: another path in the same transaction may already have
+            # removed this row, and re-deleting it would double-free its quota.
             if sql_inspect(f).deleted:
                 continue
             await self.enqueue_file(db, f)

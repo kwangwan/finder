@@ -1,15 +1,14 @@
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Iterable, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, and_, case, delete, func, select
+from sqlalchemy import Integer, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     BoardTask,
     BoardTaskAssignee,
-    BoardTaskVersion,
     FileItem,
     User,
     Workspace,
@@ -194,8 +193,9 @@ def task_to_dict(
     names: dict,
     assignee_ids: Optional[dict] = None,
     board: Optional[FileItem] = None,
-    include_detail: bool = False,
+    documents: Optional[dict] = None,
 ) -> dict:
+    document = (documents or {}).get(task.document_id)
     today = date.today()
     data = {
         "id": str(task.id),
@@ -212,9 +212,10 @@ def task_to_dict(
         # mean, instead of each one re-deriving it from a date string.
         "days_left": (task.due_date - today).days if task.due_date else None,
         "position": task.position,
-        # Whether there is anything written in the notes, so a row can say so
-        # without the listing carrying every task's full text.
-        "has_detail": bool((task.detail or "").strip()),
+        # The document this 할 일 opens, and whether anything has been written
+        # in it yet — so a row can say so without carrying the text.
+        "document_id": str(task.document_id) if task.document_id else None,
+        "has_detail": bool(document is not None and (document.content or "").strip()),
         "assignees": [
             {
                 "id": str(uid),
@@ -229,8 +230,6 @@ def task_to_dict(
         "updated_at": task.updated_at,
         "last_edited_by_name": (names.get(task.last_edited_by) or {}).get("name"),
     }
-    if include_detail:
-        data["detail"] = task.detail or ""
     if board is not None:
         data["board"] = {
             "id": str(board.id),
@@ -241,106 +240,89 @@ def task_to_dict(
     return data
 
 
-# One sitting of writing, rather than one row per autosave. Past this much
-# quiet, the next edit is a new entry in the history.
-DETAIL_ROLLUP = timedelta(minutes=10)
-# Enough to walk back through a day's work without the list becoming its own
-# archive to sift through.
-DETAIL_VERSIONS_KEPT = 40
+TASK_DOCUMENT_TYPE = "note"
 
 
-async def record_detail_version(db: AsyncSession, task: BoardTask, editor_id, content: str) -> None:
+def new_task_document(board: FileItem, name: str, user: User) -> FileItem:
     """
-    Keep a history of a 할 일's notes.
+    The document a 할 일 owns, in the folder the board is in.
 
-    Called with the notes as they now stand, before the change is committed.
-    The current sitting's row is rolled forward in place; a different person,
-    or a long enough gap, closes it and starts a new one.
+    An ordinary document in every respect — it is listed, searched, embedded
+    and versioned like any other. The only thing it does not do is get deleted
+    on its own; that happens from the 할 일 it belongs to.
     """
+    return FileItem(
+        name=name,
+        file_type=TASK_DOCUMENT_TYPE,
+        mime_type="text/markdown",
+        workspace_id=board.workspace_id,
+        folder_id=board.folder_id,
+        created_by=user.id,
+        last_edited_by=user.id,
+        is_markdown=True,
+        size_bytes=0,
+        content="",
+    )
+
+
+async def documents_by_id(db: AsyncSession, ids: Iterable) -> dict:
+    wanted = [i for i in set(ids) if i]
+    if not wanted:
+        return {}
+    rows = (await db.execute(select(FileItem).where(FileItem.id.in_(wanted)))).scalars().all()
+    return {row.id: row for row in rows}
+
+
+async def board_task_documents(db: AsyncSession, board_id) -> List[FileItem]:
+    """Every document owned by a 할 일 on this board."""
+    return list((await db.execute(
+        select(FileItem)
+        .join(BoardTask, BoardTask.document_id == FileItem.id)
+        .where(BoardTask.file_id == board_id)
+    )).scalars().all())
+
+
+async def set_board_documents_trashed(db: AsyncSession, board: FileItem, trashed: bool) -> int:
+    """
+    A board's 할 일 documents follow the board into the trash and back out.
+
+    They cannot be thrown away on their own, so leaving them behind would
+    leave documents nobody can reach and nobody can delete.
+    """
+    if board.file_type != BOARD_FILE_TYPE:
+        return 0
+    documents = await board_task_documents(db, board.id)
     now = datetime.now(timezone.utc)
-    open_row = (await db.execute(
-        select(BoardTaskVersion)
-        .where(BoardTaskVersion.task_id == task.id, BoardTaskVersion.is_open.is_(True))
-        .order_by(BoardTaskVersion.created_at.desc())
-        .limit(1)
-    )).scalars().first()
-
-    if open_row is not None:
-        started = open_row.created_at
-        if started is not None and started.tzinfo is None:
-            started = started.replace(tzinfo=timezone.utc)
-        if open_row.edited_by == editor_id and started is not None and now - started < DETAIL_ROLLUP:
-            open_row.content = content
-            open_row.created_at = now
-            return
-        open_row.is_open = False
-    elif (task.detail or "").strip() and not await has_detail_versions(db, task.id):
-        # Nothing has ever been recorded for this 할 일, so what is written
-        # right now would be lost the moment it is overwritten. Kept first, as
-        # a closed entry, so the state before the very first change is one of
-        # the things that can be gone back to. Only on the very first record —
-        # after that, the previous sitting's own entry already holds it.
-        db.add(BoardTaskVersion(
-            task_id=task.id,
-            content=task.detail,
-            edited_by=task.last_edited_by or editor_id,
-            created_at=task.updated_at or now,
-            is_open=False,
-        ))
-
-    db.add(BoardTaskVersion(
-        task_id=task.id, content=content, edited_by=editor_id, created_at=now, is_open=True,
-    ))
-    await prune_detail_versions(db, task.id)
+    changed = 0
+    for document in documents:
+        if document.is_trashed == trashed:
+            continue
+        document.is_trashed = trashed
+        document.trashed_at = now if trashed else None
+        changed += 1
+    return changed
 
 
-async def has_detail_versions(db: AsyncSession, task_id: uuid.UUID) -> bool:
-    return (await db.execute(
-        select(BoardTaskVersion.id).where(BoardTaskVersion.task_id == task_id).limit(1)
-    )).scalars().first() is not None
+async def trash_task_documents(db: AsyncSession, tasks: Iterable[BoardTask], user: Optional[User] = None) -> int:
+    """
+    Send the documents of these 할 일 to the trash.
 
-
-async def close_detail_version(db: AsyncSession, task_id: uuid.UUID) -> None:
-    """End the current sitting, so the next edit starts its own entry."""
-    rows = (await db.execute(
-        select(BoardTaskVersion).where(
-            BoardTaskVersion.task_id == task_id, BoardTaskVersion.is_open.is_(True),
-        )
+    Not deleted outright: the document is where the work was written, and a
+    row removed by accident should not take it with it for good.
+    """
+    ids = [t.document_id for t in tasks if t.document_id]
+    if not ids:
+        return 0
+    documents = (await db.execute(
+        select(FileItem).where(and_(FileItem.id.in_(ids), FileItem.is_trashed.is_(False)))
     )).scalars().all()
-    for row in rows:
-        row.is_open = False
-
-
-async def prune_detail_versions(db: AsyncSession, task_id: uuid.UUID) -> None:
-    keep = (await db.execute(
-        select(BoardTaskVersion.id)
-        .where(BoardTaskVersion.task_id == task_id)
-        .order_by(BoardTaskVersion.created_at.desc())
-        .limit(DETAIL_VERSIONS_KEPT)
-    )).scalars().all()
-    if len(keep) < DETAIL_VERSIONS_KEPT:
-        return
-    await db.execute(delete(BoardTaskVersion).where(
-        BoardTaskVersion.task_id == task_id, BoardTaskVersion.id.notin_(keep),
-    ))
-
-
-async def list_detail_versions(db: AsyncSession, task_id: uuid.UUID) -> List[dict]:
-    rows = (await db.execute(
-        select(BoardTaskVersion)
-        .where(BoardTaskVersion.task_id == task_id)
-        .order_by(BoardTaskVersion.created_at.desc())
-    )).scalars().all()
-    names = await user_names(db, [r.edited_by for r in rows])
-    return [
-        {
-            "id": str(r.id),
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "editor_name": (names.get(r.edited_by) or {}).get("name"),
-            "is_open": r.is_open,
-        }
-        for r in rows
-    ]
+    now = datetime.now(timezone.utc)
+    for document in documents:
+        document.is_trashed = True
+        document.trashed_at = now
+        if user is not None:
+            document.last_edited_by = user.id
+    return len(documents)
 
 
 async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID) -> List[dict]:
@@ -353,7 +335,8 @@ async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID) -> List[dict]:
         db,
         [t.created_by for t in tasks] + [t.last_edited_by for t in tasks] + [uid for ids in by_task.values() for uid in ids],
     )
-    return [task_to_dict(t, names, by_task) for t in tasks]
+    documents = await documents_by_id(db, [t.document_id for t in tasks])
+    return [task_to_dict(t, names, by_task, documents=documents) for t in tasks]
 
 
 async def list_workspace_tasks(
@@ -486,11 +469,13 @@ async def list_workspace_tasks(
         + [uid for ids in by_task.values() for uid in ids],
     )
 
+    documents = await documents_by_id(db, [t.document_id for t in shown])
+
     items = []
     for root in page_roots:
-        row = task_to_dict(root, names, by_task, board=boards.get(root.file_id))
+        row = task_to_dict(root, names, by_task, board=boards.get(root.file_id), documents=documents)
         row["children"] = [
-            task_to_dict(c, names, by_task, board=boards.get(c.file_id))
+            task_to_dict(c, names, by_task, board=boards.get(c.file_id), documents=documents)
             for c in children_by_root.get(root.id, [])
         ]
         items.append(row)
@@ -519,13 +504,28 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
     if not rows:
         return 0
 
+    target_board = await db.get(FileItem, target_file_id)
+    if target_board is None:
+        return 0
     by_task = await assignees_by_task(db, [r.id for r in rows])
+    sources = await documents_by_id(db, [r.document_id for r in rows])
+
     id_map = {}
     # Parents before children, so a sub-item always finds its new parent id.
     ordered = sorted(rows, key=lambda t: (t.parent_task_id is not None, t.position))
     for task in ordered:
         new_id = uuid.uuid4()
         id_map[task.id] = new_id
+        # A copied 할 일 needs a document of its own — sharing the original's
+        # would mean writing in one copy showed up in the other.
+        source_document = sources.get(task.document_id)
+        document = new_task_document(target_board, task.name, user)
+        if source_document is not None:
+            document.content = source_document.content or ""
+            document.size_bytes = len((document.content or "").encode("utf-8"))
+        db.add(document)
+        await db.flush()
+
         db.add(BoardTask(
             id=new_id,
             file_id=target_file_id,
@@ -535,7 +535,7 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
             status=task.status,
             start_date=task.start_date,
             due_date=task.due_date,
-            detail=task.detail,
+            document_id=document.id,
             position=task.position,
             created_by=user.id,
             last_edited_by=user.id,

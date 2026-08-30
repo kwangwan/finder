@@ -39,6 +39,7 @@ import {
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
 import { useNoteEditor, BN_THEME, blocksToMarkdownTableSafe } from '../../hooks/useNoteEditor';
 import AttachExistingFileModal from '../editor/AttachExistingFileModal';
+import FileLinksPanel, { useFileLinks } from './FileLinksPanel';
 import VersionHistoryModal from '../editor/VersionHistoryModal';
 import VideoPlayer from '../common/VideoPlayer';
 
@@ -53,6 +54,7 @@ export default function PreviewWindow({
   onUpdateWindowFile,
   onToggleFavorite,
   onDeleteFile,
+  onOpenFile,
   activeWorkspaceId,
   currentUser
 }) {
@@ -70,6 +72,10 @@ export default function PreviewWindow({
   const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const [bgMode, setBgMode] = useState('checkerboard'); // 'checkerboard' | 'light' | 'dark'
+
+  // Bumped whenever this window changes what it is joined to, so the strip
+  // above the body reloads without waiting for the next open.
+  const [linksToken, setLinksToken] = useState(0);
 
   const windowRef = useRef(null);
 
@@ -147,6 +153,17 @@ export default function PreviewWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.id]);
 
+  // Clicking a picture in a document opens the file it came from, so the way
+  // documents and files are joined can be walked in both directions instead
+  // of only being listed. Selection inside the editor is left untouched — no
+  // preventDefault, so resizing and captions still work.
+  const handleAttachmentClick = (e) => {
+    const media = e.target.closest?.('img, video, audio');
+    const src = media?.currentSrc || media?.src || media?.querySelector?.('source')?.src;
+    const found = src && String(src).match(/\/storage\/(?:preview|download)\/([0-9a-fA-F-]{36})/);
+    if (found) onOpenFile?.({ id: found[1] });
+  };
+
   // Everything below renders from the fetched record, overlaid with whatever
   // the window's own copy holds — that copy is the live one (updateWindowFile
   // patches it on save/rename/favorite) but may start out partial, so the
@@ -183,6 +200,37 @@ export default function PreviewWindow({
     enabled: isMarkdown && !isLoadingContent,
     onFileUpdated: (updated) => onUpdateWindowFile(id, updated)
   });
+
+  const links = useFileLinks(file?.id, linksToken);
+
+  // An attachment that has been deleted or thrown away is called out where it
+  // sits in the document, not only in the strip above it — otherwise a
+  // picture simply stops being there and the document reads as if it never
+  // had one. Marked on the rendered element, so the document's own content is
+  // never rewritten by what happened to a file.
+  useEffect(() => {
+    const root = windowRef.current?.querySelector('.editor-pane-blocknote');
+    if (!root) return;
+    const state = new Map((links?.attachments || []).map((a) => [a.id, a.state]));
+    root.querySelectorAll('[data-att-state]').forEach((el) => {
+      el.removeAttribute('data-att-state');
+      el.closest('.bn-block-content')?.removeAttribute('data-att-state');
+    });
+    root.querySelectorAll('img, video, audio').forEach((el) => {
+      const src = el.currentSrc || el.src || el.querySelector?.('source')?.src || '';
+      const found = String(src).match(/\/storage\/(?:preview|download)\/([0-9a-fA-F-]{36})/);
+      const found_state = found ? state.get(found[1]) : null;
+      if (!found_state || found_state === 'ok') return;
+      el.setAttribute('data-att-state', found_state);
+      el.closest('.bn-block-content')?.setAttribute('data-att-state', found_state);
+    });
+  }, [links, noteEditor.isContentLoading]);
+
+  // A save is when what the document points at can have changed, so the
+  // connections are re-read then rather than on every keystroke.
+  useEffect(() => {
+    if (noteEditor.saveStatus === 'saved') setLinksToken((n) => n + 1);
+  }, [noteEditor.saveStatus]);
 
   // Copy text content — for a live note, copy its current (possibly
   // unsaved-to-disk-but-already-in-the-editor) markdown rather than the
@@ -397,13 +445,19 @@ export default function PreviewWindow({
               >
                 <Star size={13} color={resolvedFile.is_favorite ? '#f59e0b' : undefined} fill={resolvedFile.is_favorite ? '#f59e0b' : 'none'} />
               </button>
+              {/* A 할 일's document is deleted from the 할 일, so the button
+                  that cannot work is not offered — the server refuses it
+                  either way, but being told after clicking is worse. */}
               <button
                 type="button"
                 className="window-action-btn icon-only"
-                onClick={(e) => { e.stopPropagation(); onDeleteFile(resolvedFile.id); }}
-                title="문서 삭제"
+                disabled={!!links?.board_task}
+                onClick={(e) => { e.stopPropagation(); if (!links?.board_task) onDeleteFile(resolvedFile.id); }}
+                title={links?.board_task
+                  ? '이 문서는 일정의 할 일에 연결되어 있어 일정에서 할 일을 삭제해야 합니다'
+                  : '문서 삭제'}
               >
-                <Trash2 size={13} color="var(--accent-rose)" />
+                <Trash2 size={13} color={links?.board_task ? 'var(--text-muted)' : 'var(--accent-rose)'} />
               </button>
               <button
                 type="button"
@@ -543,6 +597,14 @@ export default function PreviewWindow({
         </div>
       </div>
 
+      {/* What this file is joined to — the documents holding it, what it
+          holds, and the 할 일 it belongs to. Above the body so a connection is
+          visible without hunting for it, and collapsible for when it is not
+          what the window was opened for. */}
+      {!isBoard && (
+        <FileLinksPanel links={links} isDocument={isMarkdown} onOpenFile={onOpenFile} />
+      )}
+
       {/* Main Content Area */}
       <div 
         className="os-window-body"
@@ -560,6 +622,7 @@ export default function PreviewWindow({
             file={resolvedFile}
             onDirty={() => onUpdateWindowFile(id, { updated_at: new Date().toISOString() })}
             onRenamed={(name) => onUpdateWindowFile(id, { name })}
+            onOpenDocument={onOpenFile}
           />
         ) : isImage ? (
           <div 
@@ -615,7 +678,7 @@ export default function PreviewWindow({
               </div>
             )}
             {noteEditor.editor && (
-              <div className="editor-pane-blocknote">
+              <div className="editor-pane-blocknote" onClick={handleAttachmentClick}>
                 <BlockNoteView editor={noteEditor.editor} theme={BN_THEME} onChange={noteEditor.handleEditorChange} slashMenu={false}>
                   <SuggestionMenuController
                     triggerCharacter="/"
@@ -643,8 +706,9 @@ export default function PreviewWindow({
 
             <AttachExistingFileModal
               isOpen={noteEditor.isAttachModalOpen}
+              workspaceId={resolvedFile.workspace_id || activeWorkspaceId}
               onClose={() => noteEditor.setIsAttachModalOpen(false)}
-              onInsertMarkdown={noteEditor.handleInsertAttachedFile}
+              onInsertFile={(picked) => { noteEditor.handleInsertExistingFile(picked); setLinksToken((n) => n + 1); }}
             />
             <VersionHistoryModal
               fileId={resolvedFile.id}
