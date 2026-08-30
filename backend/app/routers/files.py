@@ -102,8 +102,15 @@ async def _batch_user_names(db: AsyncSession, files: List[FileItem]) -> dict:
     res = await db.execute(select(User).where(User.id.in_(user_ids)))
     return {u.id: _display_name(u) for u in res.scalars().all()}
 
-def _to_file_response(f: FileItem, users_by_id: Optional[dict] = None, favorite_ids: Optional[set] = None) -> FileResponse:
+def _to_file_response(
+    f: FileItem,
+    users_by_id: Optional[dict] = None,
+    favorite_ids: Optional[set] = None,
+    task_document_ids: Optional[set] = None,
+) -> FileResponse:
     resp = FileResponse.model_validate(f)
+    if task_document_ids is not None:
+        resp.is_task_document = f.id in task_document_ids
     if f.thumbnail_s3_key:
         resp.thumbnail_url = f"/api/storage/thumbnail/{f.id}"
     if users_by_id is not None:
@@ -115,7 +122,7 @@ def _to_file_response(f: FileItem, users_by_id: Optional[dict] = None, favorite_
         resp.is_favorite = f.id in favorite_ids
     return resp
 
-def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None, is_favorite: Optional[bool] = None) -> FileDetailResponse:
+def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, download_url: Optional[str] = None, creator_name: Optional[str] = None, last_editor_name: Optional[str] = None, is_favorite: Optional[bool] = None, is_task_document: bool = False) -> FileDetailResponse:
     resp = FileDetailResponse.model_validate(f)
     if is_favorite is not None:
         resp.is_favorite = is_favorite
@@ -125,6 +132,7 @@ def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, dow
     resp.download_url = download_url
     resp.creator_name = creator_name
     resp.last_editor_name = last_editor_name
+    resp.is_task_document = is_task_document
     return resp
 
 class AttachedToRequest(BaseModel):
@@ -246,8 +254,12 @@ async def list_files(
         total_pages = math.ceil(total_count / current_size) if current_size > 0 else 1
         users_by_id = await _batch_user_names(db, files)
         fav_ids = await favorite_service.favorite_ids(db, current_user.id, favorite_service.FILE, [f.id for f in files])
+        # Favourites are the one view that still shows a 할 일's document, so
+        # every row says whether it is one and the card can leave out the
+        # actions that would only be refused.
+        owned = set(await link_service.owning_tasks(db, [f.id for f in files]))
         return PagedFileResponse(
-            items=[_to_file_response(f, users_by_id, fav_ids) for f in files],
+            items=[_to_file_response(f, users_by_id, fav_ids, owned) for f in files],
             total_count=total_count,
             page=current_page,
             page_size=current_size,
@@ -262,7 +274,8 @@ async def list_files(
             files = [f for f in files if tag in (f.tags or [])]
         users_by_id = await _batch_user_names(db, files)
         fav_ids = await favorite_service.favorite_ids(db, current_user.id, favorite_service.FILE, [f.id for f in files])
-        return [_to_file_response(f, users_by_id, fav_ids) for f in files]
+        owned = set(await link_service.owning_tasks(db, [f.id for f in files]))
+        return [_to_file_response(f, users_by_id, fav_ids, owned) for f in files]
 
 
 @router.get("/watermark")
@@ -512,6 +525,7 @@ async def get_file_detail(
         file_item, folder_name=folder_name, download_url=download_url,
         creator_name=creator_name, last_editor_name=last_editor_name,
         is_favorite=await favorite_service.is_favorite(db, current_user.id, favorite_service.FILE, file_item.id),
+        is_task_document=await link_service.owning_task(db, file_item.id) is not None,
     )
 
 def _link_row(item: FileItem) -> dict:
@@ -1255,9 +1269,13 @@ async def batch_download_files(
     total_bytes = sum(f.size_bytes or 0 for _, f in pending)
     if total_bytes > settings.MAX_ZIP_DOWNLOAD_BYTES:
         limit_gb = round(settings.MAX_ZIP_DOWNLOAD_BYTES / (1024 ** 3), 1)
+        chosen_gb = round(total_bytes / (1024 ** 3), 1)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"선택한 항목의 용량이 ZIP 다운로드 제한({limit_gb}GB)을 초과합니다. 항목을 나눠서 다운로드해주세요."
+            detail=(
+                f"선택한 항목이 {chosen_gb}GB로 ZIP 다운로드 제한 {limit_gb}GB를 넘습니다. "
+                "나눠서 내려받아 주세요."
+            ),
         )
 
     archive_paths = dedupe_archive_paths([p for p, _ in pending])
@@ -1421,6 +1439,11 @@ async def batch_copy_items(
         for f in rows:
             if await access_service.can_access_file(db, current_user, f.id):
                 src_files.append(f)
+        # A 할 일's document is part of its 일정: copying the board already
+        # gives each copied row a document of its own, and a cut would trash
+        # the original out from under the row that owns it. Refused for the
+        # whole selection before the job is queued.
+        await _refuse_if_task_document(db, src_files, action="move" if req.trash_source else "delete")
 
     src_folders = []
     cycles = 0

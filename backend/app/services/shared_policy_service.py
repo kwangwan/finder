@@ -1,4 +1,5 @@
 import logging
+from html import escape
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Optional
@@ -316,8 +317,8 @@ async def notify_owner_of_removal(db: AsyncSession, file_item, actor: User) -> N
         html = f"""
         <div style="font-family:sans-serif;line-height:1.6">
           <h2>공용 워크스페이스 파일 삭제 안내</h2>
-          <p>회원님이 공용 워크스페이스에 올린 <strong>{file_item.name}</strong> 파일을
-             관리자({actor_name})가 삭제했습니다.</p>
+          <p>회원님이 공용 워크스페이스에 올린 <strong>{escape(file_item.name)}</strong> 파일을
+             관리자({escape(actor_name)})가 삭제했습니다.</p>
           <p>휴지통에 있는 동안에는 관리자가 복구할 수 있습니다. 문의가 있으시면 관리자에게 연락해 주세요.</p>
         </div>
         """

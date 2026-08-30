@@ -781,9 +781,13 @@ async def download_folder_zip(
     total_bytes = sum(f.size_bytes or 0 for f, _ in files_with_paths)
     if total_bytes > settings.MAX_ZIP_DOWNLOAD_BYTES:
         limit_gb = round(settings.MAX_ZIP_DOWNLOAD_BYTES / (1024 ** 3), 1)
+        folder_gb = round(total_bytes / (1024 ** 3), 1)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"폴더 용량이 ZIP 다운로드 제한({limit_gb}GB)을 초과합니다. 파일을 나눠서 다운로드해주세요."
+            detail=(
+                f"이 폴더가 {folder_gb}GB로 ZIP 다운로드 제한 {limit_gb}GB를 넘습니다. "
+                "하위 폴더나 파일을 나눠서 내려받아 주세요."
+            ),
         )
 
     # Same-named files are allowed side by side in this app, but a ZIP can't

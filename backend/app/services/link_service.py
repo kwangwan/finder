@@ -12,7 +12,7 @@ import re
 import uuid
 from typing import Dict, Iterable, List, Optional, Set
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BoardTask, FileItem, FileLink
@@ -100,35 +100,6 @@ async def documents_referencing_many(db: AsyncSession, file_ids: Iterable[uuid.U
     for target_id, document in rows:
         out.setdefault(target_id, []).append(document)
     return out
-
-
-async def attachments_of(db: AsyncSession, document_id: uuid.UUID) -> List[FileItem]:
-    """The files a document has attached, in the order they were attached."""
-    return list((await db.execute(
-        select(FileItem)
-        .join(FileLink, FileLink.target_file_id == FileItem.id)
-        .where(FileLink.document_id == document_id)
-        .order_by(FileLink.created_at)
-    )).scalars().all())
-
-
-async def missing_attachment_count(db: AsyncSession, document: FileItem) -> int:
-    """
-    How many of a document's attachments are gone — deleted for good, so no
-    link row is left, or sitting in the trash.
-    """
-    if not document.is_markdown:
-        return 0
-    referenced = referenced_file_ids(document.content)
-    referenced.discard(document.id)
-    if not referenced:
-        return 0
-    alive = set((await db.execute(
-        select(FileItem.id).where(and_(
-            FileItem.id.in_(referenced), FileItem.is_trashed.is_(False),
-        ))
-    )).scalars().all())
-    return len(referenced - alive)
 
 
 def not_task_document():

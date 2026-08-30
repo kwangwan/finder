@@ -1888,25 +1888,33 @@ export default function App() {
           icon: Flag,
           onClick: () => setReportFile(file),
         }] : []),
-        {
+        // A 할 일's document moves and is deleted with its 일정, never on its
+        // own. The entries that would only be refused are left out; renaming
+        // stays, because that works and keeps the 할 일's name in step.
+        ...(file.is_task_document ? [] : [{
           label: '다른 폴더로 이동',
           icon: FolderInput,
           onClick: () => handleOpenMoveModal(fileIds),
-        },
+        }]),
         { divider: true },
-        ...clipboardMenuItems(fileIds, folderIds, ctx?.folderId ?? activeFolderId, ctx),
-        { divider: true },
+        ...(file.is_task_document ? [] : clipboardMenuItems(fileIds, folderIds, ctx?.folderId ?? activeFolderId, ctx)),
+        ...(file.is_task_document ? [] : [{ divider: true }]),
         {
           label: '이름 변경',
           icon: Edit3,
           onClick: () => setRenameModal({ isOpen: true, item: { id: file.id, name: file.name, type: 'file' } }),
         },
-        {
+        ...(file.is_task_document ? [{
+          label: '일정에서 삭제할 수 있습니다',
+          icon: CalendarCheck,
+          disabled: true,
+          onClick: () => {},
+        }] : [{
           label: '휴지통으로 이동',
           icon: Trash2,
           danger: true,
           onClick: () => handleTrashFile(file),
-        },
+        }]),
       ]
     });
   };

@@ -187,12 +187,6 @@ body {
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.35);
 }
 
-.sidebar-actions {
-  padding: 0.5rem 0.85rem;
-  display: flex;
-  gap: 0.5rem;
-}
-
 .btn-primary {
   flex: 1;
   display: inline-flex;
@@ -294,12 +288,6 @@ body {
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-sizing: border-box;
-}
-
-.textarea-primary {
-  height: auto;
-  padding: 0.75rem 0.85rem;
-  resize: vertical;
 }
 
 .input-primary:focus,
@@ -537,11 +525,6 @@ body {
   align-items: center;
   gap: 0.4rem;
   flex-shrink: 0;
-}
-
-.topbar-btn {
-  font-size: 0.8rem !important;
-  padding: 0.38rem 0.65rem !important;
 }
 
 .mobile-search-btn {
@@ -839,14 +822,6 @@ body {
   gap: 0.75rem;
   color: var(--text-secondary);
 }
-
-.explorer-item-count {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 .explorer-item-count .item-count-number,
 .explorer-item-count strong {
   color: var(--text-primary);
@@ -1014,7 +989,6 @@ body {
   font-weight: 500;
 }
 
-
 .grid-folders {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -1115,7 +1089,6 @@ body {
   justify-content: center !important;
   border-radius: var(--radius-sm) !important;
 }
-
 
 .file-card-thumbnail {
   position: relative;
@@ -1375,49 +1348,6 @@ body {
   animation: fadeIn 0.15s ease-out;
 }
 
-/* Dropzone */
-.dropzone {
-  border: 2px dashed var(--border-medium);
-  border-radius: var(--radius-lg);
-  padding: 2.25rem 1.5rem;
-  text-align: center;
-  background: var(--bg-tertiary);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.dropzone:hover {
-  border-color: var(--accent-primary);
-  background: rgba(59, 130, 246, 0.04);
-}
-
-.dropzone.active {
-  border-color: var(--accent-primary);
-  background: rgba(59, 130, 246, 0.14) !important;
-  transform: scale(1.015);
-  box-shadow: 0 0 25px rgba(59, 130, 246, 0.3);
-}
-
-.progress-bar-wrap {
-  width: 100%;
-  height: 6px;
-  background: var(--bg-secondary);
-  border-radius: var(--radius-full);
-  overflow: hidden;
-  margin: 6px 0;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background: var(--accent-primary);
-  border-radius: var(--radius-full);
-  transition: width 0.2s ease;
-}
-
 /* Spinner — .spin-anim/.animate-spin are aliases used across the app
    alongside .spin; keep all three defined so none of them silently render
    as a static, non-spinning icon. */
@@ -1448,11 +1378,11 @@ body {
 /* Prevent awkward word breaking across lines in Korean & Asian typography */
 h1, h2, h3, h4, h5, h6,
 .badge, .role-badge, .badge-days,
-.topbar-brand, .explorer-item-count, .sort-label,
-.dialog-title, .dialog-message, .modal-title, .modal-subtitle,
+.topbar-brand, .sort-label,
+.modal-title, .modal-subtitle,
 .trash-notice-banner, .empty-state h3, .empty-state p,
-.workspace-card, .btn, .btn-primary, .btn-secondary,
-.sidebar-header, .sidebar-actions {
+.btn, .btn-primary, .btn-secondary,
+.sidebar-header {
   word-break: keep-all;
 }
 
@@ -1645,7 +1575,6 @@ h1, h2, h3, h4, h5, h6,
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
   }
-
 
   .folder-card {
     padding: 0.65rem !important;
@@ -2378,16 +2307,6 @@ h1, h2, h3, h4, h5, h6,
   font-size: 0.85rem;
 }
 
-.editor-pane-raw {
-  flex: 1;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border-subtle);
-  background: var(--bg-primary);
-  overflow: hidden;
-}
-
 /* Without flex:1 this shrinks to BlockNote's own intrinsic content width
    (~840px) inside the flex row, leaving most of a wide viewport empty next
    to it — the "not using the available space" gap. Stretch it to fill, and
@@ -2404,31 +2323,6 @@ h1, h2, h3, h4, h5, h6,
   max-width: 900px;
   margin: 0 auto;
   min-height: 100%;
-}
-
-.editor-textarea {
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  padding: 1.5rem 1.75rem;
-  background: transparent;
-  color: var(--text-primary);
-  border: none;
-  outline: none;
-  resize: none;
-  font-family: 'Fira Code', 'JetBrains Mono', Consolas, Monaco, monospace;
-  font-size: 0.95rem;
-  line-height: 1.65;
-  tab-size: 2;
-  overflow-y: auto;
-}
-
-.editor-pane-preview {
-  flex: 1;
-  height: 100%;
-  overflow-y: auto;
-  padding: 2rem 2.5rem;
-  background: var(--bg-primary);
 }
 
 /* Markdown Preview Typography */
@@ -2873,7 +2767,6 @@ h1, h2, h3, h4, h5, h6,
   flex-shrink: 0;
 }
 
-
 .window-header-actions {
   display: flex;
   align-items: center;
@@ -2999,10 +2892,8 @@ h1, h2, h3, h4, h5, h6,
 }
 
 /* Hosts the live collaborative BlockNote editor inside a preview window's
-   body — unlike .editor-panes (the old full-page editor's wrapper, which
-   hardcodes `height: calc(100% - 100px)` to account for that page's own
-   fixed header+title-row stack), a window's body has no such fixed chrome
-   above it, so this just fills whatever space .os-window-body gives it. */
+   body. A window's body has no fixed chrome above it, so this simply fills
+   whatever space .os-window-body gives it. */
 .window-note-editor-body {
   flex: 1;
   height: 100%;
@@ -3010,16 +2901,6 @@ h1, h2, h3, h4, h5, h6,
   position: relative;
   overflow: hidden;
   display: flex;
-}
-
-.os-markdown-viewport {
-  width: 100%;
-  padding: 1.5rem 1.75rem;
-  overflow-y: auto;
-  line-height: 1.65;
-  color: var(--text-primary);
-  -webkit-overflow-scrolling: touch;
-  box-sizing: border-box;
 }
 
 .os-code-viewport {
@@ -3161,14 +3042,6 @@ h1, h2, h3, h4, h5, h6,
   justify-content: center;
   padding: 2rem;
   background: var(--bg-primary);
-}
-
-.empty-content-placeholder {
-  text-align: center;
-  padding: 3rem 1rem;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  line-height: 1.5;
 }
 
 /* Window Footer */
@@ -4280,15 +4153,6 @@ select option {
 
 .fw-row-icon { display: flex; align-items: center; flex-shrink: 0; width: 16px; }
 
-.fw-file-dot {
-  width: 7px;
-  height: 7px;
-  margin: 0 4px;
-  border-radius: 2px;
-  background: var(--text-muted);
-  opacity: 0.55;
-}
-
 .fw-row-name {
   flex: 1;
   min-width: 0;
@@ -5343,7 +5207,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
 }
 
-
 /* ==========================================================================
    일정 — boards and the workspace-wide list
    ========================================================================== */
@@ -5396,8 +5259,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .bd-header-stat { flex-shrink: 0; font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
 .bd-header-done { color: var(--accent-emerald); }
 
-/* `.btn-primary` carries `flex: 1`, which would stretch this across the row. */
-.bd-add-top { flex: 0 0 auto; height: 30px; padding: 0 0.85rem; font-size: 0.79rem; display: inline-flex; align-items: center; gap: 5px; }
 
 .bd-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; }
 .bd-table { display: flex; flex-direction: column; }
@@ -5741,8 +5602,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .bd-f-period.due-today, .bd-f-period.due-soon { color: var(--accent-amber); }
 .bd-f-period.due-done { color: var(--text-muted); }
 
-.bd-period-edit { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-
 .bd-period-edit input[type="date"],
 .td-period input[type="date"] {
   padding: 2px 4px;
@@ -5753,22 +5612,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-size: 0.73rem;
   font-family: inherit;
   font-variant-numeric: tabular-nums;
-}
-
-.bd-dash { opacity: 0.6; }
-
-.bd-period-clear {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
 }
 
 .bd-period-clear:hover { color: var(--accent-rose); background: var(--bg-tertiary); }
@@ -5814,7 +5657,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .bd-empty-row { padding: 2.4rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.83rem; }
 .bd-readonly { padding: 10px 14px; font-size: 0.78rem; color: var(--text-muted); }
-.board-muted { color: var(--text-muted); }
 
 .bd-empty {
   display: flex;
@@ -5839,99 +5681,13 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   background: rgba(0, 0, 0, 0.45);
 }
 
-.td-drawer {
-  display: flex;
-  flex-direction: column;
-  width: min(560px, 100%);
-  height: 100%;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-medium);
-  box-shadow: -18px 0 44px rgba(0, 0, 0, 0.45);
-  overflow-y: auto;
-}
-
-.td-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  position: sticky;
-  top: 0;
-  background: var(--bg-secondary);
-  z-index: 2;
-}
-
-.td-title {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 7px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 1rem;
-  font-weight: 700;
-  font-family: inherit;
-}
-
 .td-title:hover:not(:disabled) { border-color: var(--border-subtle); }
 .td-title:focus { border-color: var(--border-focus); background: var(--bg-input, var(--bg-tertiary)); outline: none; }
-
-.td-state { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 0.72rem; color: var(--text-muted); }
-.td-error { color: var(--accent-rose); font-weight: 700; }
-.td-where { padding: 8px 14px 0; font-size: 0.74rem; color: var(--text-muted); }
-
-.td-fields { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 14px 0; }
 .td-fields label { display: flex; flex-direction: column; gap: 5px; min-width: 104px; }
 .td-fields label > span:first-child, .td-label { font-size: 0.7rem; font-weight: 700; color: var(--text-muted); }
-.td-period-field { flex: 1 1 220px; }
-.td-period { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; color: var(--text-secondary); }
-
-.td-people { padding: 14px 14px 0; }
-.td-people-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-
-.td-person {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px 4px 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: 0.76rem;
-  cursor: pointer;
-}
 
 .td-person.on { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); color: var(--accent-primary); font-weight: 700; }
 .td-person:disabled { cursor: default; opacity: 0.6; }
-
-.td-notes { display: flex; flex-direction: column; flex: 1; min-height: 240px; padding: 16px 14px 0; }
-.td-notes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-.td-notes-head .td-attach + .td-attach { margin-left: 0; }
-.td-attach { margin-left: auto; height: 26px; padding: 0 0.65rem; font-size: 0.73rem; display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-
-.td-editor {
-  flex: 1;
-  min-height: 200px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
-  padding: 6px 0;
-  overflow-y: auto;
-}
-
-.td-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  padding: 14px;
-  margin-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-  font-size: 0.71rem;
-  color: var(--text-muted);
-}
 
 /* --- the workspace-wide list -------------------------------------------- */
 
@@ -6070,64 +5826,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .sc-empty h3 { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
 .sc-empty p { font-size: 0.83rem; color: var(--text-muted); }
 
-
-/* --- 일정 알림 설정 ------------------------------------------------------- */
-
-.digest-modal { max-width: 520px; padding: 0; }
-
-.digest-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
 .digest-head h2 { flex: 1; font-size: 1rem; font-weight: 700; }
-
-.digest-intro {
-  margin: 0;
-  padding: 14px 16px 0;
-  font-size: 0.82rem;
-  color: var(--text-secondary);
-  line-height: 1.55;
-  word-break: keep-all;
-}
-
-.digest-warn {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 12px 16px 0;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-amber) 40%, transparent);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
-  color: var(--accent-amber);
-  font-size: 0.77rem;
-}
-
-.digest-switch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 14px 16px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-tertiary);
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
-.digest-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
-  padding: 14px 16px 0;
-}
 
 .digest-grid label { display: flex; flex-direction: column; gap: 5px; }
 .digest-grid label > span:first-child,
@@ -6150,26 +5849,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   font-family: inherit;
   cursor: pointer;
 }
-
-.digest-time { display: flex; gap: 6px; }
 .digest-time select { flex: 1; }
-
-.digest-horizons { display: flex; flex-direction: column; gap: 6px; padding: 16px 16px 0; }
-.digest-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-
-.digest-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: 0.79rem;
-  font-family: inherit;
-  cursor: pointer;
-}
 
 .digest-chip.on {
   border-color: var(--accent-primary);
@@ -6180,15 +5860,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .digest-chip:disabled { cursor: default; opacity: 0.6; }
 
-.digest-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 18px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--border-subtle);
-}
-
 .digest-actions .btn-secondary, .digest-actions .btn-primary {
   height: 34px;
   padding: 0 0.9rem;
@@ -6197,11 +5868,6 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   align-items: center;
   gap: 5px;
 }
-
-.digest-spacer { flex: 1; }
-.digest-readonly { flex: 1; font-size: 0.78rem; color: var(--text-muted); }
-
-.schedule-head-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
 
 @media (max-width: 520px) {
   .digest-actions { flex-wrap: wrap; }

@@ -436,6 +436,19 @@ export default function FolderExplorer({
 
   const visibleFileIds = files.filter(f => !hiddenIds.has(f.id)).map(f => f.id);
   const selectedCount = selectedFileIds.length + selectedFolderIds.length;
+  // A 할 일's document moves and is deleted with its 일정, so a selection
+  // holding one cannot be cut, moved or thrown away — the server refuses the
+  // batch whole, and offering the buttons would only be offering that refusal.
+  const lockedSelection = files.some((f) => selectedFileIds.includes(f.id) && f.is_task_document);
+  const lockedReason = '선택 항목에 일정의 할 일 문서가 있습니다. 해당 문서는 일정에서만 옮기거나 삭제할 수 있습니다.';
+  // A ZIP is built and streamed in one request, so the cap is real: said here,
+  // before a doomed download starts, with the size that broke it.
+  const ZIP_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+  const selectedBytes = files
+    .filter((f) => selectedFileIds.includes(f.id))
+    .reduce((sum, f) => sum + (f.size_bytes || 0), 0);
+  const zipTooBig = selectedBytes > ZIP_LIMIT_BYTES;
+  const zipReason = `선택한 파일이 ${(selectedBytes / (1024 ** 3)).toFixed(1)}GB로 ZIP 다운로드 제한 2GB를 넘습니다. 나눠서 내려받아 주세요.`;
 
   // A position is remembered across sessions, so it can outlive the window it
   // was chosen in: dragged to the right edge of a wide screen and reopened on
@@ -1516,24 +1529,30 @@ export default function FolderExplorer({
                       >
                         <Info size={14} />
                       </button>
-                      <button
-                        className="btn-icon card-action-btn"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!onDeleteFile) return;
-                          await onDeleteFile(file.id, () => new Promise((resolve) => {
-                            setRemovingIds(new Set([file.id]));
-                            setTimeout(() => {
-                              setHiddenIds(prev => new Set([...prev, file.id]));
-                              resolve();
-                            }, 220);
-                          }));
-                          setRemovingIds(new Set());
-                        }}
-                        title="삭제"
-                      >
-                        <Trash2 size={14} color="var(--accent-rose)" />
-                      </button>
+                      {/* A 할 일's document is deleted from its 일정. Offering
+                          the button here would only be offering a refusal —
+                          these turn up in 즐겨찾기, which is the one listing
+                          that still shows them. */}
+                      {!file.is_task_document && (
+                        <button
+                          className="btn-icon card-action-btn"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!onDeleteFile) return;
+                            await onDeleteFile(file.id, () => new Promise((resolve) => {
+                              setRemovingIds(new Set([file.id]));
+                              setTimeout(() => {
+                                setHiddenIds(prev => new Set([...prev, file.id]));
+                                resolve();
+                              }, 220);
+                            }));
+                            setRemovingIds(new Set());
+                          }}
+                          title="삭제"
+                        >
+                          <Trash2 size={14} color="var(--accent-rose)" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1703,9 +1722,9 @@ export default function FolderExplorer({
           <button
             type="button"
             className="btn-secondary"
-            title="잘라내기 (Ctrl+X)"
+            title={lockedSelection ? lockedReason : '잘라내기 (Ctrl+X)'}
+            disabled={lockedSelection}
             onClick={() => onClipboardCut?.(selectedFileIds, selectedFolderIds, workspaceId, currentFolder?.id ?? null)}
-            
           >
             <Scissors size={15} />
             <span className="hide-mobile">잘라내기</span>
@@ -1725,10 +1744,9 @@ export default function FolderExplorer({
           <button
             type="button"
             className="btn-primary"
-            title="폴더로 이동"
-            disabled={selectedFileIds.length === 0}
+            title={lockedSelection ? lockedReason : '폴더로 이동'}
+            disabled={selectedFileIds.length === 0 || lockedSelection}
             onClick={() => onOpenMoveModal && onOpenMoveModal(selectedFileIds)}
-            
           >
             <FolderInput size={15} />
             <span className="hide-mobile">폴더로 이동</span>
@@ -1737,8 +1755,8 @@ export default function FolderExplorer({
           <button
             type="button"
             className="btn-secondary"
-            title="ZIP 다운로드"
-            disabled={selectedFileIds.length === 0}
+            title={zipTooBig ? zipReason : 'ZIP 다운로드'}
+            disabled={selectedFileIds.length === 0 || zipTooBig}
             onClick={() => onBatchDownload && onBatchDownload(selectedFileIds)}
             
           >
@@ -1749,7 +1767,8 @@ export default function FolderExplorer({
           <button
             type="button"
             className="btn-secondary"
-            title="삭제"
+            title={lockedSelection ? lockedReason : '삭제'}
+            disabled={lockedSelection}
             onClick={async () => {
               if (!onBatchDelete) return;
               const idsToDelete = [...selectedFileIds];

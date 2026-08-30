@@ -19,6 +19,7 @@ from app.models.board import (
 )
 from app.services import board_service
 from app.services import link_service
+from app.services import shared_policy_service
 from app.services import board_digest_service
 from app.services.email_service import email_service
 from app.services.access_service import access_service
@@ -331,7 +332,7 @@ async def get_board(
         # Nothing to pick from in the shared workspace: a person may only put
         # themselves on a 할 일, so the view shows the 담당자 rather than a
         # menu of one.
-        "assignee_locked": await board_service.is_shared_workspace(db, board.workspace_id),
+        "assignee_locked": await shared_policy_service.is_shared_workspace(db, board.workspace_id),
         "assignable_users": [
             {"id": str(u.id), "name": (u.username or u.name or u.email), "avatar": u.avatar_url}
             for u in members
@@ -385,7 +386,7 @@ async def create_task(
     # In the shared workspace a person may only assign themselves, so there is
     # nothing to choose: whoever adds the 할 일 is its 담당자, set here rather
     # than offered as a menu of one.
-    if not assignees and await board_service.is_shared_workspace(db, board.workspace_id):
+    if not assignees and await shared_policy_service.is_shared_workspace(db, board.workspace_id):
         assignees = [current_user.id]
     name = req.name.strip()
     # Its document, made with it and in the same folder, so everything a

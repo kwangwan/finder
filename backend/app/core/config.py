@@ -26,7 +26,11 @@ class Settings(BaseSettings):
     # whole request; without a cap a single request for a huge folder could
     # still run long enough to be impractical even though it no longer
     # buffers everything in memory.
-    MAX_ZIP_DOWNLOAD_BYTES: int = 10 * 1024 * 1024 * 1024  # 10 GB
+    # A ZIP is built and streamed in one request: nothing about it resumes, so
+    # a 10GB archive was a download that had to survive an hour of perfect
+    # network to be worth anything. 2GB is large enough for the folders people
+    # actually archive and small enough to finish.
+    MAX_ZIP_DOWNLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
     MINIO_BUCKET_NAME: str = "knowledge-base"
     MINIO_REGION: str = "us-east-1"
     

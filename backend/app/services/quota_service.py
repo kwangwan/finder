@@ -41,11 +41,6 @@ class QuotaService:
                     return owner
         return default_user
 
-    async def remaining_bytes(self, db: AsyncSession, user: User) -> int:
-        """How much room this person still has of their own."""
-        await db.refresh(user)
-        return max(0, user.storage_quota_bytes - user.storage_used_bytes - user.storage_reserved_bytes)
-
     async def require_room_for_workspace(self, db: AsyncSession, user: User) -> int:
         """
         Refuse a new workspace to someone with no room left.
@@ -55,7 +50,8 @@ class QuotaService:
         being broken rather than as the account being full. Said now, once,
         with the number.
         """
-        remaining = await self.remaining_bytes(db, user)
+        await db.refresh(user)
+        remaining = user.storage_remaining_bytes
         if remaining >= WORKSPACE_MIN_FREE_BYTES:
             return remaining
         raise HTTPException(

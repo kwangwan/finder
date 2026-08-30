@@ -139,6 +139,17 @@ async def init_db():
             # The notes moved into that document, which keeps its own history.
             "ALTER TABLE kb_board_tasks DROP COLUMN IF EXISTS detail;",
             "DROP TABLE IF EXISTS kb_board_task_versions;",
+            # Left over from features this app no longer has: sharing links and
+            # user groups, both empty and unreferenced since. A column or a
+            # table nothing reads is a question every future reader has to ask
+            # and answer for themselves.
+            "DROP TABLE IF EXISTS kb_shares;",
+            "DROP TABLE IF EXISTS kb_group_members;",
+            "DROP TABLE IF EXISTS kb_groups;",
+            # Superseded by workspace ownership (kb_workspaces.owner_id) and, for
+            # personal folders, kb_folders.owner_user_id. Never populated.
+            "ALTER TABLE kb_files DROP COLUMN IF EXISTS owner_id;",
+            "ALTER TABLE kb_folders DROP COLUMN IF EXISTS owner_id;",
             # Carry the old values over once, then drop the column so nothing
             # can keep writing to a flag nobody reads. Inside a DO block
             # because a plain UPDATE naming `is_admin` fails to parse once the

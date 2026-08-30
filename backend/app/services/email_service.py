@@ -1,4 +1,5 @@
 import os
+from html import escape
 import boto3
 from botocore.exceptions import ClientError
 from typing import Optional
@@ -48,18 +49,27 @@ class EmailService:
         if not recipients:
             return False
 
-        if self.is_ses_configured:
+        if not self.is_ses_configured:
+            print(f"\n[NOTIFICATION MOCK] TO: {recipients}\nSUBJECT: {subject}\n{text_body or ''}\n")
+            return True
+
+        client = boto3.client(
+            "ses",
+            region_name=self.aws_region,
+            aws_access_key_id=self.aws_access_key,
+            aws_secret_access_key=self.aws_secret_key,
+        )
+        source_formatted = f"Project Run : Finder <{self.source_email}>"
+        # One message per person. A single send with everybody in To would
+        # show each recipient the others' addresses — for a storage warning to
+        # the administrators that is a list of who they are, disclosed by a
+        # notification nobody asked to be on.
+        delivered = 0
+        for address in recipients:
             try:
-                client = boto3.client(
-                    "ses",
-                    region_name=self.aws_region,
-                    aws_access_key_id=self.aws_access_key,
-                    aws_secret_access_key=self.aws_secret_key,
-                )
-                source_formatted = f"Project Run : Finder <{self.source_email}>"
                 response = client.send_email(
                     Source=source_formatted,
-                    Destination={"ToAddresses": recipients},
+                    Destination={"ToAddresses": [address]},
                     Message={
                         "Subject": {"Data": subject, "Charset": "UTF-8"},
                         "Body": {
@@ -68,13 +78,14 @@ class EmailService:
                         },
                     },
                 )
-                print(f"[SES Success] Sent notification to {recipients}, MessageId: {response.get('MessageId')}")
-                return True
+                delivered += 1
+                print(f"[SES Success] Sent notification to {address}, MessageId: {response.get('MessageId')}")
             except Exception as e:
-                print(f"[SES Error] notification: {e}")
-
-        print(f"\n[NOTIFICATION MOCK] TO: {recipients}\nSUBJECT: {subject}\n{text_body or ''}\n")
-        return True
+                # Reported, not swallowed: this used to fall through to the
+                # mock print and return True, so a failed send looked like a
+                # delivered one and the caller marked it done.
+                print(f"[SES Error] notification to {address}: {e}")
+        return delivered > 0
 
     def send_invitation_email(
         self,
@@ -89,11 +100,18 @@ class EmailService:
         Send an invitation email using AWS SES if configured, otherwise log the invite link for testing.
         """
         invite_url = f"{self.app_url}?invite_token={invite_token}"
-        
-        target_description = f"'{workspace_name}' 워크스페이스" if workspace_name else "Project Run : Finder"
+
+        # Both are written by people — a workspace called "R&D <2026>" would
+        # otherwise arrive with its name mangled, or worse, as markup.
+        safe_inviter = escape(inviter_name or "")
+        safe_workspace = escape(workspace_name) if workspace_name else ""
+        target_description = f"'{safe_workspace}' 워크스페이스" if workspace_name else "Project Run : Finder"
+        # A subject line is plain text: the escaped version would arrive
+        # showing "&amp;" where the name has an ampersand.
+        target_plain = f"'{workspace_name}' 워크스페이스" if workspace_name else "Project Run : Finder"
         role_label = "관리자 (Admin)" if role == "admin" else "멤버 (Member)"
 
-        subject = f"[Project Run : Finder] {inviter_name}님이 {target_description}에 초대하셨습니다"
+        subject = f"[Project Run : Finder] {inviter_name}님이 {target_plain}에 초대하셨습니다"
         
         html_body = f"""
         <!DOCTYPE html>
@@ -118,7 +136,7 @@ class EmailService:
             <div class="header">Project Run : Finder 초대장</div>
             <div class="content">
               안녕하세요,<br><br>
-              <strong>{inviter_name}</strong>님이 회원님을 <strong>{target_description}</strong>에 초대하셨습니다.<br>
+              <strong>{safe_inviter}</strong>님이 회원님을 <strong>{target_description}</strong>에 초대하셨습니다.<br>
               초대를 수락하시면 별도의 대기 없이 즉시 참여하여 워크스페이스의 문서와 지식을 공유하고 협업하실 수 있습니다.
             </div>
 

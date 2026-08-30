@@ -88,6 +88,9 @@ class FileResponse(BaseModel):
     media_height: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    # A 할 일's document belongs to its 일정: it cannot be deleted or moved on
+    # its own, so a view that offers those actions is offering a refusal.
+    is_task_document: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

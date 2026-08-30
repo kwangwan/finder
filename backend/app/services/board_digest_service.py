@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from html import escape
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -379,10 +380,24 @@ async def collect_for_workspace(db: AsyncSession, workspace_id, config: dict) ->
     return per_user
 
 
+WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def day_text(value: date) -> str:
+    """The date as it gets said out loud — which weekday it is, is half of
+    what a deadline means."""
+    return f"{value.month}월 {value.day}일 ({WEEKDAYS[value.weekday()]})"
+
+
 def render_digest(workspace_name: str, entry: dict, config: dict, today: date) -> tuple:
     buckets = entry["buckets"]
     total = sum(len(v) for v in buckets.values())
-    subject = f"[{workspace_name}] 오늘 확인할 일정 {total}건"
+    # Everything below is written by people — a 할 일 called "a < b" would
+    # otherwise break the mail, and a crafted name could put markup into one
+    # sent to somebody else.
+    ws_name = escape(workspace_name)
+    who = escape(entry["user"].username or entry["user"].name or "")
+    subject = f"[{workspace_name}] {day_text(today)} 할 일 {total}건"
 
     sections_html = []
     sections_text = []
@@ -395,36 +410,52 @@ def render_digest(workspace_name: str, entry: dict, config: dict, today: date) -
             tag = "<span style=\"color:#dc2626;font-weight:700\">기한 지남 · </span>" if it["overdue"] else ""
             rows_html.append(
                 f"<tr>"
-                f"<td style=\"padding:6px 10px;border-bottom:1px solid #eee\">{tag}{it['name']}</td>"
+                f"<td style=\"padding:6px 10px;border-bottom:1px solid #eee;word-break:break-all\">{tag}{escape(it['name'])}</td>"
                 f"<td style=\"padding:6px 10px;border-bottom:1px solid #eee;color:#666;white-space:nowrap\">"
-                f"{it['due'].month}월 {it['due'].day}일</td>"
+                f"{day_text(it['due'])}</td>"
                 f"<td style=\"padding:6px 10px;border-bottom:1px solid #eee;color:#666;white-space:nowrap\">"
                 f"{PRIORITY_LABELS.get(it['priority'], it['priority'])}</td>"
-                f"<td style=\"padding:6px 10px;border-bottom:1px solid #eee;color:#888\">{it['board']}</td>"
+                f"<td style=\"padding:6px 10px;border-bottom:1px solid #eee;color:#888;word-break:break-all\">{escape(it['board'])}</td>"
                 f"</tr>"
             )
             sections_text.append(
                 f"  - {'[기한 지남] ' if it['overdue'] else ''}{it['name']} "
-                f"({it['due'].month}/{it['due'].day}, {PRIORITY_LABELS.get(it['priority'], it['priority'])}, {it['board']})"
+                f"({day_text(it['due'])}, {PRIORITY_LABELS.get(it['priority'], it['priority'])}, {it['board']})"
             )
+        # Fixed columns so every section lines up with the next one: with each
+        # table sizing its own, the dates and priorities sat at a different
+        # place in each block and the mail read as several unrelated lists.
         sections_html.append(
             f"<h3 style=\"margin:22px 0 8px;font-size:15px\">{HORIZON_LABELS[horizon]} ({len(items)}건)</h3>"
-            f"<table style=\"border-collapse:collapse;width:100%;font-size:14px\">{''.join(rows_html)}</table>"
+            "<table style=\"border-collapse:collapse;width:100%;font-size:14px;table-layout:fixed\">"
+            "<colgroup><col><col style=\"width:124px\"><col style=\"width:64px\">"
+            "<col style=\"width:132px\"></colgroup>"
+            f"{''.join(rows_html)}</table>"
         )
         sections_text.insert(len(sections_text) - len(items), f"\n[{HORIZON_LABELS[horizon]}] {len(items)}건")
 
+    app_url = email_service.app_url
     html = (
         "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
         "max-width:640px;margin:0 auto;padding:24px;color:#111\">"
-        f"<p style=\"margin:0 0 4px;color:#666;font-size:13px\">{workspace_name}</p>"
-        f"<h2 style=\"margin:0 0 2px;font-size:19px\">{today.month}월 {today.day}일 일정 안내</h2>"
-        f"<p style=\"margin:0;color:#666;font-size:13px\">{entry['user'].username or entry['user'].name or ''}님께 배정된 작업입니다.</p>"
+        f"<p style=\"margin:0 0 4px;color:#666;font-size:13px\">{ws_name}</p>"
+        f"<h2 style=\"margin:0 0 2px;font-size:19px\">{day_text(today)} 할 일 안내</h2>"
+        f"<p style=\"margin:0;color:#666;font-size:13px\">{who}님이 담당인 할 일입니다.</p>"
         + "".join(sections_html)
-        + "<p style=\"margin:26px 0 0;color:#999;font-size:12px\">"
-          "이 메일은 워크스페이스 관리자가 설정한 시각에 자동으로 발송됩니다.</p>"
+        + f"<p style=\"margin:24px 0 0\"><a href=\"{app_url}\" "
+          "style=\"display:inline-block;padding:9px 16px;background:#3b82f6;color:#fff;"
+          "border-radius:6px;text-decoration:none;font-size:14px\">일정에서 보기</a></p>"
+        + "<p style=\"margin:22px 0 0;color:#999;font-size:12px\">"
+          "이 메일은 회원님이 정한 시각에 하루 한 번 발송됩니다. "
+          "받는 시각과 담을 기간은 일정 화면의 ‘설정’에서 바꾸거나 끌 수 있습니다.</p>"
         "</div>"
     )
-    text = f"[{workspace_name}] {today.month}월 {today.day}일 일정 안내\n" + "\n".join(sections_text)
+    text = (
+        f"[{workspace_name}] {day_text(today)} 할 일 안내\n"
+        + "\n".join(sections_text)
+        + f"\n\n일정에서 보기: {app_url}"
+        + "\n받는 시각과 담을 기간은 일정 화면의 '설정'에서 바꾸거나 끌 수 있습니다."
+    )
     return subject, html, text
 
 
@@ -471,11 +502,17 @@ async def send_for_workspace(db: AsyncSession, workspace: Workspace, config: dic
             continue
         subject, html, text = render_digest(workspace.name, narrowed, mine, today)
         try:
-            if email_service.send_notification(entry["user"].email, subject, html, text):
-                sent += 1
+            delivered = email_service.send_notification(entry["user"].email, subject, html, text)
         except Exception as e:  # pragma: no cover - a bad address must not stop the rest
             logger.warning(f"[BoardDigest] could not send to {entry['user'].email}: {e}")
             continue
+        # The marker is what stops a second copy going out today, so it is only
+        # written once the mail actually left. Marking a failed send would lose
+        # that person their day's reminder entirely.
+        if not delivered:
+            logger.warning(f"[BoardDigest] send reported failure for {entry['user'].email}; will retry")
+            continue
+        sent += 1
 
         if marker is None:
             db.add(AppSetting(key=_sent_key(workspace.id, uid), value=today_str))
