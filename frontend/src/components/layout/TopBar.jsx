@@ -16,7 +16,7 @@ import {
   User as UserIcon,
   HardDrive,
   Palette,
-  Terminal,
+  Monitor,
   Edit3,
   Check,
   Camera,
@@ -295,13 +295,13 @@ export default function TopBar({
 
                 <div style={{ padding: '0.6rem 0.85rem 0.35rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Palette size={13} />
-                  <span>테마 설정</span>
+                  <span>테마</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, padding: '0.2rem 0.75rem 0.6rem' }}>
                   {[
+                    { id: 'system', label: '시스템', Icon: Monitor },
                     { id: 'dark', label: '다크', Icon: Moon },
-                    { id: 'light', label: '라이트', Icon: Sun },
-                    { id: 'matrix', label: '매트릭스', Icon: Terminal }
+                    { id: 'light', label: '라이트', Icon: Sun }
                   ].map(t => {
                     const isActive = theme === t.id;
                     const IconComponent = t.Icon;

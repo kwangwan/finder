@@ -87,7 +87,6 @@ import {
 } from './api';
 import { useDialog } from './context/DialogContext';
 import { useToast } from './context/ToastContext';
-import { ThemeProvider } from './context/ThemeContext';
 
 // Sort/pagination defaults — also the fallback whenever a URL carries a
 // value outside these sets (hand-edited link, stale bookmark from an older
@@ -169,7 +168,10 @@ function buildFolderPath(nodeList, targetId) {
 export default function App() {
   const { showAlert, showConfirm } = useDialog();
   const { showToast, updateToast, dismissToast } = useToast();
-  const [theme, setTheme] = useState(() => localStorage.getItem('kb_theme') || 'dark');
+  // 'system' follows the browser; 'dark'/'light' are a deliberate choice that
+  // outlives it. Nothing stored means system, which is what someone who has
+  // never touched the setting expects.
+  const [theme, setTheme] = useState(() => localStorage.getItem('kb_theme') || 'system');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   
   // Auth State
@@ -399,19 +401,28 @@ export default function App() {
     setHasNewFilesInView(false);
   }, [activeFolderId, activeView]);
 
-  // Sync theme
+  // Sync theme. On 'system' the browser decides, and keeps deciding — someone
+  // whose machine switches at sunset should switch with it while the app is
+  // open, without a reload.
   useEffect(() => {
-    const validThemes = ['dark', 'light', 'matrix'];
-    const activeTheme = validThemes.includes(theme) ? theme : 'dark';
-    document.documentElement.setAttribute('data-theme', activeTheme);
-    localStorage.setItem('kb_theme', activeTheme);
+    const choice = ['dark', 'light', 'system'].includes(theme) ? theme : 'system';
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const apply = () => {
+      const resolved = choice === 'system' ? (media.matches ? 'light' : 'dark') : choice;
+      document.documentElement.setAttribute('data-theme', resolved);
+    };
+    apply();
+    localStorage.setItem('kb_theme', choice);
+    if (choice !== 'system') return undefined;
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
   }, [theme]);
 
   const toggleTheme = () => {
     setTheme(prev => {
+      if (prev === 'system') return 'dark';
       if (prev === 'dark') return 'light';
-      if (prev === 'light') return 'matrix';
-      return 'dark';
+      return 'system';
     });
   };
 
@@ -2015,70 +2026,61 @@ export default function App() {
   // 1. Loading state
   if (isAuthLoading) {
     return (
-      <ThemeProvider theme={theme}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
-          인증 상태를 확인하고 있습니다...
-        </div>
-      </ThemeProvider>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
+        인증 상태를 확인하고 있습니다...
+      </div>
     );
   }
 
   // 2. Not logged in -> Show Login
   if (!currentUser) {
     return (
-      <ThemeProvider theme={theme}>
-        <LoginModal
-          isOpen={true}
-          onLoginSuccess={(user) => {
-            setCurrentUser(user);
-          }}
-        />
-      </ThemeProvider>
+      <LoginModal
+        isOpen={true}
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+      />
     );
   }
 
   // 3. Logged in but not approved and not admin -> Show Pending Approval
   if (!currentUser.is_approved && !currentUser.is_superadmin) {
     return (
-      <ThemeProvider theme={theme}>
-        <PendingApprovalScreen
-          user={currentUser}
-          onApproved={(user) => setCurrentUser(user)}
-          onLogout={handleLogout}
+      <PendingApprovalScreen
+        user={currentUser}
+        onApproved={(user) => setCurrentUser(user)}
+        onLogout={handleLogout}
         onUserUpdated={setCurrentUser}
-        />
-      </ThemeProvider>
+      />
     );
   }
 
   // 4. Admin Dashboard View
   if (activeView === 'admin') {
     return (
-      <ThemeProvider theme={theme}>
-        <AdminDashboard
-          currentUser={currentUser}
-          // Coming back from the full-screen admin view has to restore a
-          // view that is CONSISTENT with activeFolderId, which is
-          // deliberately left untouched while admin is open. Unconditionally
-          // setting 'all' here desynced the two: buildFileViewParams would
-          // then fetch with root_only (because activeView === 'all') while
-          // currentFolder/the breadcrumb still resolved to the folder the
-          // user came from — so that folder's header sat above root's file
-          // list, and any folder whose root happened to hold no files of its
-          // own rendered as "폴더가 비어 있습니다" despite being full.
-          onBackToApp={() => {
-            const restoredView = activeFolderId ? 'folder' : 'all';
-            setActiveView(restoredView);
-            updateUrlParams({ folderId: activeFolderId, view: restoredView });
-          }}
-        />
-      </ThemeProvider>
+      <AdminDashboard
+        currentUser={currentUser}
+        // Coming back from the full-screen admin view has to restore a
+        // view that is CONSISTENT with activeFolderId, which is
+        // deliberately left untouched while admin is open. Unconditionally
+        // setting 'all' here desynced the two: buildFileViewParams would
+        // then fetch with root_only (because activeView === 'all') while
+        // currentFolder/the breadcrumb still resolved to the folder the
+        // user came from — so that folder's header sat above root's file
+        // list, and any folder whose root happened to hold no files of its
+        // own rendered as "폴더가 비어 있습니다" despite being full.
+        onBackToApp={() => {
+          const restoredView = activeFolderId ? 'folder' : 'all';
+          setActiveView(restoredView);
+          updateUrlParams({ folderId: activeFolderId, view: restoredView });
+        }}
+      />
     );
   }
 
   // 5. Main Knowledge Base App
   return (
-    <ThemeProvider theme={theme}>
     <div className="app-container">
       {/* Mobile Drawer Backdrop */}
       {!isSidebarCollapsed && (
@@ -2426,6 +2428,5 @@ export default function App() {
         onClearCompleted={handleClearCompletedTransfers}
       />
     </div>
-    </ThemeProvider>
   );
 }

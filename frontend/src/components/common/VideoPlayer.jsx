@@ -112,13 +112,7 @@ export default function VideoPlayer({
       {/* Loading & Buffering Overlay.
           Styled entirely from theme tokens (see .media-loading-* in
           index.css) rather than the hardcoded blue/purple glow it used to
-          carry, which clashed badly with the matrix theme's green-on-black
-          palette. The indicator is a row of stepping bars instead of a
-          rotating icon inside a circle: matrix squares off every corner
-          globally, so the round glow and the circular badge came out as
-          mismatched squares there, and a smooth continuous spin reads wrong
-          against a pixel-art look. Bars are rectangular and step discretely,
-          so they suit matrix and the dark/light themes equally. */}
+          carry, so it belongs to whichever theme is on. */}
       {isLoading && !isError && (
         <div className="media-loading-overlay">
           <div className="media-loading-bars" aria-hidden="true">

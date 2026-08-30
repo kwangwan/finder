@@ -124,13 +124,16 @@ async def init_db():
             # `is_admin` sat next to a workspace's own "admin" role and read as
             # the same thing. This one is service-wide, so it says so.
             "ALTER TABLE kb_users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;",
-            # 일정 rebuilt: every 할 일 now owns a document, so the boards
-            # saved under the old shape have no documents to point at and are
-            # cleared out rather than half-migrated. Tasks and assignees go
-            # with the board file's own CASCADE.
-            "DELETE FROM kb_files WHERE file_type = 'board';",
             "ALTER TABLE kb_board_tasks ADD COLUMN IF NOT EXISTS document_id UUID "
             "REFERENCES kb_files(id) ON DELETE SET NULL;",
+            # 일정 rebuilt: every 할 일 now owns a document, so a board saved
+            # under the old shape has rows pointing at nothing and is cleared
+            # out rather than half-migrated. Only those: this list runs on
+            # every start, and an unguarded DELETE here threw away every board
+            # anyone had made since — each restart, silently.
+            "DELETE FROM kb_files f WHERE f.file_type = 'board' AND EXISTS ("
+            "  SELECT 1 FROM kb_board_tasks t"
+            "  WHERE t.file_id = f.id AND t.document_id IS NULL);",
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_board_task_document "
             "ON kb_board_tasks (document_id) WHERE document_id IS NOT NULL;",
             # The notes moved into that document, which keeps its own history.

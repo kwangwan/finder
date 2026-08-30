@@ -1,8 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=VT323&family=Silkscreen:wght@400;700&family=Press+Start+2P&display=swap');
-/* Galmuri: a pixel-art bitmap font covering full Hangul (11,172 syllables) +
-   Latin + numbers — VT323/Press Start 2P/Silkscreen above are Latin-only and
-   fall back to a non-pixel font for Korean text. Used for the matrix theme. */
-@import url('https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
   /* Color Palette - Deep Slate Dark (Default) */
@@ -22,8 +18,7 @@
   --text-muted: #64748b;
   
   /* Text drawn on an accent-coloured surface. White reads correctly on the
-     default blue; the matrix theme overrides it, because white is the one
-     colour that palette does not contain. */
+     default blue. */
   --on-accent: #ffffff;
   --accent-primary: #3b82f6;
   --accent-primary-hover: #2563eb;
@@ -73,52 +68,6 @@
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.06);
 }
 
-[data-theme='matrix'] {
-  --bg-primary: #000000;
-  --bg-secondary: #040d06;
-  --bg-tertiary: #081a0c;
-  --bg-card: rgba(4, 13, 6, 0.85);
-  --bg-card-hover: rgba(8, 26, 12, 0.95);
-  --bg-input: #020703;
-  
-  --border-subtle: rgba(34, 197, 94, 0.2);
-  --border-medium: #22c55e;
-  --border-focus: #22c55e;
-  
-  --text-primary: #4ade80;
-  --text-secondary: #22c55e;
-  --text-muted: #15803d;
-  
-  --on-accent: #04120a;
-  --accent-primary: #22c55e;
-  --accent-primary-hover: #16a34a;
-  --accent-gradient: linear-gradient(135deg, #22c55e 0%, #10b981 100%);
-  --accent-cyan: #10b981;
-  --accent-emerald: #22c55e;
-  --accent-amber: #84cc16;
-  --accent-rose: #ef4444;
-  
-  --glass-bg: rgba(4, 13, 6, 0.9);
-  --glass-border: 1px solid rgba(34, 197, 94, 0.3);
-  --glass-shadow: 0 0 20px rgba(34, 197, 94, 0.15);
-  
-  --font-sans: 'Galmuri11', 'JetBrains Mono', monospace;
-  --font-mono: 'Galmuri11', 'JetBrains Mono', monospace;
-
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-full: 0px;
-}
-
-/* Smooth CSS border-radius arcs read as anti-aliased curves, which clash with
-   the matrix theme's pixel-art look — square everything off, including the
-   ~150 spots across the app that set border-radius via inline style rather
-   than the --radius-* variables above (border-radius:50% avatars/dots too). */
-[data-theme='matrix'] * {
-  border-radius: 0 !important;
-}
-
 * {
   margin: 0;
   padding: 0;
@@ -127,9 +76,7 @@
 
 /* Browsers don't inherit font-family into form controls by default (they use
    a platform UI font instead) — without this, every <button>/<select>/
-   <input>/<textarea> silently ignores the theme font (this is why some
-   buttons and select boxes kept the system font after the matrix theme's
-   font change, even though everything else correctly inherited it). */
+   <input>/<textarea> silently ignores the app's font. */
 button, input, select, textarea, optgroup {
   font-family: inherit;
 }
@@ -3116,14 +3063,9 @@ h1, h2, h3, h4, h5, h6,
 /* ==========================================================================
    Media (video) loading overlay
 
-   Built from theme tokens only. The previous version hardcoded a blue/purple
-   radial glow behind a circular badge with a continuously rotating icon,
-   which fought the matrix theme on two fronts: the palette clashed with its
-   green-on-black, and matrix squares off every corner globally
-   ([data-theme='matrix'] * { border-radius: 0 }) so the "circle" rendered as
-   a square sitting inside a still-round glow. The indicator here is a row of
-   bars that step discretely — rectangular by nature, no rotation, and it
-   reads correctly in every theme.
+   Built from theme tokens only, so it reads correctly in both themes: a row
+   of bars that step discretely rather than a hardcoded blue/purple glow
+   behind a rotating badge.
    ========================================================================== */
 .media-loading-overlay {
   position: absolute;
@@ -3137,8 +3079,8 @@ h1, h2, h3, h4, h5, h6,
   /* Deliberately NOT --bg-primary: this scrim always sits over video, which
      .os-video-viewport renders on black in every theme. Following the theme
      background would wash the light theme out to a flat grey panel with the
-     frame behind it invisible. Media overlays stay dark; only the accent and
-     the matrix text override below follow the theme. */
+     frame behind it invisible. Media overlays stay dark; only the accent
+     follows the theme. */
   background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -3166,8 +3108,8 @@ h1, h2, h3, h4, h5, h6,
 .media-loading-bars span:nth-child(3) { animation-delay: 0.28s; }
 .media-loading-bars span:nth-child(4) { animation-delay: 0.42s; }
 
-/* steps() rather than a smooth ease keeps the motion blocky, which is what
-   makes the same indicator work for the pixel-art matrix theme. */
+/* Discrete steps rather than a smooth ease: the motion stays legible at a
+   glance without drawing the eye the way a spinner does. */
 @keyframes mediaLoadingBar {
   0%, 100% { transform: scaleY(0.3); opacity: 0.45; }
   50%      { transform: scaleY(1);   opacity: 1; }
@@ -3193,8 +3135,6 @@ h1, h2, h3, h4, h5, h6,
 
 /* Matrix is monochrome green by design, so let its own text tokens through
    instead of the neutral light greys — they're already light-on-black. */
-[data-theme='matrix'] .media-loading-title { color: var(--text-primary); }
-[data-theme='matrix'] .media-loading-meta { color: var(--accent-primary); }
 
 .media-loading-filename {
   max-width: 220px;
@@ -5041,10 +4981,9 @@ select option {
    ========================================================================== */
 
 /* .input-field was used across the admin dashboard but never defined, so those
-   boxes fell back to the browser's own chrome — white, rounded, system font.
-   Against the matrix theme (green on black, pixel type, every corner squared
-   off globally) they read as belonging to a different application. Built from
-   the same tokens as everything else, so each theme restyles them for free. */
+   boxes fell back to the browser's own chrome — white, rounded, system font,
+   reading as another application's. Built from the same tokens as everything
+   else, so both themes restyle them for free. */
 .input-field {
   width: 100%;
   padding: 0.45rem 0.6rem;
@@ -5062,8 +5001,7 @@ select option {
 
 /* Every other input in the app carried the browser's default grey placeholder,
    because only .input-field had a rule — nineteen boxes, each of which would
-   otherwise need its own. Grey is wrong in any theme with a palette of its
-   own, and unmistakably so in the matrix theme's green on black.
+   otherwise need its own. Grey is wrong in a theme with a palette of its own.
    opacity is pinned because Firefox dims placeholders on top of the colour. */
 input::placeholder,
 textarea::placeholder {
@@ -5376,9 +5314,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
    colour variables its theme object controls — cell borders are a literal
    `1px solid #ddd`, and the resize handle, drop cursor and selected-cell wash
    are all a fixed light blue. Nothing passed through `theme` can reach them,
-   so a table drew near-white gridlines on a dark background; in the matrix
-   theme, where everything else is green on black, they read as plain white
-   boxes.
+   so a table drew near-white gridlines on a dark background.
    
    index.css is imported before @blocknote/mantine/style.css (main.jsx loads it
    first, BlockNote's arrives later via PreviewWindow), so an equal-specificity
