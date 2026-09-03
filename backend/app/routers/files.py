@@ -107,6 +107,12 @@ async def _record_version(
             created_at=when,
             period_start=period,
         ))
+        # Written out now, not at commit: this session does not autoflush, so
+        # a second call for the same window — an ordinary save, whose previous
+        # content was written minutes ago in this same half hour — would not
+        # see the row just added and would insert a second one, which the
+        # unique index then refuses at commit time.
+        await db.flush()
 
 def _display_name(user: Optional[User]) -> Optional[str]:
     """
@@ -867,6 +873,11 @@ async def update_markdown_note(
             await db.rollback()
             if attempt == 1:
                 raise
+            # A rollback expires every object in this session, the signed-in
+            # user among them, and reading an expired attribute from async code
+            # raises rather than quietly running a query. The file is re-read at
+            # the top of the loop; the user has to be brought back too.
+            await db.refresh(current_user)
     await db.refresh(file_item)
 
     if content_changed:

@@ -136,17 +136,51 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
     }
   };
 
+  // Three different answers, and they used to arrive as one: "보내지
+  // 않았습니다 / 메일을 보내지 못했습니다" left it unclear whether there had
+  // been nothing to send or whether the send had been tried and refused.
+  const TEST_RESULTS = {
+    nothing_to_send: {
+      title: '보낼 내용이 없어 보내지 않았습니다',
+      type: 'info',
+      hint: '기한이 있는 할 일이 ‘담을 기간’ 안에 들어와야 메일이 갑니다.',
+    },
+    not_configured: {
+      title: '이 서버에서는 메일이 나가지 않습니다',
+      type: 'warning',
+      hint: '메일 발송 설정이 없어, 받는 시각을 정해 두어도 실제로는 발송되지 않습니다.',
+    },
+    failed: {
+      title: '보내려 했지만 실패했습니다',
+      type: 'error',
+      hint: '메일 서버가 아래 이유로 거절했습니다. 잠시 후 다시 시도해 보세요.',
+    },
+  };
+
   const test = async () => {
     setIsTesting(true);
     try {
       const res = await sendTestDigest(workspaceId);
-      await showAlert({
-        title: res.sent ? '보냈습니다' : '보내지 않았습니다',
-        message: res.sent ? `${res.to} 주소로 미리보기를 보냈습니다.` : (res.reason || '메일을 보내지 못했습니다.'),
-        type: res.sent ? 'success' : 'warning',
-      });
+      if (res.sent) {
+        await showAlert({
+          title: '보냈습니다',
+          message: `${res.to} 주소로 미리보기를 보냈습니다.`,
+          type: 'success',
+        });
+      } else {
+        const outcome = TEST_RESULTS[res.status] || TEST_RESULTS.failed;
+        await showAlert({
+          title: outcome.title,
+          message: [res.reason, outcome.hint].filter(Boolean).join('\n'),
+          type: outcome.type,
+        });
+      }
     } catch (e) {
-      await showAlert({ title: '보내지 못했습니다', message: e.message, type: 'error' });
+      await showAlert({
+        title: '보내려 했지만 실패했습니다',
+        message: e.message,
+        type: 'error',
+      });
     } finally {
       setIsTesting(false);
     }

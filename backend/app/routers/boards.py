@@ -246,10 +246,13 @@ async def send_test_digest(
     current_user: User = Depends(get_current_approved_user),
 ):
     """
-    Send the digest now, to the administrator asking for it.
+    Send the digest now, to the person asking for it.
 
     A setting whose effect is invisible until tomorrow morning is one nobody
-    can check they got right.
+    can check they got right — so this answers not just whether a mail went
+    out but which of the three things happened: it was sent, there was nothing
+    to send, or sending was attempted and refused. "보내지 않았습니다" and
+    "보내지 못했습니다" are different answers and were being given together.
     """
     if not await access_service.is_workspace_member(db, current_user, workspace_id):
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
@@ -262,14 +265,32 @@ async def send_test_digest(
     per_user = await board_digest_service.collect_for_workspace(db, workspace_id, wide)
     entry = per_user.get(current_user.id)
     if entry is None:
-        return {"sent": False, "reason": "본인에게 배정된 할 일 중 설정한 기간에 해당하는 것이 없습니다."}
+        return {
+            "sent": False,
+            "status": "nothing_to_send",
+            "reason": "담당인 할 일 중 기한이 설정된 것이 없습니다.",
+        }
     entry = board_digest_service.narrow_to(entry, config["horizons"])
     if not any(entry["buckets"].values()):
-        return {"sent": False, "reason": "설정한 기간에 해당하는 할 일이 없습니다."}
+        return {
+            "sent": False,
+            "status": "nothing_to_send",
+            "reason": "‘담을 기간’에 해당하는 할 일이 없습니다.",
+        }
     today = board_digest_service.local_today(config["timezone"])
     subject, html, text = board_digest_service.render_digest(workspace.name, entry, config, today)
-    ok = email_service.send_notification(current_user.email, f"[미리보기] {subject}", html, text)
-    return {"sent": bool(ok), "to": current_user.email}
+    sent, problem = email_service.send_notification_result(
+        current_user.email, f"[미리보기] {subject}", html, text
+    )
+    if problem == "not_configured":
+        return {
+            "sent": False,
+            "status": "not_configured",
+            "reason": "이 서버에 메일 발송이 설정되어 있지 않습니다.",
+        }
+    if not sent:
+        return {"sent": False, "status": "failed", "reason": problem or "알 수 없는 오류"}
+    return {"sent": True, "status": "sent", "to": current_user.email}
 
 
 async def _may_edit_workspace_defaults(db: AsyncSession, user: User, workspace_id) -> bool:

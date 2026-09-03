@@ -27,6 +27,26 @@ class EmailService:
                 os.getenv("SES_FROM_EMAIL_NOTIFY") or os.getenv("SES_SOURCE_EMAIL") or "notify@proj.run")
 
     @property
+    def source_formatted(self) -> str:
+        """
+        The From header, with the sender's name quoted.
+
+        The name has a colon in it, and an unquoted colon in a display name
+        does not read as part of the name — RFC 5322 says it opens a *group*,
+        so `Project Run : Finder <notify@proj.run>` parsed as a group called
+        "Project Run" holding an address whose local part is "Finder <notify".
+        SES refused every one of them with "Local address contains control or
+        whitespace", which is how the 할 일 digest, the storage warnings and
+        the deletion notices all failed silently while invitations — sent
+        under a name with no colon — kept working. Quoted, the whole name is
+        the name.
+        """
+        address = self.source_email
+        if not address or "<" in address:
+            return address
+        return f'"Project Run : Finder" <{address}>'
+
+    @property
     def app_url(self) -> str:
         return settings.APP_PUBLIC_URL or os.getenv("APP_PUBLIC_URL", "https://finder.proj.run")
 
@@ -37,21 +57,32 @@ class EmailService:
         return bool(key and secret and len(key.strip()) > 5 and len(secret.strip()) > 5 and key != "your_ses_key")
 
     def send_notification(self, to_emails, subject: str, html_body: str, text_body: str = "") -> bool:
-        """
-        Send one notification to one or more recipients.
+        """Whether the notification went out. See `send_notification_result`
+        for why it did not, when a caller has somewhere to say so."""
+        return self.send_notification_result(to_emails, subject, html_body, text_body)[0]
 
-        Used for operational mail (storage warnings, deletion notices) rather
-        than invitations. Falls back to logging when SES is not configured, so
-        a development environment still shows what would have been sent
-        instead of failing the action that triggered it.
+    def send_notification_result(
+        self, to_emails, subject: str, html_body: str, text_body: str = ""
+    ) -> tuple:
+        """
+        Send one notification to one or more recipients, and say what happened:
+        `(sent, problem)` where `problem` is None on success, and otherwise the
+        reason nothing left — "no recipients", "not configured", or whatever
+        the mail service itself said.
+
+        Used for operational mail (storage warnings, deletion notices, the 할
+        일 digest) rather than invitations. Falls back to logging when SES is
+        not configured, so a development environment still shows what would
+        have been sent instead of failing the action that triggered it — but it
+        says so rather than reporting a delivery that never happened.
         """
         recipients = [e for e in (to_emails if isinstance(to_emails, (list, tuple, set)) else [to_emails]) if e]
         if not recipients:
-            return False
+            return False, "받는 사람이 없습니다."
 
         if not self.is_ses_configured:
             print(f"\n[NOTIFICATION MOCK] TO: {recipients}\nSUBJECT: {subject}\n{text_body or ''}\n")
-            return True
+            return True, "not_configured"
 
         client = boto3.client(
             "ses",
@@ -59,16 +90,16 @@ class EmailService:
             aws_access_key_id=self.aws_access_key,
             aws_secret_access_key=self.aws_secret_key,
         )
-        source_formatted = f"Project Run : Finder <{self.source_email}>"
         # One message per person. A single send with everybody in To would
         # show each recipient the others' addresses — for a storage warning to
         # the administrators that is a list of who they are, disclosed by a
         # notification nobody asked to be on.
         delivered = 0
+        problem = None
         for address in recipients:
             try:
                 response = client.send_email(
-                    Source=source_formatted,
+                    Source=self.source_formatted,
                     Destination={"ToAddresses": [address]},
                     Message={
                         "Subject": {"Data": subject, "Charset": "UTF-8"},
@@ -85,7 +116,18 @@ class EmailService:
                 # mock print and return True, so a failed send looked like a
                 # delivered one and the caller marked it done.
                 print(f"[SES Error] notification to {address}: {e}")
-        return delivered > 0
+                problem = problem or self._readable_error(e)
+        return delivered > 0, (None if delivered else problem)
+
+    @staticmethod
+    def _readable_error(error: Exception) -> str:
+        """What the mail service refused, in the words it used — a person
+        reading "보내지 못했습니다" and nothing else cannot tell a rejected
+        address from an expired key from a service that is simply down."""
+        if isinstance(error, ClientError):
+            info = error.response.get("Error", {})
+            return f"{info.get('Code', 'Unknown')}: {info.get('Message', str(error))}"
+        return str(error)
 
     def send_invitation_email(
         self,
@@ -167,9 +209,8 @@ class EmailService:
                     aws_access_key_id=self.aws_access_key,
                     aws_secret_access_key=self.aws_secret_key
                 )
-                source_formatted = f"Project Run <{self.source_email}>" if ("@" in self.source_email and "<" not in self.source_email) else self.source_email
                 response = client.send_email(
-                    Source=source_formatted,
+                    Source=self.source_formatted,
                     Destination={"ToAddresses": [to_email]},
                     Message={
                         "Subject": {"Data": subject, "Charset": "UTF-8"},
