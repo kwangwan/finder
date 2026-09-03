@@ -11,9 +11,10 @@ import {
   uploadNoteImage,
   ensureMediaToken,
   getMediaPreviewUrl,
+  getFileDownloadUrl,
+  getThumbnailUrl,
   getStoredToken,
   getAuthConfig,
-  checkpointFileVersion,
   updateMarkdownNote
 } from '../api';
 import { getVideoEmbedUrl, VIDEO_EMBED_LINK_TEXT } from '../utils/markdownLinkComponents';
@@ -21,13 +22,6 @@ import { exportMarkdownToPdf } from '../utils/pdfExport';
 import { useDialog } from '../context/DialogContext';
 
 const COLLAB_FRAGMENT_NAME = 'blocknote';
-
-// See the original NoteEditor.jsx history for the full derivation of these
-// two timers — kept identical when this logic was ported into a reusable
-// hook so any open note window (there can now be several at once) still
-// gets Notion-style session-boundary + periodic history checkpoints.
-const IDLE_CHECKPOINT_DELAY = 2 * 60 * 1000;
-const PERIODIC_CHECKPOINT_INTERVAL = 10 * 60 * 1000;
 
 // Once the bounded retry below (2 attempts, ~15s total) gives up, nothing
 // else used to retry a failed autosave until the user's next real edit —
@@ -108,7 +102,28 @@ function upgradeVideoLinks(blocks) {
   });
 }
 
-const blockNoteSchema = BlockNoteSchema.create({
+// BlockNote's own parsers for these two read only the URL out of the element
+// they were given, so the file's name — which is the entire visible content of
+// a 파일 attachment, and the label under a player — was dropped on the way back
+// in. Both are written by `attachmentFigureHtml` below as a `data-name`, the
+// same attribute the video block already uses, and recovered here. Remove
+// these two overrides if a future BlockNote reads the name itself.
+function parseWithName(spec, targetTag) {
+  return function parse(element) {
+    const props = spec.implementation.parse?.call(this, element);
+    if (!props) return props;
+    const target = element.tagName.toLowerCase() === targetTag
+      ? element
+      : element.querySelector(targetTag);
+    const name = target?.getAttribute('data-name');
+    return name && !props.name ? { ...props, name } : props;
+  };
+}
+
+const stockAudioSpec = defaultBlockSpecs.audio;
+const stockFileSpec = defaultBlockSpecs.file;
+
+export const blockNoteSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     video: {
@@ -117,6 +132,20 @@ const blockNoteSchema = BlockNoteSchema.create({
         ...stockVideoSpec.implementation,
         render: renderVideoBlock,
         toExternalHTML: videoBlockToExternalHTML
+      }
+    },
+    audio: {
+      ...stockAudioSpec,
+      implementation: {
+        ...stockAudioSpec.implementation,
+        parse: parseWithName(stockAudioSpec, 'audio')
+      }
+    },
+    file: {
+      ...stockFileSpec,
+      implementation: {
+        ...stockFileSpec.implementation,
+        parse: parseWithName(stockFileSpec, 'embed')
       }
     }
   }
@@ -132,25 +161,75 @@ function getSyncUrl() {
   return syncUrlPromise;
 }
 
-const IMAGE_MARKDOWN_RE = /(!\[[^\]]*\]\()(\/api\/storage\/preview\/[^)?]+)(\?[^)]*)?(\))/g;
-const IMAGE_ID_RE = /\/api\/storage\/preview\/([^/?]+)/;
+// One of this app's own media URLs, in every shape it can arrive in: written
+// as a plain path or with an origin in front of it (the browser resolves a
+// relative src to an absolute one, and that absolute form comes back out of
+// the editor), and with or without the short-lived media token.
+const MEDIA_URL_RE = /(?:https?:\/\/[^/\s"')]+)?\/api\/storage\/(preview|download|thumbnail)\/([0-9a-fA-F-]{36})(?:\?[^\s"')\]]*)?/g;
 
-async function refreshImageTokensInMarkdown(markdown) {
-  if (!markdown || !markdown.includes('/api/storage/preview/')) return markdown;
+const MEDIA_URL_BUILDERS = {
+  preview: getMediaPreviewUrl,
+  download: getFileDownloadUrl,
+  thumbnail: getThumbnailUrl,
+};
+
+/**
+ * The stored form of every attachment URL: a plain path, no token.
+ *
+ * A media token lives for minutes and is a credential; writing one into the
+ * document meant the saved markdown carried an expired one for every
+ * attachment that was not an image (nothing ever refreshed those), so a file
+ * attached today opened to a 401 tomorrow. The document says *which* file it
+ * points at, and nothing more — the token is put back on the way in.
+ */
+function stripMediaTokens(markdown) {
+  if (!markdown || !markdown.includes('/api/storage/')) return markdown;
+  return markdown.replace(MEDIA_URL_RE, (_m, kind, id) => `/api/storage/${kind}/${id}`);
+}
+
+/** The same URLs with a token that works right now, for the editor to load. */
+async function addMediaTokens(markdown) {
+  if (!markdown || !markdown.includes('/api/storage/')) return markdown;
   await ensureMediaToken();
-  return markdown.replace(IMAGE_MARKDOWN_RE, (match, pre, path, _query, post) => {
-    const idMatch = path.match(IMAGE_ID_RE);
-    if (!idMatch) return match;
-    return pre + getMediaPreviewUrl(idMatch[1]) + post;
+  return markdown.replace(MEDIA_URL_RE, (match, kind, id) => {
+    const build = MEDIA_URL_BUILDERS[kind];
+    return build ? build(id) : match;
   });
 }
 
-function collectImageBlocks(blocks, acc = []) {
+const MEDIA_ID_RE = /\/api\/storage\/(?:preview|download|thumbnail)\/([0-9a-fA-F-]{36})/;
+
+// Every block that points at a file: a picture, a player, or a card with a
+// file name on it. All four are refreshed on the same timer — an image was,
+// and a video whose token had expired simply stopped playing.
+const ATTACHMENT_BLOCK_TYPES = new Set(['image', 'video', 'audio', 'file']);
+
+function collectAttachmentBlocks(blocks, acc = []) {
   for (const block of blocks) {
-    if (block.type === 'image' && block.props?.url) acc.push(block);
-    if (block.children && block.children.length) collectImageBlocks(block.children, acc);
+    if (ATTACHMENT_BLOCK_TYPES.has(block.type) && block.props?.url) acc.push(block);
+    if (block.children && block.children.length) collectAttachmentBlocks(block.children, acc);
   }
   return acc;
+}
+
+// Whether there is anything at all in the editor. Read from the blocks rather
+// than by converting to markdown, because this is asked on every keystroke.
+// Anything that is not text — a picture, a table, an attachment — counts as
+// content whatever it holds.
+const TEXTUAL_BLOCK_TYPES = new Set([
+  'paragraph', 'heading', 'quote', 'codeBlock',
+  'bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem',
+]);
+
+function isEditorEmpty(editor) {
+  const walk = (blocks) => blocks.every((block) => {
+    if (!TEXTUAL_BLOCK_TYPES.has(block.type)) return false;
+    const text = Array.isArray(block.content)
+      ? block.content.map((node) => node.text || '').join('')
+      : (block.content || '');
+    return !text.trim() && (!block.children?.length || walk(block.children));
+  });
+  return walk(editor?.document || []);
 }
 
 function colorForUser(id) {
@@ -290,15 +369,204 @@ export function expandBlankParagraphs(markdown) {
   return out.join('\n');
 }
 
+// An attachment that is not a picture does not survive a markdown round trip.
+// BlockNote's exporter writes a video as `![name](url)`, an audio as a bare
+// `<audio>` tag and a file as `[name](url)`; its parser only turns the first
+// of those back into a video when the URL *ends in a video extension*, which
+// this app's `/api/storage/preview/<id>` never does. So a video came back as a
+// broken picture and a file as a plain link — attachments looked right until
+// the document was reopened.
+//
+// Written instead as the `<figure>` form BlockNote's own parsers do recognise
+// for all three (parseFigureElement, see the block specs in @blocknote/core),
+// which every markdown parser passes through untouched because `figure` is a
+// block-level HTML tag. Done by swapping each attachment block for a
+// placeholder paragraph before the export and putting the figure back after
+// it, rather than by rewriting the exporter's HTML, so the placeholder text is
+// the only thing that has to survive the conversion.
+const ATTACHMENT_BLOCK_MARKDOWN_TYPES = new Set(['video', 'audio', 'file']);
+const ATTACHMENT_PLACEHOLDER = (index) => `\uE001ATT${index}\uE001`;
+
+function escapeHtmlAttr(value) {
+  return String(value).replace(/\s+/g, ' ').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeHtmlText(value) {
+  return String(value).replace(/\s+/g, ' ').replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function attachmentFigureHtml(block) {
+  const { url, name, caption } = block.props || {};
+  // On one line, always: a raw HTML block in markdown ends at the first blank
+  // line, so a caption someone typed a line break into would cut the figure in
+  // half and leave the rest of it showing as text.
+  const nameAttr = name ? ` data-name="${escapeHtmlAttr(name)}"` : '';
+  const inner = block.type === 'file'
+    ? `<embed src="${escapeHtmlAttr(url)}"${nameAttr}>`
+    : `<${block.type} src="${escapeHtmlAttr(url)}"${nameAttr} controls></${block.type}>`;
+  const figcaption = caption ? `<figcaption>${escapeHtmlText(caption)}</figcaption>` : '';
+  return `<figure>${inner}${figcaption}</figure>`;
+}
+
+function extractAttachments(blocks, collected) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? extractAttachments(block.children, collected) : block.children;
+    // A YouTube-style embed keeps its own representation (a link the load side
+    // turns back into a player), so it is left to that path.
+    const isEmbeddedVideo = block.type === 'video' && !!getVideoEmbedUrl(block.props?.url);
+    if (ATTACHMENT_BLOCK_MARKDOWN_TYPES.has(block.type) && block.props?.url && !isEmbeddedVideo) {
+      collected.push(attachmentFigureHtml(block));
+      return {
+        type: 'paragraph',
+        content: [{ type: 'text', text: ATTACHMENT_PLACEHOLDER(collected.length - 1), styles: {} }],
+        children,
+      };
+    }
+    return children === block.children ? block : { ...block, children };
+  });
+}
+
+// Indentation — one block tucked under another with Tab — has no markdown of
+// its own outside lists, and BlockNote's external-HTML exporter says so
+// explicitly: everything but a list item is *flattened* to the top level on
+// the way out ("default blockContainer style blocks are flattened (no nested
+// block support) for externalHTML"). So an indented paragraph came back
+// against the left margin every time a document was reopened.
+//
+// Recorded as this character, one per level, at the very start of the block's
+// text, and taken off again when the document is read back. A private-use
+// character for the same reason the table workaround above uses one: it can
+// never be typed, no markdown rule gives it a meaning, and no parser trims it
+// the way it would trim a space. Only blocks that hold text can carry it,
+// which leaves an indented picture or attachment flat — they have no text to
+// put it in, and the alternative would be markup no other editor could read.
+const INDENT_MARK = '\uE002';
+const LIST_BLOCK_TYPES = new Set(['bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem']);
+// A code block's content is the code: a marker in it would be a line of the
+// program. A table's is cells, not text.
+const UNMARKABLE_BLOCK_TYPES = new Set(['codeBlock', 'table']);
+
+function prefixInlineContent(content, prefix) {
+  if (typeof content === 'string') return prefix + content;
+  if (!Array.isArray(content)) return content;
+  const [first, ...rest] = content;
+  if (first?.type === 'text') return [{ ...first, text: prefix + first.text }, ...rest];
+  return [{ type: 'text', text: prefix, styles: {} }, ...content];
+}
+
+/**
+ * Write each block's depth into its own text, so the flattening the exporter
+ * does can be undone on the way back in.
+ *
+ * A list item inside a list item is left alone: markdown nests those itself,
+ * and marking them too would count the same level twice.
+ */
+function markIndentation(blocks, parentType = null, parentMark = 0) {
+  return blocks.map((block) => {
+    const mark = parentType === null
+      ? 0
+      : (LIST_BLOCK_TYPES.has(block.type) && LIST_BLOCK_TYPES.has(parentType) ? parentMark : parentMark + 1);
+    const children = block.children?.length ? markIndentation(block.children, block.type, mark) : block.children;
+    const canMark = mark > 0 && block.content !== undefined && !UNMARKABLE_BLOCK_TYPES.has(block.type);
+    const content = canMark ? prefixInlineContent(block.content, INDENT_MARK.repeat(mark)) : block.content;
+    if (content === block.content && children === block.children) return block;
+    return { ...block, content, children };
+  });
+}
+
+function takeIndentMark(content) {
+  const text = typeof content === 'string'
+    ? content
+    : (Array.isArray(content) && content[0]?.type === 'text' ? content[0].text : null);
+  if (!text || text[0] !== INDENT_MARK) return { mark: 0, content };
+  let mark = 0;
+  while (text[mark] === INDENT_MARK) mark += 1;
+  const rest = text.slice(mark);
+  if (typeof content === 'string') return { mark, content: rest };
+  const [, ...tail] = content;
+  return { mark, content: rest ? [{ ...content[0], text: rest }, ...tail] : tail };
+}
+
+/**
+ * Put the indented blocks back under the ones they belong to.
+ *
+ * `base` is the depth the list being walked already sits at, so a nested list
+ * that markdown restored by itself is not counted a second time.
+ */
+export function restoreIndentation(blocks, base = 0) {
+  const out = [];
+  const anchors = [];
+  for (const block of blocks) {
+    const { mark, content } = takeIndentMark(block.content);
+    const children = block.children?.length ? restoreIndentation(block.children, mark) : [];
+    const next = { ...block, content, children: [...children] };
+    const relative = mark - base;
+    const parent = relative > 0 ? anchors[relative - 1] : null;
+    if (parent) {
+      parent.children.push(next);
+      anchors.length = relative;
+      anchors[relative] = next;
+    } else {
+      out.push(next);
+      anchors.length = 0;
+      anchors[0] = next;
+    }
+  }
+  return out;
+}
+
 export function blocksToMarkdownTableSafe(editor, blocks) {
-  const html = editor.blocksToHTMLLossy(blocks);
+  const attachments = [];
+  const prepared = extractAttachments(markIndentation(blocks), attachments);
+  const html = editor.blocksToHTMLLossy(prepared);
   const container = document.createElement('div');
   container.innerHTML = html;
   container.querySelectorAll('table br').forEach((br) => {
     br.replaceWith(document.createTextNode(TABLE_BR_PLACEHOLDER));
   });
-  const markdown = cleanHTMLToMarkdown(container.innerHTML);
-  return markdown.split(TABLE_BR_PLACEHOLDER).join('<br>');
+  let markdown = cleanHTMLToMarkdown(container.innerHTML).split(TABLE_BR_PLACEHOLDER).join('<br>');
+  attachments.forEach((figure, index) => {
+    markdown = markdown.split(ATTACHMENT_PLACEHOLDER(index)).join(figure);
+  });
+  return stripMediaTokens(markdown);
+}
+
+// A document written before attachments had a form of their own holds each one
+// as an ordinary link to a file in the workspace, which is why an attachment
+// that had been saved once came back as a line of blue text instead of the
+// card it was inserted as. A paragraph that is nothing but a link to a file
+// here is that, and is turned back into the attachment it stands for — a
+// repair on the way in, so no stored document has to be rewritten for it.
+//
+// Only files: a picture written as `![]()` still parses as a picture, but a
+// *video* attached before this change was written the same way and cannot be
+// told apart from one by its URL alone, so an old video attachment stays a
+// (broken) picture until it is attached again.
+const ATTACHMENT_LINK_RE = /^(?:https?:\/\/[^/]+)?\/api\/(?:storage\/(?:preview|download|presigned-download)\/[0-9a-fA-F-]{36}|files\/[0-9a-fA-F-]{36}\/download)(?:\?[^\s]*)?$/;
+
+function upgradeAttachmentLinks(blocks) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? upgradeAttachmentLinks(block.children) : block.children;
+    if (block.type === 'paragraph' && block.content?.length === 1) {
+      const node = block.content[0];
+      if (node?.type === 'link' && ATTACHMENT_LINK_RE.test(node.href || '')) {
+        const name = (node.content || []).map((n) => n.text || '').join('');
+        return { type: 'file', props: { url: node.href, name }, children };
+      }
+    }
+    return children === block.children ? block : { ...block, children };
+  });
+}
+
+/** Markdown as it is stored turned into blocks as the editor holds them. */
+export function markdownToBlocks(editor, markdown) {
+  const parsed = editor.tryParseMarkdownToBlocks(expandBlankParagraphs(markdown) || ' ');
+  const blocks = restoreBlankParagraphs(upgradeAttachmentLinks(upgradeVideoLinks(restoreIndentation(parsed))));
+  // replaceBlocks refuses an empty list, and a document that parsed to nothing
+  // is an empty document, not a missing one.
+  return blocks.length ? blocks : [{ type: 'paragraph' }];
 }
 
 /**
@@ -323,8 +591,9 @@ export function restoreBlankParagraphs(blocks) {
 
 /**
  * Owns everything a collaborative BlockNote note editor needs: the Yjs
- * doc/Hocuspocus room, the BlockNote editor instance, autosave + version-
- * history checkpoint timers, and image/video markdown round-trip fixups.
+ * doc/Hocuspocus room, the BlockNote editor instance, the autosave, and the
+ * markdown round-trip fixups. Version history needs nothing from here — the
+ * server keeps one entry per half hour off the saves themselves.
  *
  * Extracted from the old full-page NoteEditor.jsx so it can be mounted once
  * per open note *window* instead of once per whole app — every piece of
@@ -352,7 +621,6 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   const saveRetryTimeoutRef = useRef(null);
   const saveRetryIntervalRef = useRef(null);
   const saveRetryCountRef = useRef(0);
-  const idleCheckpointTimeoutRef = useRef(null);
   const fileRef = useRef(file);
   const workspaceIdRef = useRef(activeWorkspaceId);
   const titleRef = useRef(title);
@@ -362,6 +630,13 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   const isLoadingContentRef = useRef(true);
   const hasBootstrappedRef = useRef(false);
   const editorRef = useRef(null);
+  // Whether the document we are editing has any text in it, and whether it was
+  // this person who took the text out. Together they are what tells an ordinary
+  // "select all, delete" — which must save — from an editor that is empty for
+  // some other reason, which must never be written over the document. See the
+  // guard in doSave.
+  const hasContentRef = useRef(!!(file?.content || '').trim());
+  const emptiedHereRef = useRef(false);
 
   fileRef.current = file;
   workspaceIdRef.current = activeWorkspaceId;
@@ -380,12 +655,24 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   const [collab, setCollab] = useState(null);
 
   const doSave = useCallback(async (newTitle, newTags) => {
+    const markdown = blocksToMarkdownTableSafe(editorRef.current, editorRef.current.document);
+    // A document that has been open for hours can be emptied without anybody
+    // touching it — a torn-down and rebuilt editor, a collaborative room that
+    // came back without its content — and the autosave then wrote that
+    // emptiness over the real document, which had to be dug back out of the
+    // history. An empty save is only ever legitimate when the emptying
+    // happened here, in front of the person doing it.
+    if (!markdown.trim() && hasContentRef.current && !emptiedHereRef.current) {
+      console.warn('[NoteEditor] refused to save an empty document that was not emptied here');
+      setSaveStatus('saved');
+      return;
+    }
     setSaveStatus('saving');
     try {
-      const markdown = blocksToMarkdownTableSafe(editorRef.current, editorRef.current.document);
       const updated = await updateMarkdownNote(fileRef.current.id, { name: newTitle, content: markdown, tags: newTags });
       setSaveStatus('saved');
       setSaveError(null);
+      hasContentRef.current = !!markdown.trim();
       saveRetryCountRef.current = 0;
       if (saveRetryIntervalRef.current) {
         clearInterval(saveRetryIntervalRef.current);
@@ -446,8 +733,10 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
         hasBootstrappedRef.current = true;
         try {
           if (newYdoc.getXmlFragment(COLLAB_FRAGMENT_NAME).length === 0 && editorRef.current) {
-            const processed = await refreshImageTokensInMarkdown(fileRef.current?.content || '');
-            const blocks = restoreBlankParagraphs(upgradeVideoLinks(editorRef.current.tryParseMarkdownToBlocks(expandBlankParagraphs(processed) || ' ')));
+            const stored = fileRef.current?.content || '';
+            hasContentRef.current = !!stored.trim();
+            emptiedHereRef.current = false;
+            const blocks = markdownToBlocks(editorRef.current, await addMediaTokens(stored));
             editorRef.current.replaceBlocks(editorRef.current.document, blocks);
           }
         } finally {
@@ -458,10 +747,6 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     });
     setCollab({ ydoc: newYdoc, provider: newProvider });
     return () => {
-      if (idleCheckpointTimeoutRef.current) {
-        clearTimeout(idleCheckpointTimeoutRef.current);
-        idleCheckpointTimeoutRef.current = null;
-      }
       if (saveRetryTimeoutRef.current) {
         clearTimeout(saveRetryTimeoutRef.current);
         saveRetryTimeoutRef.current = null;
@@ -531,11 +816,12 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   useEffect(() => {
     if (!enabled) return;
     const interval = setInterval(async () => {
-      const images = collectImageBlocks(editor.document).filter((b) => b.props.url.includes('/api/storage/preview/'));
-      if (images.length === 0) return;
+      const attachments = collectAttachmentBlocks(editor.document)
+        .filter((b) => MEDIA_ID_RE.test(b.props.url));
+      if (attachments.length === 0) return;
       await ensureMediaToken();
-      images.forEach((b) => {
-        const idMatch = b.props.url.match(IMAGE_ID_RE);
+      attachments.forEach((b) => {
+        const idMatch = b.props.url.match(MEDIA_ID_RE);
         if (idMatch) editor.updateBlock(b, { props: { url: getMediaPreviewUrl(idMatch[1]) } });
       });
     }, 5 * 60 * 1000);
@@ -565,24 +851,6 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     }, 1000);
   }, [doSave]);
 
-  const scheduleIdleCheckpoint = useCallback(() => {
-    if (idleCheckpointTimeoutRef.current) clearTimeout(idleCheckpointTimeoutRef.current);
-    idleCheckpointTimeoutRef.current = setTimeout(() => {
-      idleCheckpointTimeoutRef.current = null;
-      if (!isSaveLeaderRef.current() || !fileRef.current?.id) return;
-      checkpointFileVersion(fileRef.current.id).catch(() => {});
-    }, IDLE_CHECKPOINT_DELAY);
-  }, []);
-
-  useEffect(() => {
-    if (!enabled || !file?.id) return;
-    const interval = setInterval(() => {
-      if (!isSaveLeaderRef.current()) return;
-      checkpointFileVersion(file.id).catch(() => {});
-    }, PERIODIC_CHECKPOINT_INTERVAL);
-    return () => clearInterval(interval);
-  }, [enabled, file?.id]);
-
   useEffect(() => {
     if (!enabled) return;
     const flush = () => {
@@ -590,15 +858,8 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
       }
-      if (idleCheckpointTimeoutRef.current) {
-        clearTimeout(idleCheckpointTimeoutRef.current);
-        idleCheckpointTimeoutRef.current = null;
-      }
       if (!isSaveLeaderRef.current()) return;
-      const pending = saveStatusRef.current === 'saved' ? Promise.resolve() : doSaveRef.current(titleRef.current, tagsRef.current);
-      Promise.resolve(pending).then(() => {
-        if (fileRef.current?.id) checkpointFileVersion(fileRef.current.id).catch(() => {});
-      });
+      if (saveStatusRef.current !== 'saved') doSaveRef.current(titleRef.current, tagsRef.current);
     };
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') flush();
@@ -615,13 +876,14 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     const val = e.target.value;
     setTitle(val);
     triggerAutoSave(val, tags);
-    scheduleIdleCheckpoint();
   };
 
   const handleEditorChange = () => {
     if (isLoadingContentRef.current) return;
+    // Recorded at the moment the editor itself reports the change, which is
+    // the only moment an empty document can be known to be somebody's doing.
+    emptiedHereRef.current = isEditorEmpty(editorRef.current);
     triggerAutoSave(titleRef.current, tagsRef.current);
-    scheduleIdleCheckpoint();
   };
 
   /**
@@ -648,9 +910,10 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   };
 
   const handleVersionRestored = async (updatedFile) => {
-    const processed = await refreshImageTokensInMarkdown(updatedFile.content || '');
-    const blocks = restoreBlankParagraphs(upgradeVideoLinks(editor.tryParseMarkdownToBlocks(expandBlankParagraphs(processed) || ' ')));
+    const blocks = markdownToBlocks(editor, await addMediaTokens(updatedFile.content || ''));
     editor.replaceBlocks(editor.document, blocks);
+    hasContentRef.current = !!(updatedFile.content || '').trim();
+    emptiedHereRef.current = false;
     onFileUpdatedRef.current?.(updatedFile);
   };
 

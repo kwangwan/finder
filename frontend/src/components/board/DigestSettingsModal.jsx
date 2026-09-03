@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Loader2, Mail, Check, AlertTriangle, Settings as SettingsIcon } from '../../utils/icons';
 import {
   getDigestSettings, saveDigestSettings, saveMyDigestSettings, sendTestDigest,
@@ -18,17 +18,28 @@ const MINUTES = [0, 10, 20, 30, 40, 50].map((m) => ({ value: m, label: `${pad(m)
  * which day it is would make their boards disagree. When the mail lands is
  * nobody else's business, so that is each person's own, starting from whatever
  * the administrator set as the default.
+ *
+ * Every control here saves itself the moment it is used. There used to be a
+ * 저장 button, and a switch that says "매일 받는 중" the moment it is flipped
+ * reads as already in effect — so a reminder turned on and then closed was
+ * never stored at all, and the mail simply never came. Nothing to press, and
+ * nothing that can be left unpressed.
  */
 export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen, onClose }) {
   const { showAlert } = useDialog();
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [tab, setTab] = useState('mine');
 
   const [mine, setMine] = useState({});
   const [defaults, setDefaults] = useState({});
+  // 'idle' | 'saving' | 'saved' | 'failed', so a change that went through says
+  // so without a dialog and a change that did not is never mistaken for one
+  // that did.
+  const [saveState, setSaveState] = useState('idle');
+  const savedTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(savedTimerRef.current), []);
 
   const load = () => {
     setIsLoading(true);
@@ -53,52 +64,75 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
 
   const canEditDefaults = !!data?.can_edit_defaults;
   const editing = tab === 'mine' ? mine : defaults;
-  const setEditing = tab === 'mine' ? setMine : setDefaults;
   const readOnly = tab === 'defaults' && !canEditDefaults;
 
   const toggleHorizon = (value) => {
     const current = editing.horizons || [];
-    setEditing({ ...editing, horizons: current.includes(value) ? current.filter((h) => h !== value) : [...current, value] });
+    const next = current.includes(value) ? current.filter((h) => h !== value) : [...current, value];
+    // The mail has to carry something. Turning the last one off would leave a
+    // reminder with nothing in it, so the last one stays on.
+    if (next.length === 0) return;
+    apply({ horizons: next });
   };
 
-  const save = async () => {
-    setIsSaving(true);
+  /**
+   * Take a change, show it immediately, and send it.
+   *
+   * The screen is updated first so a dropdown never appears to snap back while
+   * the request is in flight; a failure says so and puts the stored value back
+   * by re-reading it.
+   */
+  const apply = async (patch) => {
+    if (readOnly) return;
+    const isMine = tab === 'mine';
+    const next = { ...(isMine ? mine : defaults), ...patch };
+    (isMine ? setMine : setDefaults)(next);
+    setSaveState('saving');
+    clearTimeout(savedTimerRef.current);
     try {
-      if (tab === 'mine') {
+      if (isMine) {
         await saveMyDigestSettings(workspaceId, {
-          enabled: mine.enabled,
-          send_hour: mine.send_hour,
-          send_minute: mine.send_minute,
-          horizons: mine.horizons,
+          enabled: next.enabled,
+          send_hour: next.send_hour,
+          send_minute: next.send_minute,
+          horizons: next.horizons,
         });
       } else {
         await saveDigestSettings(workspaceId, {
-          enabled: defaults.enabled,
-          timezone: defaults.timezone,
-          send_hour: defaults.send_hour,
-          send_minute: defaults.send_minute,
-          horizons: defaults.horizons,
+          enabled: next.enabled,
+          timezone: next.timezone,
+          send_hour: next.send_hour,
+          send_minute: next.send_minute,
+          horizons: next.horizons,
         });
       }
-      onClose(true);
+      // The two tabs are not independent — turning on a personal setting makes
+      // it an override, and the workspace default is what the other tab shows
+      // people who have none — so the whole thing is re-read once it lands.
+      const res = await getDigestSettings(workspaceId);
+      setData(res);
+      setDefaults(res.defaults);
+      setMine(res.effective);
+      setSaveState('saved');
+      savedTimerRef.current = setTimeout(() => setSaveState('idle'), 2000);
     } catch (e) {
+      setSaveState('failed');
       await showAlert({ title: '저장하지 못했습니다', message: e.message, type: 'error' });
-    } finally {
-      setIsSaving(false);
+      load();
     }
   };
 
   const useDefault = async () => {
-    setIsSaving(true);
+    setSaveState('saving');
     try {
       await saveMyDigestSettings(workspaceId, {
         enabled: null, send_hour: null, send_minute: null, horizons: null,
       });
+      setSaveState('idle');
       load();
     } catch (e) {
+      setSaveState('failed');
       await showAlert({ title: '되돌리지 못했습니다', message: e.message, type: 'error' });
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -188,7 +222,7 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
                       <Dropdown
                         value={defaults.timezone}
                         options={(data.timezone_choices || []).map((tz) => ({ value: tz.value, label: tz.label }))}
-                        onChange={(v) => setDefaults({ ...defaults, timezone: v })}
+                        onChange={(v) => apply({ timezone: v })}
                         label="기준시"
                         className="dg-wide"
                       />
@@ -202,7 +236,7 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
                   <div className="dg-control">
                     <Toggle
                       on={!!editing.enabled}
-                      onChange={(v) => !readOnly && setEditing({ ...editing, enabled: v })}
+                      onChange={(v) => apply({ enabled: v })}
                       onLabel="매일 받는 중"
                       offLabel="받지 않는 중"
                       title="매일 알림 메일을 받을지 여부"
@@ -216,11 +250,11 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
                     <span className="dg-time">
                       <Dropdown
                         value={editing.send_hour} options={HOURS} label="시"
-                        onChange={(v) => !readOnly && setEditing({ ...editing, send_hour: v })}
+                        onChange={(v) => apply({ send_hour: v })}
                       />
                       <Dropdown
                         value={editing.send_minute} options={MINUTES} label="분"
-                        onChange={(v) => !readOnly && setEditing({ ...editing, send_minute: v })}
+                        onChange={(v) => apply({ send_minute: v })}
                       />
                     </span>
                   </div>
@@ -265,7 +299,7 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
                     <span>나에게 미리보기 보내기</span>
                   </button>
                   {overridden && (
-                    <button type="button" className="btn-secondary" onClick={useDefault} disabled={isSaving}>
+                    <button type="button" className="btn-secondary" onClick={useDefault}>
                       기본값으로
                     </button>
                   )}
@@ -273,12 +307,13 @@ export default function DigestSettingsModal({ workspaceId, workspaceName, isOpen
               )}
               {readOnly && <span className="dg-readonly">기본값은 워크스페이스를 관리하는 사람만 바꿀 수 있습니다.</span>}
               <span className="dg-spacer" />
-              <button type="button" className="btn-secondary" onClick={() => onClose(false)}>닫기</button>
-              {!readOnly && (
-                <button type="button" className="btn-primary" onClick={save} disabled={isSaving}>
-                  {isSaving ? '저장 중...' : '저장'}
-                </button>
+              {saveState !== 'idle' && !readOnly && (
+                <span className="dg-savestate">
+                  {saveState === 'saving' ? <Loader2 size={12} className="spin" /> : <Check size={12} />}
+                  <span>{saveState === 'saving' ? '저장 중' : '저장됨'}</span>
+                </span>
               )}
+              <button type="button" className="btn-secondary" onClick={() => onClose(true)}>닫기</button>
             </div>
           </>
         )}

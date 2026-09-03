@@ -5,7 +5,7 @@ import {
 } from '../../utils/icons';
 import {
   listWorkspaceTasks, updateBoardTask, deleteBoardTask, createBoardTask,
-  getFileDetail, getBoard, getDigestSettings,
+  getFileDetail, getBoard, getDigestSettings, listBoardAssignees,
 } from '../../api';
 import { useDialog } from '../../context/DialogContext';
 import TaskRow from './TaskRow';
@@ -57,9 +57,10 @@ export default function ScheduleExplorer({
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   // One object, because they are one thing: how this list is being looked at.
-  // Starts on the answer most people want first — what is mine and not done.
+  // Starts on everything outstanding in the workspace; whose it is, is one of
+  // the settings rather than a decision made for the reader.
   const [filters, setFilters] = useState({ ...DEFAULT_FILTERS });
-  const { includeDone, mineOnly, priority, status, grouping, fromDate, toDate } = filters;
+  const { includeDone, assigneeId, priority, status, grouping, fromDate, toDate } = filters;
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsRefresh, setSettingsRefresh] = useState(0);
@@ -88,6 +89,8 @@ export default function ScheduleExplorer({
   // The reference clock everything on a board is read against. Shown so nobody
   // has to guess which day the app thinks it is.
   const [zone, setZone] = useState({ timezone: null, label: '' });
+  // Who can be filtered by: everyone with a 할 일 here, this person first.
+  const [people, setPeople] = useState([]);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -102,6 +105,15 @@ export default function ScheduleExplorer({
   }, [workspaceId, settingsRefresh]);
 
   useEffect(() => {
+    if (!workspaceId) { setPeople([]); return undefined; }
+    let cancelled = false;
+    listBoardAssignees(workspaceId)
+      .then((items) => { if (!cancelled) setPeople(items); })
+      .catch(() => { if (!cancelled) setPeople([]); });
+    return () => { cancelled = true; };
+  }, [workspaceId, refreshToken]);
+
+  useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
@@ -111,7 +123,7 @@ export default function ScheduleExplorer({
     return () => clearTimeout(t);
   }, [query]);
 
-  useEffect(() => { setPage(1); }, [includeDone, mineOnly, priority, status, fromDate, toDate, workspaceId]);
+  useEffect(() => { setPage(1); }, [includeDone, assigneeId, priority, status, fromDate, toDate, workspaceId]);
 
   const load = useCallback(async () => {
     if (!workspaceId) return;
@@ -121,7 +133,7 @@ export default function ScheduleExplorer({
         workspaceId,
         q: search,
         includeDone,
-        assigneeId: mineOnly ? currentUser?.id : null,
+        assigneeId: assigneeId || null,
         priority: priority || null,
         status: status || null,
         fromDate,
@@ -137,7 +149,7 @@ export default function ScheduleExplorer({
     } finally {
       setIsLoading(false);
     }
-  }, [workspaceId, search, includeDone, mineOnly, priority, status, fromDate, toDate, page, currentUser?.id]);
+  }, [workspaceId, search, includeDone, assigneeId, priority, status, fromDate, toDate, page]);
 
   useEffect(() => { load(); }, [load, refreshToken]);
 
@@ -297,9 +309,12 @@ export default function ScheduleExplorer({
     const items = data.items;
 
     // How urgent a top-level 할 일 is, counting its sub-items: work due today
-    // is due today whichever row carries the date.
+    // is due today whichever row carries the date. A sub-item that is already
+    // done is left out of the reckoning — a finished step cannot make the 할
+    // 일 it belongs to late.
     const soonest = (t) => {
       const all = [t, ...(t.children || [])]
+        .filter((x) => x.status !== 'done')
         .map((x) => x.days_left)
         .filter((d) => d !== null && d !== undefined);
       return all.length ? Math.min(...all) : null;
@@ -542,6 +557,8 @@ export default function ScheduleExplorer({
       <ScheduleFilterModal
         isOpen={filtersOpen}
         filters={filters}
+        people={people}
+        currentUserId={currentUser?.id}
         onChange={setFilters}
         onClose={() => setFiltersOpen(false)}
       />

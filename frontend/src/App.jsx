@@ -1759,12 +1759,24 @@ export default function App() {
    * The name of a 할 일 lives in its document's title, so a rename made in the
    * document's window has to reach the board it belongs to and the 일정 tab —
    * neither of which is looking at that window.
+   *
+   * The name is written straight into every list that already holds that file
+   * before anything is re-read: a rename is typed a letter at a time, and a
+   * listing that only catches up when its own request comes back showed the
+   * old name for as long as the typing went on — and stayed on the old one
+   * whenever a refetch was skipped or overtaken. The reload still follows, for
+   * everything the patch cannot know about.
    */
-  const handleFileRenamed = useCallback(() => {
+  const handleFileRenamed = useCallback((fileId, newName) => {
+    if (fileId && newName) {
+      setFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, name: newName } : f)));
+      windowManager.updateWindowFile(fileId, { name: newName });
+    }
     refreshFiles();
+    refreshFoldersAndStats();
     bumpWindowRefresh();
     setScheduleRefreshToken((n) => n + 1);
-  }, [refreshFiles, bumpWindowRefresh]);
+  }, [refreshFiles, refreshFoldersAndStats, bumpWindowRefresh, windowManager]);
 
   // Cut/copy/paste entries shared by the file, folder and background menus, so
   // the three stay in step and a selection is always acted on as a unit.

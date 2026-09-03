@@ -48,7 +48,15 @@ function dayLabel(iso) {
   return `${m}월 ${d}일${weekday}`;
 }
 
-export function remainingText(daysLeft) {
+/**
+ * How long is left, or how long it is late.
+ *
+ * A finished 할 일 gets nothing: it is not late and it is not due, whatever
+ * its date says, and "3일 지남" beside something already done reads as work
+ * still outstanding.
+ */
+export function remainingText(daysLeft, status) {
+  if (status === 'done') return '';
   if (daysLeft === null || daysLeft === undefined) return '';
   if (daysLeft < 0) return `${-daysLeft}일 지남`;
   if (daysLeft === 0) return '오늘';
@@ -213,7 +221,7 @@ export default function TaskRow({
   const periodRef = useRef(null);
 
   const tone = dueTone(task.days_left, task.status);
-  const left = remainingText(task.days_left);
+  const left = remainingText(task.days_left, task.status);
 
   const toggleAssignee = (userId) => {
     const current = task.assignees.map((a) => a.id);

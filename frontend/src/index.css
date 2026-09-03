@@ -2386,8 +2386,12 @@ h1, h2, h3, h4, h5, h6,
   overflow-y: auto;
 }
 
+/* The document fills the window it was given. A fixed reading column left a
+   wide window mostly empty and made every table and picture in it narrower
+   than it had room to be — and the window is already the user's own choice of
+   width, so it is the one that decides. */
 .editor-pane-blocknote .bn-editor {
-  max-width: 900px;
+  max-width: 100%;
   margin: 0 auto;
   min-height: 100%;
 }
@@ -5530,6 +5534,11 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .bd-note.has { color: var(--accent-primary); }
 .bd-subadd { opacity: 0; }
 .bd-row:hover .bd-subadd, .bd-row:focus-within .bd-subadd { opacity: 1; }
+/* A touch screen never hovers, so on a phone the only way to add a sub-item
+   was to not have one. Where there is no hover, it is simply always there. */
+@media (hover: none) {
+  .bd-subadd { opacity: 1; }
+}
 
 .bd-rowboard {
   flex-shrink: 1;
@@ -6346,6 +6355,14 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .dg-spacer { flex: 1; }
 .dg-readonly { font-size: 0.77rem; color: var(--text-muted); }
+/* Every control here saves itself, so this is what says so. */
+.dg-savestate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.77rem;
+  color: var(--accent-emerald);
+}
 
 @media (max-width: 560px) {
   .sc-explorer { padding: 0.9rem 0.9rem 5rem; }

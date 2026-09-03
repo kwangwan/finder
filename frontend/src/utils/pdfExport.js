@@ -56,6 +56,33 @@ async function resolveEmbeds(markdown) {
 
   let text = markdown || '';
 
+  // 0. Attachments, which a document writes as a <figure> holding a
+  // <video>/<audio>/<embed> (see useNoteEditor's blocksToMarkdownTableSafe —
+  // markdown has no shorthand that survives a round trip for any of them).
+  // A PDF cannot play anything, so each becomes what it is: a named link that
+  // downloads the file, resolved to a presigned URL the same way an attached
+  // file link is below.
+  const figureRe = /<figure>\s*<(video|audio|embed)\b([^>]*)>[\s\S]*?<\/figure>/g;
+  for (const m of [...text.matchAll(figureRe)]) {
+    const [full, , attrs] = m;
+    const src = (attrs.match(/src="([^"]*)"/) || [])[1] || '';
+    const name = (attrs.match(/data-name="([^"]*)"/) || [])[1] || '';
+    const idMatch = src.match(/\/api\/storage\/(?:preview|download)\/([0-9a-fA-F-]{36})/);
+    const label = name || '첨부 파일';
+    let html;
+    if (idMatch) {
+      try {
+        const { download_url } = await getPresignedDownloadUrl(idMatch[1]);
+        html = `<a href="${escapeAttr(download_url)}" class="pdf-attachment-link">📎 ${escapeHtml(label)}</a>`;
+      } catch (e) {
+        html = `<span class="pdf-attachment-broken">📎 ${escapeHtml(label)} (다운로드 링크 생성 실패 — 앱에서 다시 시도하세요)</span>`;
+      }
+    } else {
+      html = `<a href="${escapeAttr(src)}" class="pdf-attachment-link">📎 ${escapeHtml(label)}</a>`;
+    }
+    text = text.split(full).join(placeholder(html));
+  }
+
   // 1. Attached-file links -> resolve to a real, self-contained presigned
   // download URL (valid ~1hr from export time; the API route itself only
   // returns JSON to an authenticated fetch, so the raw route is useless here).

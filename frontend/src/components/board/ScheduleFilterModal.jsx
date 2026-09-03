@@ -26,10 +26,19 @@ export const STATUS_OPTIONS = [
   { value: 'hold', label: '보류' },
 ];
 
-/** What the list shows when nobody has changed anything. */
+/**
+ * What the list shows when nobody has changed anything: everything in the
+ * workspace. It used to open on "내 담당만", which answered a narrower question
+ * than the tab is for — the 일정 탭 is where the whole workspace's work is —
+ * and hid other people's deadlines from the person most likely to be looking
+ * for them. Whose work to look at is now a choice, with yourself at the top.
+ */
 export const DEFAULT_FILTERS = {
   grouping: 'urgency',
-  mineOnly: true,
+  assigneeId: '',
+  // Kept beside the id so the chip can say whose work is being shown without
+  // the bar having to hold the list of people to look the name up in.
+  assigneeName: '',
   includeDone: false,
   priority: '',
   status: '',
@@ -43,7 +52,9 @@ export function activeFilters(f) {
   if (f.grouping !== DEFAULT_FILTERS.grouping) {
     out.push({ key: 'grouping', label: GROUPINGS.find((g) => g.value === f.grouping)?.label, reset: { grouping: DEFAULT_FILTERS.grouping } });
   }
-  if (!f.mineOnly) out.push({ key: 'mineOnly', label: '모든 담당자', reset: { mineOnly: true } });
+  if (f.assigneeId) {
+    out.push({ key: 'assignee', label: `담당: ${f.assigneeName || '선택한 사람'}`, reset: { assigneeId: '', assigneeName: '' } });
+  }
   if (f.includeDone) out.push({ key: 'includeDone', label: '완료도 함께', reset: { includeDone: false } });
   if (f.priority) {
     out.push({ key: 'priority', label: PRIORITY_OPTIONS.find((p) => p.value === f.priority)?.label, reset: { priority: '' } });
@@ -69,7 +80,7 @@ export function activeFilters(f) {
  * behind one button that says how many are on, and what is on is shown back
  * as chips beside it so nothing is hidden, only tidied.
  */
-export default function ScheduleFilterModal({ isOpen, filters, onChange, onClose }) {
+export default function ScheduleFilterModal({ isOpen, filters, onChange, onClose, people = [], currentUserId = null }) {
   if (!isOpen) return null;
   const set = (patch) => onChange({ ...filters, ...patch });
 
@@ -104,12 +115,18 @@ export default function ScheduleFilterModal({ isOpen, filters, onChange, onClose
           <div className="sf-row">
             <span className="sf-label">담당자</span>
             <div className="sf-control">
-              <Toggle
-                on={filters.mineOnly}
-                onChange={(v) => set({ mineOnly: v })}
-                onLabel="내 담당만 보는 중"
-                offLabel="모든 담당자를 보는 중"
-                title="나에게 배정된 것만 볼지"
+              <Dropdown
+                value={filters.assigneeId || ''}
+                label="담당자로 거르기"
+                options={[
+                  { value: '', label: '담당자 전체' },
+                  ...people.map((p) => ({ value: p.id, label: p.id === currentUserId ? `${p.name} (나)` : p.name })),
+                ]}
+                onChange={(v) => set({
+                  assigneeId: v,
+                  assigneeName: people.find((p) => p.id === v)?.name || '',
+                })}
+                className="sf-wide"
               />
             </div>
           </div>

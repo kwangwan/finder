@@ -813,15 +813,6 @@ export async function restoreFileVersion(fileId, versionId) {
   return res.json();
 }
 
-export async function checkpointFileVersion(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/versions/checkpoint`, {
-    method: 'POST',
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to checkpoint version');
-  return res.json();
-}
-
 export async function moveFile(fileId, folder_id) {
   const res = await fetch(`${API_BASE}/files/${fileId}/move`, {
     method: 'PUT',
@@ -1522,6 +1513,14 @@ export async function sendTestDigest(workspaceId) {
 }
 
 /** Every task in a workspace, soonest deadline first then most important. */
+/** Everyone with a 할 일 in this workspace, the person asking first. */
+export async function listBoardAssignees(workspaceId) {
+  const res = await fetch(`${API_BASE}/boards/assignees?workspace_id=${workspaceId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('담당자 목록을 불러오지 못했습니다.');
+  const body = await res.json();
+  return body.items || [];
+}
+
 export async function listWorkspaceTasks({
   workspaceId, q = '', includeDone = false, assigneeId = null,
   status = null, priority = null, fromDate = null, toDate = null,

@@ -26,6 +26,7 @@ from app.models.board import (
     STATUS_LABELS,
     STATUSES,
 )
+from app.services import board_digest_service
 
 
 def priority_rank_expr():
@@ -190,15 +191,36 @@ async def user_names(db: AsyncSession, user_ids: Iterable[uuid.UUID]) -> dict:
     return {u.id: {"name": (u.username or u.name or u.email), "avatar": u.avatar_url} for u in rows}
 
 
+async def workspace_today(db: AsyncSession, workspace_id) -> date:
+    """
+    Which day it is *here* — read from the workspace's own reference clock.
+
+    `date.today()` is the server's day, and the server keeps UTC: for the
+    first nine hours of a Korean morning it is still yesterday there, so a 할
+    일 due today read as "1일 남음" and yesterday's read as "오늘". The clock
+    the 일정 탭 shows (일정 → 설정 → 기준시) is the one every board is meant to
+    be read against — deliberately a workspace-wide setting, not a personal
+    one, so that two people never disagree about which day it is — so it is
+    the one "오늘" has to be counted from.
+    """
+    settings = await board_digest_service.get_settings(db, workspace_id)
+    zone = board_digest_service.zone_of(settings.get("timezone"))
+    return datetime.now(timezone.utc).astimezone(zone).date()
+
+
 def task_to_dict(
     task: BoardTask,
     names: dict,
     assignee_ids: Optional[dict] = None,
     board: Optional[FileItem] = None,
     documents: Optional[dict] = None,
+    *,
+    today: date,
 ) -> dict:
+    """`today` is the workspace's own day (see `workspace_today`) and has no
+    default: a caller that forgets it would silently go back to counting the
+    days from the server's UTC date."""
     document = (documents or {}).get(task.document_id)
-    today = date.today()
     data = {
         "id": str(task.id),
         "file_id": str(task.file_id),
@@ -344,7 +366,7 @@ async def trash_task_documents(db: AsyncSession, tasks: Iterable[BoardTask], use
     return len(documents)
 
 
-async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID) -> List[dict]:
+async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID, *, today: date) -> List[dict]:
     """Every row of one board, sub-items included, in manual order."""
     tasks = (await db.execute(
         select(BoardTask).where(BoardTask.file_id == file_id).order_by(BoardTask.position.asc(), BoardTask.created_at.asc())
@@ -355,7 +377,7 @@ async def list_board_tasks(db: AsyncSession, file_id: uuid.UUID) -> List[dict]:
         [t.created_by for t in tasks] + [t.last_edited_by for t in tasks] + [uid for ids in by_task.values() for uid in ids],
     )
     documents = await documents_by_id(db, [t.document_id for t in tasks])
-    return [task_to_dict(t, names, by_task, documents=documents) for t in tasks]
+    return [task_to_dict(t, names, by_task, documents=documents, today=today) for t in tasks]
 
 
 async def list_workspace_tasks(
@@ -381,6 +403,7 @@ async def list_workspace_tasks(
     """
     page = max(1, page)
     page_size = max(1, min(100, page_size))
+    today = await workspace_today(db, workspace_id)
 
     conds = [
         FileItem.id == BoardTask.file_id,
@@ -513,9 +536,9 @@ async def list_workspace_tasks(
 
     items = []
     for root in page_roots:
-        row = task_to_dict(root, names, by_task, board=boards.get(root.file_id), documents=documents)
+        row = task_to_dict(root, names, by_task, board=boards.get(root.file_id), documents=documents, today=today)
         row["children"] = [
-            task_to_dict(c, names, by_task, board=boards.get(c.file_id), documents=documents)
+            task_to_dict(c, names, by_task, board=boards.get(c.file_id), documents=documents, today=today)
             for c in children_by_root.get(root.id, [])
         ]
         items.append(row)

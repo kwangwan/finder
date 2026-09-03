@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, BigInteger, Boolean, Text, DateTime, ForeignKey, JSON, Float, Integer
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import event, inspect
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -46,6 +47,14 @@ class FileItem(Base):
     media_scanned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    # When this file last changed in a way a *listing* of it shows: it was
+    # added, renamed, moved, thrown away or restored. `updated_at` cannot
+    # answer that — a document's autosave moves it every second the author is
+    # typing, and telling everyone else looking at the folder that they are
+    # out of date because somebody is writing is noise, not news. Maintained
+    # by the mapper hook below rather than by each write path, so a new write
+    # path cannot forget it. Read by files.py's watermark endpoint.
+    listing_updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=True)
 
     # Relationships
     folder = relationship("Folder", back_populates="files")
@@ -80,3 +89,18 @@ class FileItem(Base):
         if include_content:
             data["content"] = self.content
         return data
+
+
+# What a listing shows about a file. A change to one of these is worth telling
+# other people looking at the same folder about; a change to anything else
+# (content, size, embedding state, thumbnail) is not.
+LISTING_FIELDS = ("name", "file_type", "folder_id", "workspace_id", "is_trashed")
+
+
+@event.listens_for(FileItem, "before_update")
+def _touch_listing_updated_at(mapper, connection, target):
+    state = inspect(target)
+    for field in LISTING_FIELDS:
+        if state.attrs[field].history.has_changes():
+            target.listing_updated_at = datetime.now(timezone.utc)
+            return

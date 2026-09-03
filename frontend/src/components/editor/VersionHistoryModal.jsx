@@ -14,10 +14,9 @@ function formatDate(isoString) {
 
 function formatTime(isoString) {
   const d = new Date(isoString);
-  // Seconds matter here: two versions closed out moments apart (e.g. an
-  // idle-checkpoint close followed immediately by the next edit's open row)
-  // are genuinely distinct entries, but without seconds they render as an
-  // identical-looking HH:MM and look like a duplicate/bug at a glance.
+  // Seconds are kept because not every entry is one of the half-hourly ones:
+  // a restore leaves a snapshot of what it replaced at the moment it happened,
+  // and two of those can fall in the same minute.
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
 
@@ -47,7 +46,7 @@ function groupByDate(versions) {
 export default function VersionHistoryModal({
   fileId, isOpen, onClose, onRestored,
   title = '문서 히스토리',
-  emptyText = '아직 저장된 이전 버전이 없습니다. 편집 후 시간이 지나면 자동으로 기록됩니다.',
+  emptyText = '아직 저장된 이전 버전이 없습니다. 편집하면 30분 단위로 그 시간대의 마지막 내용이 남습니다.',
   source,
 }) {
   const list = source?.list || ((id) => listFileVersions(id));
@@ -168,11 +167,6 @@ export default function VersionHistoryModal({
                     >
                       <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
                         {formatTime(v.created_at)}
-                        {v.is_open && (
-                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--accent-primary)', border: '1px solid var(--accent-primary)', borderRadius: 'var(--radius-sm)', padding: '0 4px' }}>
-                            진행 중
-                          </span>
-                        )}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{v.editor_name || '알 수 없음'}</div>
                     </div>

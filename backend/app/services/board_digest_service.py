@@ -120,7 +120,9 @@ def timezone_options() -> list:
 DEFAULTS = {
     "enabled": False,
     "timezone": DEFAULT_TIMEZONE,
-    "send_hour": 9,
+    # Before the working day rather than at the start of it: the mail is for
+    # reading through once before anything else has begun.
+    "send_hour": 8,
     "send_minute": 0,
     # Which horizons to include. A digest with every horizon on is a wall of
     # text; one with none is an empty mail.

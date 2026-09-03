@@ -39,47 +39,74 @@ from app.core.config import settings
 router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
 
 # Per file, how many historical snapshots to keep — pruned by the periodic job.
-# Only counts closed (is_open=False) rows; the one still-open row (if any)
-# isn't "history" yet and is never pruned by this cap.
 VERSION_RETENTION_COUNT = 100
 
-async def _get_open_version(db: AsyncSession, file_id: uuid.UUID) -> Optional[FileVersion]:
-    return (await db.execute(
-        select(FileVersion).where(FileVersion.file_id == file_id, FileVersion.is_open == True)
-    )).scalar_one_or_none()
+# History is kept per half hour: every save inside the same half-hour window
+# lands on that window's one row, which therefore always holds the document as
+# it stood at the end of it.
+#
+# What this replaced was a "session" model — one row rolled forward while
+# somebody was typing and closed out by a separate checkpoint call from the
+# editor (idle, periodic, tab-hide). It depended on the client remembering to
+# close its session, produced entries at times nothing in particular happened,
+# and left a long sitting with a single restore point. A clock division needs
+# no cooperation from the client and is something a person can predict: "매
+# 30분마다 그 시간대의 마지막 상태가 하나 남는다".
+VERSION_PERIOD_MINUTES = 30
 
-async def _roll_open_version(db: AsyncSession, file_item: FileItem, content: str, name: Optional[str], edited_by: Optional[uuid.UUID]):
-    """Record `content` as the file's in-progress session snapshot: update the
-    existing open row in place if the session is still ongoing, or start a new
-    one if there isn't one yet. Called on every real content edit with the
-    content as it was *before* that edit — so the open row always trails the
-    live document by exactly one save, ready to be finalized the moment the
-    session ends (see _close_open_version)."""
+def _version_period(when: datetime) -> datetime:
+    """The half-hour window `when` falls in, named by the instant it starts."""
+    return when.replace(
+        minute=(when.minute // VERSION_PERIOD_MINUTES) * VERSION_PERIOD_MINUTES,
+        second=0,
+        microsecond=0,
+    )
+
+async def _record_version(
+    db: AsyncSession,
+    file_item: FileItem,
+    content: Optional[str],
+    name: Optional[str],
+    edited_by: Optional[uuid.UUID],
+    when: Optional[datetime] = None,
+):
+    """Keep `content` as the history entry for the half hour `when` falls in,
+    replacing whatever that window held before.
+
+    Empty content is never recorded: a document that has been emptied — by
+    hand or by a save that went wrong — must not push the last version that
+    still holds its text out of the history, which is the one thing that can
+    bring it back.
+
+    A row with no period (`period_start IS NULL`) is a deliberate one-off
+    snapshot — what a restore replaced, or an entry from before this was
+    introduced — and is never overwritten by a later save."""
     if not (content and content.strip()):
         return
-    open_version = await _get_open_version(db, file_item.id)
-    if open_version:
-        open_version.content = content
-        open_version.name = name
-        open_version.edited_by = edited_by
-        open_version.created_at = datetime.now(timezone.utc)
+    when = when or datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    period = _version_period(when)
+    row = (await db.execute(
+        select(FileVersion).where(
+            FileVersion.file_id == file_item.id,
+            FileVersion.period_start == period,
+        )
+    )).scalars().first()
+    if row:
+        row.content = content
+        row.name = name
+        row.edited_by = edited_by
+        row.created_at = when
     else:
-        db.add(FileVersion(file_id=file_item.id, name=name, content=content, edited_by=edited_by, is_open=True))
-
-async def _close_open_version(db: AsyncSession, file_item: FileItem, content: Optional[str] = None, name: Optional[str] = None, edited_by: Optional[uuid.UUID] = None) -> bool:
-    """Finalize the file's open session snapshot (if any) into a permanent
-    history entry, using the given content/name/edited_by (defaults to the
-    file's current values) rather than whatever the open row last trailed at
-    — the moment a session actually ends is worth recording exactly, not
-    approximately. Returns whether a row was closed."""
-    open_version = await _get_open_version(db, file_item.id)
-    if not open_version:
-        return False
-    open_version.content = content if content is not None else (file_item.content or "")
-    open_version.name = name if name is not None else file_item.name
-    open_version.edited_by = edited_by if edited_by is not None else file_item.last_edited_by
-    open_version.is_open = False
-    return True
+        db.add(FileVersion(
+            file_id=file_item.id,
+            name=name,
+            content=content,
+            edited_by=edited_by,
+            created_at=when,
+            period_start=period,
+        ))
 
 def _display_name(user: Optional[User]) -> Optional[str]:
     """
@@ -303,11 +330,17 @@ async def get_files_watermark(
 ):
     """
     Cheap polling signal for viewers who aren't themselves uploading: the most
-    recent updated_at among files matching this exact view, plus the count.
+    recent listing change among files matching this exact view, plus the count.
     Comparing just the count misses a net-zero change (one file added, one
-    removed at the same time) — the max-updated_at watermark changes on any
-    add/edit/delete/move, regardless of whether the count shifts. Route must
-    stay registered before /{file_id} or "watermark" gets parsed as a file id.
+    removed at the same time) — the watermark moves on any add/rename/move/
+    delete regardless of whether the count shifts. Route must stay registered
+    before /{file_id} or "watermark" gets parsed as a file id.
+
+    Deliberately `listing_updated_at`, not `updated_at`: a document being
+    written in changes nothing this listing shows, and pushing "새로운 변경
+    사항이 있습니다" at everyone in the folder for every autosave made the
+    prompt mean nothing. A document reaches the folder's listing when it is
+    added, renamed, moved or thrown away — those are what this watches.
     """
     conditions = [FileItem.is_trashed == False]
     if not is_favorite:
@@ -338,8 +371,13 @@ async def get_files_watermark(
     if is_favorite is not None:
         conditions.append(favorite_service.file_favorite_condition(current_user.id, is_favorite))
 
+    # COALESCE for rows written before the column existed, whose listing time
+    # is unknown and whose updated_at is the best thing there is.
     res = await db.execute(
-        select(func.max(FileItem.updated_at), func.count(FileItem.id)).where(and_(*conditions))
+        select(
+            func.max(func.coalesce(FileItem.listing_updated_at, FileItem.updated_at)),
+            func.count(FileItem.id),
+        ).where(and_(*conditions))
     )
     max_updated, count = res.one()
     return {"watermark": max_updated.isoformat() if max_updated else None, "count": count}
@@ -750,12 +788,12 @@ async def update_markdown_note(
 
     # Two saves for the same file landing in overlapping transactions (two
     # tabs, or the editor's own bounded autosave retry racing a slow-but-not-
-    # actually-failed original request) can each see "no open version yet"
-    # and both try to open one — caught at commit time by the
-    # ux_file_versions_one_open_per_file unique index. Retry once against a
+    # actually-failed original request) can each see "no history row for this
+    # half hour yet" and both try to insert one — caught at commit time by the
+    # ux_file_versions_one_per_period unique index. Retry once against a
     # freshly-fetched file_item: by then the other request's insert has
-    # committed, so _get_open_version sees it and updates it in place
-    # instead of colliding again.
+    # committed, so _record_version sees it and updates it in place instead of
+    # colliding again.
     for attempt in range(2):
         if attempt > 0:
             file_item = await db.get(FileItem, file_id)
@@ -764,6 +802,9 @@ async def update_markdown_note(
         old_content = file_item.content
         old_name = file_item.name
         old_last_edited_by = file_item.last_edited_by
+        # When the content being replaced was itself written, so it can be
+        # kept in the half hour it actually belongs to rather than in this one.
+        old_written_at = file_item.updated_at
         # Compare against the actual previous content, not just "was a content
         # field sent" — the editor's 1s autosave debounce can fire a PUT whose
         # content is identical to what's already stored (e.g. focus/blur with no
@@ -801,7 +842,13 @@ async def update_markdown_note(
             )
 
         if content_changed:
-            await _roll_open_version(db, file_item, old_content, old_name, old_last_edited_by)
+            # Both halves of the change, each into its own half hour: the text
+            # being replaced belongs to the window it was written in (which may
+            # be days ago, and may never have been recorded at all — a document
+            # edited for the first time had no history entry under the old
+            # scheme either), and the new text to the window happening now.
+            await _record_version(db, file_item, old_content, old_name, old_last_edited_by, when=old_written_at)
+            await _record_version(db, file_item, req.content, file_item.name, current_user.id)
             # What this document has attached is whatever it now points at —
             # attaching and detaching are content changes and nothing else.
             await link_service.sync_document_links(db, file_item)
@@ -869,7 +916,6 @@ def _to_version_response(version: FileVersion, editor_name: Optional[str], inclu
         "edited_by": version.edited_by,
         "editor_name": editor_name,
         "created_at": version.created_at,
-        "is_open": version.is_open,
     }
     if include_content:
         data["content"] = version.content
@@ -895,36 +941,6 @@ async def list_file_versions(
         users = (await db.execute(select(User).where(User.id.in_(editor_ids)))).scalars().all()
         names = {u.id: _display_name(u) for u in users}
     return [_to_version_response(v, names.get(v.edited_by), include_content=False) for v in versions]
-
-@router.post("/{file_id}/versions/checkpoint")
-async def checkpoint_file_version(
-    file_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user)
-):
-    """Close out the note's in-progress session snapshot (if any) with its
-    CURRENT content right now — turning it from a rolling, constantly-
-    overwritten row into a permanent history entry. The editor calls this
-    after ~2 minutes of no edits (and on tab-hide/close), mirroring Notion's
-    own history behavior: it snapshots every ~10 minutes *while actively
-    editing* and also closes out a version the moment editing stops, so a
-    short session still gets its own restore point immediately rather than
-    only being captured retroactively whenever the note happens to be edited
-    again. No-ops (returns closed=False) if there's no open session to close
-    — e.g. the note was only viewed, never edited, since it was last closed —
-    so repeated idle-fires without further edits don't do anything."""
-    if not await access_service.can_access_file(db, current_user, file_id):
-        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
-
-    file_item = await db.get(FileItem, file_id)
-    if not file_item:
-        return {"closed": False}
-    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
-
-    closed = await _close_open_version(db, file_item)
-    if closed:
-        await db.commit()
-    return {"closed": closed}
 
 @router.get("/{file_id}/versions/{version_id}", response_model=FileVersionDetailResponse)
 async def get_file_version(
@@ -954,10 +970,9 @@ async def restore_file_version(
     """Restore a note to a past version's content. Goes through the exact
     same content-write path a normal save does (size/quota bookkeeping, MinIO
     backup, re-embedding) so restored content is searchable again without any
-    separate logic. The state being replaced is always snapshotted as a
-    permanent, closed history entry first (finalizing whatever session
-    happened to be open, rather than letting the restore silently overwrite
-    it) so restoring is itself never a one-way trip."""
+    separate logic. The state being replaced is snapshotted first, as an entry
+    belonging to no half hour so that the next save cannot overwrite it, so
+    restoring is itself never a one-way trip."""
     if not await access_service.can_access_file(db, current_user, file_id):
         raise HTTPException(status_code=403, detail="파일을 수정할 권한이 없습니다.")
 
@@ -970,9 +985,13 @@ async def restore_file_version(
     if not version or version.file_id != file_id:
         raise HTTPException(status_code=404, detail="Version not found")
 
-    if (file_item.content or "") != version.content:
-        if not await _close_open_version(db, file_item):
-            db.add(FileVersion(file_id=file_item.id, name=file_item.name, content=file_item.content or "", edited_by=file_item.last_edited_by, is_open=False))
+    if (file_item.content or "") != version.content and (file_item.content or "").strip():
+        db.add(FileVersion(
+            file_id=file_item.id,
+            name=file_item.name,
+            content=file_item.content,
+            edited_by=file_item.last_edited_by,
+        ))
 
     old_size = file_item.size_bytes or 0
     new_size = len(version.content.encode("utf-8"))

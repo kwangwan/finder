@@ -179,6 +179,33 @@ async def init_db():
                 END IF;
             END $$;
             """,
+            # History is now kept one entry per half hour (see files.py's
+            # _record_version). The session model it replaces is gone with it:
+            # nothing opens a version any more, so every row that was still
+            # open becomes an ordinary entry and the flag itself goes.
+            "ALTER TABLE kb_file_versions ADD COLUMN IF NOT EXISTS period_start TIMESTAMPTZ;",
+            "CREATE INDEX IF NOT EXISTS ix_kb_file_versions_period_start ON kb_file_versions (period_start);",
+            "DROP INDEX IF EXISTS ux_file_versions_one_open_per_file;",
+            # A default first, so that if the drop below is ever refused the
+            # column left behind cannot break an insert that no longer names
+            # it: each statement here stands on its own, and a NOT NULL column
+            # nothing writes to would fail every save.
+            "ALTER TABLE kb_file_versions ALTER COLUMN is_open SET DEFAULT FALSE;",
+            "ALTER TABLE kb_file_versions DROP COLUMN IF EXISTS is_open;",
+            # One row per file per half hour. Two tabs saving at the same
+            # moment both see "no row for this window yet"; this is what turns
+            # that race into the retry in update_markdown_note rather than two
+            # rows for one window. Partial, because the one-off snapshots
+            # (period_start IS NULL) are allowed to repeat.
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_file_versions_one_per_period "
+            "ON kb_file_versions (file_id, period_start) WHERE period_start IS NOT NULL;",
+            # When a file last changed in a way a *listing* shows: added,
+            # renamed, moved, thrown away or restored. Distinct from
+            # updated_at, which also moves every time a document's body is
+            # autosaved — and a document being written in is not a reason to
+            # tell everyone looking at the folder that they are out of date.
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS listing_updated_at TIMESTAMPTZ;",
+            "UPDATE kb_files SET listing_updated_at = updated_at WHERE listing_updated_at IS NULL;",
         ]
 
         # Every timestamp column was originally created as a naive
@@ -284,44 +311,6 @@ async def init_db():
                 ))
         except Exception as e:
             print(f"[DB Init Index Warning] Could not create HNSW index: {e}")
-
-        # At most one "open" (still-being-edited) version row per file — see
-        # FileVersion.is_open. Without this, two requests that both read "no
-        # open version yet" before either commits (a genuine race under
-        # concurrent edits — e.g. two tabs, or an autosave retry overlapping
-        # a slow-but-still-in-flight original request) could each insert
-        # their own open row, leaving a file with two simultaneously "open"
-        # versions — confirmed already present in existing data, not just a
-        # theoretical race. The retry path in update_markdown_note (files.py)
-        # is what turns the resulting IntegrityError into a clean recovery
-        # instead of a failed save going forward.
-        #
-        # A unique index can't be created while duplicates already violate
-        # it, so first close out every already-open row except the most
-        # recent one per file (into permanent history, same as any other
-        # session-end close — no content is discarded).
-        try:
-            async with conn.begin_nested():
-                await conn.execute(text("""
-                UPDATE kb_file_versions v
-                SET is_open = false
-                WHERE v.is_open = true
-                AND v.created_at < (
-                    SELECT MAX(v2.created_at) FROM kb_file_versions v2
-                    WHERE v2.file_id = v.file_id AND v2.is_open = true
-                );
-                """))
-        except Exception as e:
-            print(f"[DB Migration Warning] Could not dedupe pre-existing open file versions: {e}")
-
-        try:
-            async with conn.begin_nested():
-                await conn.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_file_versions_one_open_per_file "
-                    "ON kb_file_versions (file_id) WHERE is_open = true;"
-                ))
-        except Exception as e:
-            print(f"[DB Init Index Warning] Could not create one-open-version-per-file index: {e}")
 
         # Recalculate each user's storage_used_bytes based on files in their owned workspaces.
         # Trashed files still occupy real storage until permanently purged, so they must stay

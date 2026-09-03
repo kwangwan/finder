@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_approved_user
-from app.models import BoardTask, FileItem, Folder, User, Workspace, WorkspaceMember
+from app.models import BoardTask, BoardTaskAssignee, FileItem, Folder, User, Workspace, WorkspaceMember
 from app.models.board import (
     BOARD_FILE_TYPE,
     PRIORITIES,
@@ -66,6 +66,49 @@ async def board_meta(current_user: User = Depends(get_current_approved_user)):
         "priorities": [{"value": v, "label": PRIORITY_LABELS[v]} for v in PRIORITIES],
         "statuses": [{"value": v, "label": STATUS_LABELS[v]} for v in STATUSES],
     }
+
+
+@router.get("/assignees")
+async def list_workspace_assignees(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Everyone who has a 할 일 in this workspace, for the 일정 탭's 담당자 filter.
+
+    The person asking comes first, whether or not they have anything: "my
+    work" is the one answer wanted often enough that it should not have to be
+    hunted for in an alphabetical list. Names and photos only — the member
+    directory, which carries email addresses, stays administrator-only.
+    """
+    if not await access_service.is_workspace_member(db, current_user, workspace_id):
+        raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+
+    rows = (await db.execute(
+        select(User)
+        .join(BoardTaskAssignee, BoardTaskAssignee.user_id == User.id)
+        .join(BoardTask, BoardTask.id == BoardTaskAssignee.task_id)
+        .join(FileItem, FileItem.id == BoardTask.file_id)
+        .where(
+            FileItem.workspace_id == workspace_id,
+            FileItem.is_trashed == False,  # noqa: E712
+            FileItem.file_type == BOARD_FILE_TYPE,
+            User.is_system == False,  # noqa: E712
+        )
+        .distinct()
+        .order_by(User.username.asc())
+    )).scalars().all()
+
+    def described(user: User) -> dict:
+        return {
+            "id": str(user.id),
+            "name": (user.username or user.name or user.email),
+            "avatar": user.avatar_url,
+        }
+
+    people = [described(u) for u in rows if u.id != current_user.id]
+    return {"items": [described(current_user)] + people}
 
 
 @router.get("/tasks")
@@ -337,7 +380,9 @@ async def get_board(
             {"id": str(u.id), "name": (u.username or u.name or u.email), "avatar": u.avatar_url}
             for u in members
         ],
-        "tasks": await board_service.list_board_tasks(db, file_id),
+        "tasks": await board_service.list_board_tasks(
+            db, file_id, today=await board_service.workspace_today(db, board.workspace_id)
+        ),
     }
 
 
@@ -357,7 +402,8 @@ async def get_task(
     by_task = await board_service.assignees_by_task(db, [task.id])
     names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
     documents = await board_service.documents_by_id(db, [task.document_id])
-    return board_service.task_to_dict(task, names, by_task, board=board, documents=documents)
+    today = await board_service.workspace_today(db, board.workspace_id)
+    return board_service.task_to_dict(task, names, by_task, board=board, documents=documents, today=today)
 
 
 @router.post("/{file_id}/tasks", status_code=status.HTTP_201_CREATED)
@@ -387,9 +433,8 @@ async def create_task(
     #
     # In the shared workspace there is nothing else it could be. Elsewhere it
     # is a default rather than a rule — the picker still opens — but the same
-    # default, because a 할 일 added by someone is nearly always theirs, and
-    # one created with nobody on it vanishes the moment the 일정 탭 is showing
-    # "내 담당만", which is what it shows by default.
+    # default, because a 할 일 added by someone is nearly always theirs, and one
+    # created with nobody on it can be filtered for by no one in the 일정 탭.
     if not assignees and "assignee_ids" not in req.model_fields_set:
         assignees = [current_user.id]
     name = req.name.strip()
@@ -419,7 +464,8 @@ async def create_task(
     await db.commit()
     await db.refresh(task)
     names = await board_service.user_names(db, [task.created_by] + assignees)
-    return board_service.task_to_dict(task, names, {task.id: assignees}, documents={document.id: document})
+    today = await board_service.workspace_today(db, board.workspace_id)
+    return board_service.task_to_dict(task, names, {task.id: assignees}, documents={document.id: document}, today=today)
 
 
 @router.put("/{file_id}/tasks/{task_id}")
@@ -468,7 +514,8 @@ async def update_task(
     by_task = await board_service.assignees_by_task(db, [task.id])
     names = await board_service.user_names(db, [task.created_by] + by_task.get(task.id, []))
     documents = {document.id: document} if document is not None else {}
-    return board_service.task_to_dict(task, names, by_task, documents=documents)
+    today = await board_service.workspace_today(db, board.workspace_id)
+    return board_service.task_to_dict(task, names, by_task, documents=documents, today=today)
 
 
 @router.put("/{file_id}/reorder")

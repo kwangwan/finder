@@ -785,10 +785,13 @@ export default function PreviewWindow({
       {/* Footer Meta Bar */}
       <div className="os-window-footer">
         <div className="footer-left">
-          <span>{formatFileSize(resolvedFile.size_bytes)}</span>
+          {/* A 일정 has no stored file behind it — its 할 일 rows live in the
+              database — so the footer said "0 B" about something that has no
+              size at all. */}
+          {!isBoard && <span>{formatFileSize(resolvedFile.size_bytes)}</span>}
           {resolvedFile.created_at && (
             <>
-              <span>•</span>
+              {!isBoard && <span>•</span>}
               <span>{new Date(resolvedFile.updated_at || resolvedFile.created_at).toLocaleDateString()}</span>
             </>
           )}

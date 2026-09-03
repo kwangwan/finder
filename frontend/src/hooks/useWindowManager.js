@@ -70,7 +70,11 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
   // server on, so a poll can tell a genuine remote change from an echo of
   // our own write.
   const hasLoadedRef = useRef(false);
-  const lastSyncedRef = useRef('');
+  // `null`, not '': an empty string is a real signature — the one a person
+  // with nothing open has — and starting out equal to it made applyRemote
+  // treat "this account has no windows" as "nothing changed", so the previous
+  // account's taskbar stayed on screen after a logout and a second login.
+  const lastSyncedRef = useRef(null);
   const saveTimerRef = useRef(null);
   // Timestamp of the state this client last saw, so the cheap poll can tell
   // 'nothing changed' without pulling the full payload.
@@ -436,8 +440,13 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     if (!enabled || !currentUserId) return;
     let cancelled = false;
     hasLoadedRef.current = false;
-    lastSyncedRef.current = '';
+    lastSyncedRef.current = null;
     lastVersionRef.current = null;
+    // Nothing of the previous account survives into this one, not even for
+    // the moment the restore takes: whose windows these are is decided by who
+    // is signed in, and the answer has just changed. Saving is gated on
+    // hasLoadedRef, so clearing here cannot be written back to the server.
+    setWindows([]);
     (async () => {
       try {
         const state = await getWindowState();
@@ -445,12 +454,17 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
         if (!cancelled) await applyRemote(state.windows || []);
       } catch (e) {
         console.warn('[WindowSync] restore failed:', e);
+        // Nothing was read, so nothing is known — but an empty local list must
+        // not then be written back over whatever the server still holds. It
+        // counts as already agreed; only a window actually opened from here
+        // will differ from it and be saved.
+        if (!cancelled) lastSyncedRef.current = signatureOf([]);
       } finally {
         if (!cancelled) hasLoadedRef.current = true;
       }
     })();
     return () => { cancelled = true; };
-  }, [enabled, currentUserId, applyRemote]);
+  }, [enabled, currentUserId, applyRemote, signatureOf]);
 
   // Persist local changes, debounced.
   useEffect(() => {
