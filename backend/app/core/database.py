@@ -189,8 +189,20 @@ async def init_db():
             # A default first, so that if the drop below is ever refused the
             # column left behind cannot break an insert that no longer names
             # it: each statement here stands on its own, and a NOT NULL column
-            # nothing writes to would fail every save.
-            "ALTER TABLE kb_file_versions ALTER COLUMN is_open SET DEFAULT FALSE;",
+            # nothing writes to would fail every save. Guarded, because once
+            # the drop has succeeded this would print a warning on every
+            # startup for a column that is gone on purpose.
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'kb_file_versions' AND column_name = 'is_open'
+                ) THEN
+                    EXECUTE 'ALTER TABLE kb_file_versions ALTER COLUMN is_open SET DEFAULT FALSE';
+                END IF;
+            END $$;
+            """,
             "ALTER TABLE kb_file_versions DROP COLUMN IF EXISTS is_open;",
             # One row per file per half hour. Two tabs saving at the same
             # moment both see "no row for this window yet"; this is what turns
