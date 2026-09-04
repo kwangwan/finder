@@ -9,6 +9,33 @@ from app.services.embedding_service import embedding_service
 from app.services.s3_service import s3_service
 
 class DocumentService:
+    async def index_file_chunks_safely(
+        self, db: AsyncSession, file_item: FileItem, raw_bytes: Optional[bytes] = None
+    ) -> int:
+        """
+        Index what can be indexed, and never take the caller down with it.
+
+        Indexing runs at the end of a save or an upload, after the file itself
+        is stored and committed, so it has nothing left to undo — but a failure
+        inside it leaves the session needing a rollback, and every caller went
+        on to read the file it had just written and got a broken session
+        instead. That is how one PDF carrying a NUL byte in its text turned
+        into a failed upload of a file that was, in fact, already stored.
+
+        Rolled back and re-read here so the caller is handed a session it can
+        keep using and a file it can still read.
+        """
+        try:
+            return await self.index_file_chunks(db, file_item, raw_bytes=raw_bytes)
+        except Exception as e:
+            print(f"[Embedding Warning] Indexing failed for {file_item.id}: {e}")
+            try:
+                await db.rollback()
+                await db.refresh(file_item)
+            except Exception as recovery_error:  # pragma: no cover - nothing left to do
+                print(f"[Embedding Warning] Could not recover the session: {recovery_error}")
+            return 0
+
     async def index_file_chunks(self, db: AsyncSession, file_item: FileItem, raw_bytes: Optional[bytes] = None) -> int:
         """
         Chunk and embed the content of a file item (Markdown, PDF, Word DOCX, Excel XLSX, plain text)
@@ -48,6 +75,11 @@ class DocumentService:
         # If still no content but file_item.content has text (e.g. uploaded text)
         if not content_to_index and file_item.content:
             content_to_index = file_item.content
+
+        # Whatever the source — an extractor, or text typed into the editor —
+        # what goes into a database column has to be something a column can
+        # hold. See chunking_service.sanitize_text.
+        content_to_index = chunking_service.sanitize_text(content_to_index)
 
         # If there is no extractable text content (e.g. image-only PDF, empty note, raw media), do not embed
         if not content_to_index or not content_to_index.strip():

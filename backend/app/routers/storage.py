@@ -438,11 +438,8 @@ async def complete_multipart_upload(
     # Update workspace owner storage usage
     await quota_service.record_storage_added(db, workspace_id, current_user, req.size_bytes or 0)
 
-    # Index embeddings
-    try:
-        await document_service.index_file_chunks(db, file_item)
-    except Exception as e:
-        print(f"[Embedding Warning] Indexing failed for multipart file {file_item.id}: {e}")
+    # Index embeddings. Never fatal: the file is stored and committed by now.
+    await document_service.index_file_chunks_safely(db, file_item)
 
     # Capture metadata (EXIF / MP4 moov) — off the response path,
     # since it costs two more ranged reads from storage and is only
@@ -988,11 +985,8 @@ async def complete_chunk_upload(
     if file_type == "video":
         background_tasks.add_task(_generate_and_save_video_thumbnail, file_item.id, s3_key, req.filename)
 
-    # Index embeddings
-    try:
-        await document_service.index_file_chunks(db, file_item)
-    except Exception as e:
-        print(f"[Embedding Warning] Indexing failed for chunk file {file_item.id}: {e}")
+    # Index embeddings. Never fatal: the file is stored and committed by now.
+    await document_service.index_file_chunks_safely(db, file_item)
 
     # Capture metadata (EXIF / MP4 moov) — off the response path,
     # since it costs two more ranged reads from storage and is only
@@ -1149,10 +1143,8 @@ async def direct_upload(
     await quota_service.commit_reservation(db, owner.id, len(file_bytes), len(file_bytes))
     await shared_policy_service.record_daily_usage(db, current_user.id, len(file_bytes))
 
-    try:
-        await document_service.index_file_chunks(db, file_item, raw_bytes=file_bytes)
-    except Exception as e:
-        print(f"[Embedding Warning] Indexing failed for direct file {file_item.id}: {e}")
+    # Never fatal: the file is stored and committed by now.
+    await document_service.index_file_chunks_safely(db, file_item, raw_bytes=file_bytes)
 
     # Capture metadata (EXIF / MP4 moov) — off the response path,
     # since it costs two more ranged reads from storage and is only

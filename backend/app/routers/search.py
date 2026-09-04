@@ -38,12 +38,13 @@ async def reindex_all_files(
     indexed_count = 0
     total_chunks = 0
     for f in files:
-        try:
-            chunks = await document_service.index_file_chunks(db, f)
+        # One file that cannot be indexed must not end the sweep, and the
+        # session has to be usable for the next one — which is what the safe
+        # form takes care of.
+        chunks = await document_service.index_file_chunks_safely(db, f)
+        if chunks:
             total_chunks += chunks
             indexed_count += 1
-        except Exception as e:
-            print(f"[Reindex Warning] Failed to index {f.id} ({f.name}): {e}")
 
     return {
         "status": "success",

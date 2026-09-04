@@ -752,10 +752,8 @@ async def create_markdown_note(
     except Exception as e:
         print(f"[MinIO Backup Warning] Could not backup note to MinIO: {e}")
 
-    try:
-        await document_service.index_file_chunks(db, file_item)
-    except Exception as e:
-        print(f"[Embedding Warning] Indexing failed for note {file_item.id}: {e}")
+    # Never fatal: the note is saved and committed by now.
+    await document_service.index_file_chunks_safely(db, file_item)
 
     creator_name = _display_name(current_user)
     return _to_file_detail_response(
@@ -901,10 +899,8 @@ async def update_markdown_note(
             print(f"[MinIO Backup Warning] Could not update MinIO note: {e}")
 
     if content_changed:
-        try:
-            await document_service.index_file_chunks(db, file_item)
-        except Exception as e:
-            print(f"[Embedding Warning] Re-indexing failed for note {file_item.id}: {e}")
+        # Never fatal: the note is saved and committed by now.
+        await document_service.index_file_chunks_safely(db, file_item)
 
     creator = await db.get(User, file_item.created_by) if file_item.created_by else None
     creator_name = _display_name(creator)
@@ -1027,10 +1023,8 @@ async def restore_file_version(
         except Exception as e:
             print(f"[MinIO Backup Warning] Could not update MinIO note: {e}")
 
-    try:
-        await document_service.index_file_chunks(db, file_item)
-    except Exception as e:
-        print(f"[Embedding Warning] Re-indexing failed for note {file_item.id}: {e}")
+    # Never fatal: the note is saved and committed by now.
+    await document_service.index_file_chunks_safely(db, file_item)
 
     creator = await db.get(User, file_item.created_by) if file_item.created_by else None
     creator_name = _display_name(creator)
@@ -1091,10 +1085,8 @@ async def create_file_metadata(
     # Record storage added
     await quota_service.record_storage_added(db, workspace_id, current_user, file_item.size_bytes or 0)
 
-    try:
-        await document_service.index_file_chunks(db, file_item)
-    except Exception as e:
-        print(f"[Embedding Warning] Indexing failed for uploaded file {file_item.id}: {e}")
+    # Never fatal: the note is saved and committed by now.
+    await document_service.index_file_chunks_safely(db, file_item)
 
     return _to_file_response(file_item)
 

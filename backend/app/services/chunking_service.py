@@ -121,6 +121,24 @@ class ChunkingService:
         return chunks
 
     @staticmethod
+    def sanitize_text(text: str) -> str:
+        """
+        Text as a database column can actually hold it.
+
+        A PDF's extracted text can carry a NUL byte — this one had two, in the
+        middle of a UUID whose hyphens had been mangled — and Postgres refuses
+        any text containing 0x00 outright ("invalid byte sequence for encoding
+        UTF8"), which failed the insert, broke the transaction, and took the
+        whole upload down with it. Lone surrogates come out of the same kind of
+        salvaged text and are refused the same way, so the round trip through
+        UTF-8 drops those too.
+        """
+        if not text:
+            return text
+        without_nul = text.replace("\x00", "")
+        return without_nul.encode("utf-8", "ignore").decode("utf-8", "ignore")
+
+    @staticmethod
     def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         """Extract plain text from PDF binary data."""
         try:
@@ -130,7 +148,7 @@ class ChunkingService:
                 t = page.extract_text()
                 if t and t.strip():
                     text_pages.append(f"### [PDF Page {i+1}]\n{t.strip()}")
-            return "\n\n".join(text_pages)
+            return ChunkingService.sanitize_text("\n\n".join(text_pages))
         except Exception as e:
             print(f"[PDF Extract Warning] Failed to extract text from PDF: {e}")
             return ""
@@ -166,7 +184,7 @@ class ChunkingService:
                         separator = " | ".join(["---"] * len(row_cells))
                         lines.append(f"| {separator} |")
 
-            return "\n\n".join(lines)
+            return ChunkingService.sanitize_text("\n\n".join(lines))
         except Exception as e:
             print(f"[Word Extract Warning] Failed to extract text from DOCX: {e}")
             return ""
@@ -201,7 +219,7 @@ class ChunkingService:
 
                 sheets_text.append("\n".join(sheet_lines))
 
-            return "\n\n".join(sheets_text)
+            return ChunkingService.sanitize_text("\n\n".join(sheets_text))
         except Exception as e:
             print(f"[Excel Extract Warning] Failed to extract text from Excel: {e}")
             return ""
