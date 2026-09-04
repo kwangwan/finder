@@ -57,6 +57,11 @@ const SYNC_STREAM_MAX_BACKOFF_MS = 30000;
 // Writes are debounced: dragging a window or clicking through several files
 // would otherwise fire a PUT per change.
 const SYNC_SAVE_DEBOUNCE_MS = 800;
+// A save that does not land — the backend restarting under a deploy is the
+// ordinary case — is tried again on this backoff rather than dropped. While
+// any of it is outstanding the local state is held to be the true one, so a
+// poll cannot answer a minimize with the state the server still has.
+const SYNC_SAVE_RETRY_MS = [2000, 4000, 8000];
 
 export function useWindowManager({ enabled = false, currentUserId = null } = {}) {
   const [windows, setWindows] = useState([]);
@@ -76,6 +81,14 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
   // account's taskbar stayed on screen after a logout and a second login.
   const lastSyncedRef = useRef(null);
   const saveTimerRef = useRef(null);
+  // A change of ours that the server has not accepted yet, and how many times
+  // it has been tried.
+  const unsavedRef = useRef(false);
+  const saveRetryTimerRef = useRef(null);
+  const saveAttemptRef = useRef(0);
+  // Bumped to run the save effect again after a failure, since nothing else
+  // will have changed by then.
+  const [saveNonce, setSaveNonce] = useState(0);
   // Timestamp of the state this client last saw, so the cheap poll can tell
   // 'nothing changed' without pulling the full payload.
   const lastVersionRef = useRef(null);
@@ -442,6 +455,8 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     hasLoadedRef.current = false;
     lastSyncedRef.current = null;
     lastVersionRef.current = null;
+    unsavedRef.current = false;
+    saveAttemptRef.current = 0;
     // Nothing of the previous account survives into this one, not even for
     // the moment the restore takes: whose windows these are is decided by who
     // is signed in, and the answer has just changed. Saving is gated on
@@ -472,6 +487,10 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
     const signature = signatureOf(windows);
     if (signature === lastSyncedRef.current) return;
 
+    // Ours and not yet agreed. Said before the request is even sent, because
+    // the poll must not treat the server's older state as news from now until
+    // this either lands or is given up on.
+    unsavedRef.current = true;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       saveTimerRef.current = null;
@@ -484,21 +503,48 @@ export function useWindowManager({ enabled = false, currentUserId = null } = {})
       saveWindowState(payload)
         // Adopt the server's new timestamp so the poll doesn't immediately
         // treat this client's own write as a remote change.
-        .then((res) => { lastVersionRef.current = res?.updated_at || lastVersionRef.current; })
-        .catch((e) => console.warn('[WindowSync] save failed:', e));
+        .then((res) => {
+          lastVersionRef.current = res?.updated_at || lastVersionRef.current;
+          unsavedRef.current = false;
+          saveAttemptRef.current = 0;
+        })
+        .catch((e) => {
+          console.warn('[WindowSync] save failed:', e);
+          // It did not land, so we are not agreed after all — saying we were
+          // is what let a poll put a window back the moment the backend came
+          // back up, which reads as a minimize button that does nothing.
+          if (lastSyncedRef.current === signature) lastSyncedRef.current = null;
+          const delay = SYNC_SAVE_RETRY_MS[saveAttemptRef.current];
+          if (delay === undefined) {
+            // Out of tries: let the server be the truth again rather than
+            // holding a listening client out of sync forever.
+            unsavedRef.current = false;
+            saveAttemptRef.current = 0;
+            return;
+          }
+          saveAttemptRef.current += 1;
+          if (saveRetryTimerRef.current) clearTimeout(saveRetryTimerRef.current);
+          saveRetryTimerRef.current = setTimeout(() => {
+            saveRetryTimerRef.current = null;
+            setSaveNonce((n) => n + 1);
+          }, delay);
+        });
     }, SYNC_SAVE_DEBOUNCE_MS);
 
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [enabled, currentUserId, windows, signatureOf]);
+  }, [enabled, currentUserId, windows, signatureOf, saveNonce]);
+
+  useEffect(() => () => clearTimeout(saveRetryTimerRef.current), []);
 
   // Adopt a remote change: fetch the full state only once the timestamp has
   // actually moved. Shared by the stream and the poll so both agree on what
   // counts as a change and neither can apply a stale list.
   const pullRemote = useCallback(async (remoteVersion) => {
-    // Don't overwrite anything still on its way to the server.
-    if (saveTimerRef.current) return;
+    // Don't overwrite anything still on its way to the server, or anything
+    // that was refused by it and is waiting to be sent again.
+    if (saveTimerRef.current || unsavedRef.current) return;
     if (!remoteVersion || remoteVersion === lastVersionRef.current) return;
     lastVersionRef.current = remoteVersion;
     const state = await getWindowState();
