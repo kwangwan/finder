@@ -484,6 +484,12 @@ async def list_workspace_tasks(
     )).scalars().all()
     children_by_root = {}
     for child in children_rows:
+        # "완료는 숨기는 중" means every finished row, not only whole 할 일: a
+        # list of steps where the done ones stay is the wrong half of the work.
+        # The 완료 group itself is reached by asking for it (status=done) or by
+        # turning the toggle on, both of which set show_done.
+        if not show_done and child.status == DONE_STATUS:
+            continue
         children_by_root.setdefault(child.parent_task_id, []).append(child)
     # Soonest first here too. This list answers "what is due", so a sub-item
     # kept its board's manual order and arrived in an order that meant nothing

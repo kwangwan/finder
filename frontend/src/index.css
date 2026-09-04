@@ -5549,11 +5549,24 @@ input.bd-name:focus {
 
 .bd-note:hover, .bd-subadd:hover { color: var(--accent-primary); border-color: var(--border-medium); background: var(--bg-tertiary); }
 .bd-note.has { color: var(--accent-primary); }
-.bd-subadd { opacity: 0; }
-.bd-row:hover .bd-subadd, .bd-row:focus-within .bd-subadd { opacity: 1; }
-/* A touch screen never hovers, so on a phone the only way to add a sub-item
-   was to not have one. Where there is no hover, it is simply always there. */
+
+/* Both are always there. Revealing the sub-item button on hover kept the row
+   clean at the cost of hiding it from every touch screen, and asking the
+   media query whether the pointer can hover turned out not to be dependable
+   enough to rest a button nobody can otherwise reach on. Quiet enough to sit
+   on every row instead. */
+.bd-subadd { color: var(--text-muted); opacity: 0.55; }
+.bd-row:hover .bd-subadd, .bd-row:focus-within .bd-subadd, .bd-subadd:hover { opacity: 1; }
+
+/* Where a finger does the pointing, both get a target the size of one without
+   taking any more room in the row. Grown away from the name and not towards
+   it: reaching over the field's first characters would open the document
+   instead of putting a caret where it was tapped. */
 @media (hover: none) {
+  .bd-note, .bd-subadd { position: relative; }
+  .bd-note::after, .bd-subadd::after { content: ''; position: absolute; }
+  .bd-note::after { inset: -9px 0 -9px -9px; }
+  .bd-subadd::after { inset: -9px -9px -9px 0; }
   .bd-subadd { opacity: 1; }
 }
 

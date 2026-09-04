@@ -332,6 +332,19 @@ export default function TaskRow({
             {childCount ? (collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />) : null}
           </button>
         ) : <span className="bd-twisty is-empty" />}
+        {/* Every 할 일 has a document, and this is the way into it — kept at
+            the left end, where it sits still: after the name it moved with
+            every rename and read as part of the text. Filled in once something
+            is written in it, so a glance down the column says which ones have
+            a record. */}
+        <button
+          type="button"
+          className={`bd-note ${task.has_detail ? 'has' : ''}`}
+          onClick={() => onOpen?.(task)}
+          title={task.has_detail ? '이 할 일의 문서 열기' : '이 할 일의 문서에 기록 남기기'}
+        >
+          <FileText size={12} />
+        </button>
         {canWrite && onRename ? (
           <input
             type="text"
@@ -364,17 +377,11 @@ export default function TaskRow({
         )}
         {childCount > 0 && <span className="bd-subcount" title={`하위 할 일 ${childCount}개`}>{childCount}</span>}
 
-        {/* Every 할 일 has a document. Filled in once something is written in
-            it, so a glance down the column says which ones have a record. */}
-        <button
-          type="button"
-          className={`bd-note ${task.has_detail ? 'has' : ''}`}
-          onClick={() => onOpen?.(task)}
-          title={task.has_detail ? '이 할 일의 문서 열기' : '이 할 일의 문서에 기록 남기기'}
-        >
-          <FileText size={12} />
-        </button>
-
+        {/* Adding a sub-item used to appear on hover, which is a thing a
+            phone cannot do — the button was simply not there for anyone
+            holding one. It is on the row for good now, in the same quiet grey
+            as the document icon so a page of rows does not fill up with
+            controls, and it brightens when it is about to be used. */}
         {canWrite && depth === 0 && onAddSub && (
           <button type="button" className="bd-subadd" title="하위 할 일 추가" onClick={() => onAddSub(task)}>
             <Plus size={12} />

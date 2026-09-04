@@ -141,6 +141,7 @@ export default function ScheduleFilterModal({ isOpen, filters, onChange, onClose
                 offLabel="완료는 숨기는 중"
                 title="완료한 할 일을 목록에 포함할지"
               />
+              <small>끝난 하위 할 일도 함께 숨깁니다.</small>
               <small>상위 할 일이 완료면 그 아래 하위 할 일까지 함께 숨깁니다.</small>
             </div>
           </div>
