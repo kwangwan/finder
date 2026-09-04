@@ -428,6 +428,76 @@ function extractAttachments(blocks, collected) {
   });
 }
 
+// A link whose text is its own address is written by BlockNote as the bare
+// address — `[url](url)` is redundant to read, so its exporter drops the
+// markup. Its markdown parser has no autolink of its own, though, so what came
+// back was plain text: the link was there all through the writing and gone the
+// next time the document was opened.
+//
+// Written as an explicit `[url](url)` instead, which every markdown parser —
+// BlockNote's included — reads back as the link it was. Deliberately fixed
+// here and not by finding addresses in the text as it loads: an address that
+// is not a link is a choice somebody made (a link can be taken off), and
+// re-linking it on the way in would overrule them. What is opened is what was
+// saved, in both directions.
+const SELF_NAMED_LINK_PLACEHOLDER = (index) => `\uE003LINK${index}\uE003`;
+
+/**
+ * `[url](url)` for an address that can be written plainly, and
+ * `[url](<url>)` for one holding brackets or spaces.
+ *
+ * Not the backslash escaping BlockNote's exporter uses: its own parser does
+ * not undo that, so `x\(1\)` came back as the href with the backslashes still
+ * in it and every save added two more. The angle-bracket form is taken
+ * verbatim by that parser, so the address that is read is the address that
+ * was written.
+ */
+function selfNamedLinkMarkdown(url) {
+  if (/[[\]>]/.test(url)) return null;   // nothing safe to write; left to BlockNote
+  const destination = /[()\\\s<]/.test(url) ? `<${url}>` : url;
+  return `[${url}](${destination})`;
+}
+
+function keepSelfNamedLinks(content, collected) {
+  if (!Array.isArray(content)) return content;
+  let changed = false;
+  const out = content.map((node) => {
+    if (node?.type !== 'link' || !node.href) return node;
+    const parts = node.content || [];
+    // Only the plain case: a styled link's text is not its address any more
+    // (`**url**`), so BlockNote already keeps the markup for it.
+    const plain = parts.every((n) => n?.type === 'text' && !Object.keys(n.styles || {}).length);
+    if (!plain || parts.map((n) => n.text || '').join('') !== node.href) return node;
+    if (!selfNamedLinkMarkdown(node.href)) return node;
+    changed = true;
+    collected.push(node.href);
+    return { type: 'text', text: SELF_NAMED_LINK_PLACEHOLDER(collected.length - 1), styles: {} };
+  });
+  return changed ? out : content;
+}
+
+function markSelfNamedLinks(blocks, collected) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? markSelfNamedLinks(block.children, collected) : block.children;
+    let content = block.content;
+    if (Array.isArray(content)) {
+      content = keepSelfNamedLinks(content, collected);
+    } else if (content?.type === 'tableContent') {
+      const rows = content.rows.map((row) => ({
+        ...row,
+        cells: row.cells.map((cell) => (Array.isArray(cell)
+          ? keepSelfNamedLinks(cell, collected)
+          : { ...cell, content: keepSelfNamedLinks(cell.content, collected) })),
+      }));
+      if (rows.some((row, i) => row.cells.some((cell, j) => cell !== content.rows[i].cells[j]))) {
+        content = { ...content, rows };
+      }
+    }
+    if (content === block.content && children === block.children) return block;
+    return { ...block, content, children };
+  });
+}
+
 // Indentation — one block tucked under another with Tab — has no markdown of
 // its own outside lists, and BlockNote's external-HTML exporter says so
 // explicitly: everything but a list item is *flattened* to the top level on
@@ -519,7 +589,11 @@ export function restoreIndentation(blocks, base = 0) {
 
 export function blocksToMarkdownTableSafe(editor, blocks) {
   const attachments = [];
-  const prepared = extractAttachments(markIndentation(blocks), attachments);
+  const selfNamedLinks = [];
+  const prepared = extractAttachments(
+    markSelfNamedLinks(markIndentation(blocks), selfNamedLinks),
+    attachments,
+  );
   const html = editor.blocksToHTMLLossy(prepared);
   const container = document.createElement('div');
   container.innerHTML = html;
@@ -529,6 +603,9 @@ export function blocksToMarkdownTableSafe(editor, blocks) {
   let markdown = cleanHTMLToMarkdown(container.innerHTML).split(TABLE_BR_PLACEHOLDER).join('<br>');
   attachments.forEach((figure, index) => {
     markdown = markdown.split(ATTACHMENT_PLACEHOLDER(index)).join(figure);
+  });
+  selfNamedLinks.forEach((href, index) => {
+    markdown = markdown.split(SELF_NAMED_LINK_PLACEHOLDER(index)).join(selfNamedLinkMarkdown(href));
   });
   return stripMediaTokens(markdown);
 }
@@ -560,109 +637,10 @@ function upgradeAttachmentLinks(blocks) {
   });
 }
 
-// A link the editor made by itself — typing an address turns it into one —
-// is written back by BlockNote as the bare address, since its text and its
-// target are the same string and `[url](url)` would be noise. Its markdown
-// parser then has no autolink of its own (its inline tokenizers start at
-// \`![~*_<, and nothing there begins a URL), so what came back was ordinary
-// text: the link was there while writing and gone on reopening.
-//
-// Put back on the way in, the way GitHub-flavoured markdown reads the same
-// text, so what is stored stays a plain readable address and every document
-// written before this gets its links back too.
-const BARE_URL_RE = /(?:https?:\/\/|www\.)[^\s<>]+|[\w.+-]+@[\w-]+\.[\w.-]*\w/gi;
-
-/** Sentence punctuation at the end of an address is the sentence's, not the
- *  address's — and a closing bracket only belongs to it if it opened inside. */
-function trimUrlTail(url) {
-  let out = url;
-  for (;;) {
-    if (/[.,;:!?'"\u2019\u201d]$/.test(out)) { out = out.slice(0, -1); continue; }
-    const last = out[out.length - 1];
-    const opener = { ')': '(', ']': '[', '}': '{' }[last];
-    if (opener) {
-      const opened = out.split(opener).length - 1;
-      const closed = out.split(last).length - 1;
-      if (closed > opened) { out = out.slice(0, -1); continue; }
-    }
-    return out;
-  }
-}
-
-function hrefFor(url) {
-  if (/^https?:\/\//i.test(url)) return url;
-  if (/^www\./i.test(url)) return `http://${url}`;
-  return `mailto:${url}`;
-}
-
-function linkifyTextNode(node) {
-  // Not inside code: an address written as code is being shown, not offered.
-  if (!node?.text || node.styles?.code) return [node];
-  const out = [];
-  let cursor = 0;
-  BARE_URL_RE.lastIndex = 0;
-  for (let match = BARE_URL_RE.exec(node.text); match; match = BARE_URL_RE.exec(node.text)) {
-    const url = trimUrlTail(match[0]);
-    if (!url) continue;
-    const start = match.index;
-    if (start > cursor) out.push({ ...node, text: node.text.slice(cursor, start) });
-    out.push({
-      type: 'link',
-      href: hrefFor(url),
-      content: [{ ...node, type: 'text', text: url }],
-    });
-    cursor = start + url.length;
-    BARE_URL_RE.lastIndex = cursor;
-  }
-  if (!out.length) return [node];
-  if (cursor < node.text.length) out.push({ ...node, text: node.text.slice(cursor) });
-  return out;
-}
-
-function linkifyContent(content) {
-  if (!Array.isArray(content)) return content;
-  let changed = false;
-  const out = [];
-  for (const node of content) {
-    if (node?.type !== 'text') { out.push(node); continue; }
-    const pieces = linkifyTextNode(node);
-    if (pieces.length !== 1 || pieces[0] !== node) changed = true;
-    out.push(...pieces);
-  }
-  return changed ? out : content;
-}
-
-export function linkifyBareUrls(blocks) {
-  return blocks.map((block) => {
-    const children = block.children?.length ? linkifyBareUrls(block.children) : block.children;
-    // A code block's content is the code, and a table's is cells of their own.
-    let content = block.content;
-    if (block.type !== 'codeBlock') {
-      if (Array.isArray(content)) {
-        content = linkifyContent(content);
-      } else if (content?.type === 'tableContent') {
-        const rows = content.rows.map((row) => ({
-          ...row,
-          cells: row.cells.map((cell) => (Array.isArray(cell)
-            ? linkifyContent(cell)
-            : { ...cell, content: linkifyContent(cell.content) })),
-        }));
-        if (rows.some((row, i) => row.cells.some((cell, j) => cell !== content.rows[i].cells[j]))) {
-          content = { ...content, rows };
-        }
-      }
-    }
-    if (content === block.content && children === block.children) return block;
-    return { ...block, content, children };
-  });
-}
-
 /** Markdown as it is stored turned into blocks as the editor holds them. */
 export function markdownToBlocks(editor, markdown) {
   const parsed = editor.tryParseMarkdownToBlocks(expandBlankParagraphs(markdown) || ' ');
-  const blocks = linkifyBareUrls(
-    restoreBlankParagraphs(upgradeAttachmentLinks(upgradeVideoLinks(restoreIndentation(parsed)))),
-  );
+  const blocks = restoreBlankParagraphs(upgradeAttachmentLinks(upgradeVideoLinks(restoreIndentation(parsed))));
   // replaceBlocks refuses an empty list, and a document that parsed to nothing
   // is an empty document, not a missing one.
   return blocks.length ? blocks : [{ type: 'paragraph' }];
