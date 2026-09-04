@@ -198,6 +198,7 @@ export default function PreviewWindow({
   // The last title we told the rest of the app about, so an autosave that
   // changed only the body does not set every list reloading.
   const renamedNameRef = useRef(file?.name || '');
+  const titleInputRef = useRef(null);
 
   const noteEditor = useNoteEditor({
     file: fileDetail,
@@ -215,6 +216,18 @@ export default function PreviewWindow({
       }
     }
   });
+
+  // This document renamed somewhere else — its 할 일 renamed in the 일정 탭 or
+  // on its board. Left alone while the field is being typed in: the person
+  // holding the caret is the one deciding the title.
+  useEffect(() => {
+    const name = file?.name;
+    if (!isMarkdown || !name || name === noteEditor.title) return;
+    if (document.activeElement === titleInputRef.current) return;
+    renamedNameRef.current = name;
+    noteEditor.adoptExternalTitle(name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file?.name, isMarkdown]);
 
   const links = useFileLinks(file?.id, linksToken);
 
@@ -406,6 +419,7 @@ export default function PreviewWindow({
           </div>
           {isMarkdown ? (
             <input
+              ref={titleInputRef}
               type="text"
               className="window-title-input"
               value={noteEditor.title}
@@ -637,6 +651,10 @@ export default function PreviewWindow({
             file={resolvedFile}
             onDirty={() => onUpdateWindowFile(id, { updated_at: new Date().toISOString() })}
             onRenamed={(name) => { onUpdateWindowFile(id, { name }); onFileRenamed?.(file?.id, name); }}
+            // A 할 일's name is the title of the document it owns, so a rename
+            // here is a rename of that document — the same news as one made in
+            // the document's own window, sent the same way.
+            onTaskRenamed={(documentId, name) => onFileRenamed?.(documentId, name)}
             refreshToken={externalRefreshToken}
             onOpenDocument={onOpenFile}
           />

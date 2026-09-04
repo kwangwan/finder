@@ -47,7 +47,8 @@ function formatInZone(date, timeZone) {
  * spans all of them, which no single board can.
  */
 export default function ScheduleExplorer({
-  workspaceId, workspaceName = '', currentUser, onOpenBoard, onOpenFolder, refreshToken = 0,
+  workspaceId, workspaceName = '', currentUser, onOpenBoard, onOpenFolder, onTaskRenamed,
+  refreshToken = 0,
 }) {
   const { showConfirm, showAlert } = useDialog();
   const [data, setData] = useState({ items: [], total: 0, page: 1, total_pages: 1 });
@@ -160,8 +161,15 @@ export default function ScheduleExplorer({
     if (missing.length === 0) return undefined;
     let cancelled = false;
     Promise.all(missing.map((id) => getBoard(id)
-      .then((b) => [id, { people: b.assignable_users || [], locked: !!b.assignee_locked }])
-      .catch(() => [id, { people: [], locked: false }])))
+      .then((b) => [id, {
+        people: b.assignable_users || [],
+        locked: !!b.assignee_locked,
+        // Whether this person may change anything on that board. Fetched with
+        // the rest rather than assumed, so a row in a folder they can only
+        // read does not offer a rename that would be refused.
+        canWrite: b.can_write !== false,
+      }])
+      .catch(() => [id, { people: [], locked: false, canWrite: false }])))
       .then((pairs) => { if (!cancelled) setPeopleByBoard((prev) => ({ ...prev, ...Object.fromEntries(pairs) })); });
     return () => { cancelled = true; };
   }, [data.items, peopleByBoard]);
@@ -191,6 +199,28 @@ export default function ScheduleExplorer({
       load();
     } finally {
       setBusyId(null);
+    }
+  };
+
+  /**
+   * The same rename as on the board, from the list that spans them all.
+   *
+   * Written into the row first so the field shows what was typed; the list is
+   * not re-read, because the order here is the deadline and a name has not
+   * changed it.
+   */
+  const renameTask = async (task, name) => {
+    const apply = (t) => (t.id === task.id ? { ...t, name } : t);
+    setData((prev) => ({
+      ...prev,
+      items: prev.items.map((t) => ({ ...apply(t), children: (t.children || []).map(apply) })),
+    }));
+    try {
+      await updateBoardTask(task.file_id, task.id, { name });
+      if (task.document_id) onTaskRenamed?.(task.document_id, name);
+    } catch (e) {
+      await showAlert({ title: '이름을 바꾸지 못했습니다', message: e.message, type: 'error' });
+      load();
     }
   };
 
@@ -485,11 +515,13 @@ export default function ScheduleExplorer({
                           childCount={(task.children || []).length}
                           collapsed={collapsed.has(task.id)}
                           busy={busyId === task.id}
+                          canWrite={peopleByBoard[task.board?.id]?.canWrite !== false}
                           people={peopleByBoard[task.board?.id]?.people || []}
                           assigneeLocked={!!peopleByBoard[task.board?.id]?.locked}
                           onToggleCollapse={toggleCollapse}
                           onOpen={openDocument}
                           onPatch={patch}
+                          onRename={renameTask}
                           onDelete={removeTask}
                           onAddSub={(t) => { setDraft({ fileId: t.file_id, parentTaskId: t.id }); setDraftName(''); }}
                           onOpenBoardWindow={openBoard}
@@ -503,10 +535,12 @@ export default function ScheduleExplorer({
                             task={child}
                             depth={1}
                             busy={busyId === child.id}
+                            canWrite={peopleByBoard[child.board?.id]?.canWrite !== false}
                             people={peopleByBoard[child.board?.id]?.people || []}
                             assigneeLocked={!!peopleByBoard[child.board?.id]?.locked}
                             onOpen={openDocument}
                             onPatch={patch}
+                            onRename={renameTask}
                             onDelete={removeTask}
                           />
                         ))}

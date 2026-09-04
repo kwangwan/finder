@@ -878,6 +878,21 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     triggerAutoSave(val, tags);
   };
 
+  /**
+   * Take a title this document was given somewhere else — a 할 일 renamed in
+   * the 일정 탭 or on its board, since a 할 일's name *is* its document's
+   * title.
+   *
+   * Refused while anything of ours is unsaved: every save sends the title, so
+   * a window still holding the old one would put it back on its next save,
+   * and a window in the middle of being typed into must not have the field
+   * changed underneath the person typing.
+   */
+  const adoptExternalTitle = useCallback((name) => {
+    if (!name || saveStatusRef.current !== 'saved') return;
+    setTitle((current) => (current === name ? current : name));
+  }, []);
+
   const handleEditorChange = () => {
     if (isLoadingContentRef.current) return;
     // Recorded at the moment the editor itself reports the change, which is
@@ -949,6 +964,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     editor,
     title,
     handleTitleChange,
+    adoptExternalTitle,
     handleEditorChange,
     saveStatus,
     saveError,

@@ -2282,6 +2282,9 @@ export default function App() {
             workspaceId={activeWorkspace?.id}
             workspaceName={activeWorkspace?.name || ''}
             currentUser={currentUser}
+            // A 할 일 renamed here renames the document it owns, so every
+            // window and list showing that document is told.
+            onTaskRenamed={handleFileRenamed}
             refreshToken={scheduleRefreshToken}
             onOpenBoard={(boardFile) => windowManager.openWindow(boardFile)}
             onOpenFolder={(folder, wsId) => windowManager.openFolderWindow(folder, wsId || activeWorkspace?.id)}

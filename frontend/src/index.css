@@ -5363,6 +5363,7 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 .bd-row.is-drop { box-shadow: inset 0 2px 0 var(--accent-primary); }
 .bd-row.is-drop-after { box-shadow: inset 0 -2px 0 var(--accent-primary); }
 .bd-row.is-done .bd-name { text-decoration: line-through; color: var(--text-muted); }
+.bd-row.is-done input.bd-name:focus { text-decoration: none; color: var(--text-primary); }
 /* A sub-item is set in from the left *inside its name cell* and shaded, so
    every other column still lines up with the row above it. Indenting the whole
    row shifted its grid, and the status, priority and period columns then
@@ -5484,11 +5485,19 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
 
 .bd-twisty.is-empty { cursor: default; }
 
+/* The name is a field, not a label — a 할 일 is renamed where it is read.
+   It has to look like the text it replaced until it is used, so it carries no
+   border or background of its own until the pointer is on it. As a field it
+   cannot shrink to its content the way the old button did, so it takes the
+   width the name column has left and the icons after it line up down the
+   page. */
 .bd-name {
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 2px 0;
-  border: none;
+  flex: 1 1 auto;
+  min-width: 40px;
+  padding: 2px 5px;
+  margin-left: -5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-primary);
   font-size: 0.84rem;
@@ -5501,7 +5510,15 @@ button.file-card-uploader:hover { color: var(--accent-primary); }
   cursor: pointer;
 }
 
-.bd-name:hover { color: var(--accent-primary); }
+input.bd-name { cursor: text; }
+button.bd-name:hover { color: var(--accent-primary); }
+input.bd-name:hover { border-color: var(--border-subtle); }
+input.bd-name:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: var(--bg-primary);
+  text-overflow: clip;
+}
 
 .bd-subcount {
   flex-shrink: 0;

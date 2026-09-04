@@ -11,7 +11,7 @@ export {
   initialOf, colorForName, Avatar, PillSelect,
 } from './TaskRow';
 
-export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument, refreshToken = null }) {
+export default function BoardPane({ file, onDirty, onRenamed, onTaskRenamed, onOpenDocument, refreshToken = null }) {
   const { showConfirm, showAlert } = useDialog();
   const [board, setBoard] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,6 +94,38 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument, re
       load();
     } finally {
       setBusyId(null);
+    }
+  };
+
+  /**
+   * A 할 일 renamed where it is read, rather than only inside its document.
+   *
+   * Written into the row first: the name is typed a letter at a time and the
+   * row must show what was typed, not what the last round trip returned. It
+   * goes through the same update as any other field, which also carries the
+   * new name to the document the 할 일 owns.
+   */
+  const renameTask = async (task, name) => {
+    setBoard((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) => (t.id === task.id ? { ...t, name } : t)),
+    }));
+    try {
+      const updated = await updateBoardTask(file.id, task.id, { name });
+      setBoard((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((t) => (t.id === task.id ? { ...t, ...updated } : t)),
+      }));
+      onDirty?.();
+      // The document window showing this 할 일 has the old title in it, and
+      // its next save would put that name back.
+      if (task.document_id) onTaskRenamed?.(task.document_id, name);
+    } catch (e) {
+      setBoard((prev) => ({
+        ...prev,
+        tasks: prev.tasks.map((t) => (t.id === task.id ? { ...t, name: task.name } : t)),
+      }));
+      await showAlert({ title: '이름을 바꾸지 못했습니다', message: e.message, type: 'error' });
     }
   };
 
@@ -293,6 +325,7 @@ export default function BoardPane({ file, onDirty, onRenamed, onOpenDocument, re
           onToggleCollapse={toggleCollapse}
           onOpen={openDocument}
           onPatch={patch}
+          onRename={renameTask}
           onDelete={removeTask}
           onAddSub={depth === 0 ? (t) => { setDraftUnder(t.id); setDraftName(''); } : undefined}
           dragProps={dragPropsFor(task)}

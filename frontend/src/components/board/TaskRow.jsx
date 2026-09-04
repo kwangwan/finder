@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus, Trash2, ChevronRight, ChevronDown, Calendar, GripVertical, Check, FileText,
   ExternalLink, FolderOpen,
@@ -202,6 +202,7 @@ export default function TaskRow({
   onToggleCollapse,
   onOpen,
   onPatch,
+  onRename,
   onDelete,
   onAddSub,
   dragProps = {},
@@ -213,6 +214,24 @@ export default function TaskRow({
 }) {
   const [editingPeriod, setEditingPeriod] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  // The name is typed in the row itself. Held locally while it is being typed
+  // and sent a moment later, so it is saved without anything having to be
+  // pressed — and adopted from the 할 일 again whenever the change came from
+  // somewhere else (its own document's title, or another person).
+  const [name, setName] = useState(task.name);
+  const [isNaming, setIsNaming] = useState(false);
+  // A row is draggable, and a draggable ancestor takes over the press-and-move
+  // that should be selecting text in the field — the browser starts dragging
+  // the row instead, and nothing inside can be selected. Dragging is therefore
+  // turned off while the pointer is on the name (before any press, which is
+  // why hovering and not focus decides it); the grip is the handle for
+  // reordering, and the rest of the row still drags.
+  const [isOverName, setIsOverName] = useState(false);
+  const nameRef = useRef(task.name);
+  const renameTimerRef = useRef(null);
+  // Set by Escape, read by the blur it causes: giving up on an edit must not
+  // then be saved by the very act of leaving the field.
+  const abandonedRef = useRef(false);
   // Where a person can only ever assign themselves there is no choice to
   // offer — the cell says who it is instead of opening a menu of one.
   const peopleLocked = assigneeLocked;
@@ -220,8 +239,67 @@ export default function TaskRow({
   const peopleRef = useRef(null);
   const periodRef = useRef(null);
 
+  const rowDragProps = (isOverName || isNaming) && dragProps?.draggable
+    ? { ...dragProps, draggable: false }
+    : dragProps;
+
   const tone = dueTone(task.days_left, task.status);
   const left = remainingText(task.days_left, task.status);
+
+  useEffect(() => {
+    nameRef.current = task.name;
+    // Never over the top of what is being typed here.
+    if (!isNaming) setName(task.name);
+  }, [task.name, isNaming]);
+
+  useEffect(() => () => clearTimeout(renameTimerRef.current), []);
+
+  const RENAME_DELAY = 600;
+
+  const commitName = (value, { immediate = false } = {}) => {
+    clearTimeout(renameTimerRef.current);
+    const trimmed = value.trim();
+    // An empty name would leave a row nothing can be said about; the 할 일
+    // keeps the name it had.
+    if (!trimmed || trimmed === nameRef.current) return;
+    const send = () => {
+      nameRef.current = trimmed;
+      onRename?.(task, trimmed);
+    };
+    if (immediate) send(); else renameTimerRef.current = setTimeout(send, RENAME_DELAY);
+  };
+
+  const handleNameChange = (e) => {
+    setName(e.target.value);
+    // Nothing is sent mid-syllable: while a Korean keyboard is composing, the
+    // field holds a half-built letter, and a save landing there would rename
+    // the 할 일 — and its document — to it. The syllable finishing is what
+    // starts the clock again.
+    if (e.nativeEvent?.isComposing) {
+      clearTimeout(renameTimerRef.current);
+      return;
+    }
+    commitName(e.target.value);
+  };
+
+  const handleNameBlur = () => {
+    setIsNaming(false);
+    if (abandonedRef.current) {
+      abandonedRef.current = false;
+      setName(nameRef.current);
+      return;
+    }
+    if (!name.trim()) { setName(task.name); return; }
+    commitName(name, { immediate: true });
+  };
+
+  const abandonName = (e) => {
+    e.preventDefault();
+    clearTimeout(renameTimerRef.current);
+    abandonedRef.current = true;
+    setName(nameRef.current);
+    e.currentTarget.blur();
+  };
 
   const toggleAssignee = (userId) => {
     const current = task.assignees.map((a) => a.id);
@@ -234,7 +312,7 @@ export default function TaskRow({
     <div
       className={`bd-row depth-${depth} tone-${tone} ${isOpen ? 'is-open' : ''} ${task.status === 'done' ? 'is-done' : ''} ${isDragging ? 'is-dragging' : ''} ${isDropTarget === 'after' ? 'is-drop-after' : isDropTarget ? 'is-drop' : ''}`}
       onMouseEnter={onHover}
-      {...dragProps}
+      {...rowDragProps}
     >
       <div className="bd-f-name">
         {/* Only where dragging actually reorders something. In the 일정 탭 the
@@ -254,14 +332,36 @@ export default function TaskRow({
             {childCount ? (collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />) : null}
           </button>
         ) : <span className="bd-twisty is-empty" />}
-        <button
-          type="button"
-          className="bd-name"
-          onClick={() => onOpen?.(task)}
-          title={`${task.name} — 이 할 일의 문서 열기`}
-        >
-          {task.name}
-        </button>
+        {canWrite && onRename ? (
+          <input
+            type="text"
+            className="bd-name"
+            value={name}
+            onChange={handleNameChange}
+            onCompositionEnd={(e) => commitName(e.currentTarget.value)}
+            onFocus={() => setIsNaming(true)}
+            onBlur={handleNameBlur}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+              if (e.key === 'Escape') abandonName(e);
+            }}
+            draggable={false}
+            onMouseEnter={() => setIsOverName(true)}
+            onMouseLeave={() => setIsOverName(false)}
+            onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            title={`${task.name} — 눌러서 이름 고치기`}
+            aria-label="할 일 이름"
+          />
+        ) : (
+          <button
+            type="button"
+            className="bd-name"
+            onClick={() => onOpen?.(task)}
+            title={`${task.name} — 이 할 일의 문서 열기`}
+          >
+            {task.name}
+          </button>
+        )}
         {childCount > 0 && <span className="bd-subcount" title={`하위 할 일 ${childCount}개`}>{childCount}</span>}
 
         {/* Every 할 일 has a document. Filled in once something is written in
