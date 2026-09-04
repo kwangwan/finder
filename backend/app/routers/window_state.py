@@ -96,7 +96,15 @@ async def get_window_state(
     if not row or not row.windows:
         return WindowStateResponse(windows=[], updated_at=row.updated_at if row else None)
 
-    entries = [e for e in row.windows if isinstance(e, dict) and (e.get("file_id") or e.get("folder_id"))]
+    # A folder window showing the workspace's home has no folder id — it is
+    # still a window, and dropping it here is why one never came back after a
+    # reload. It says what it is in `kind` and where it is in `workspace_id`.
+    entries = [
+        e for e in row.windows
+        if isinstance(e, dict) and (
+            e.get("file_id") or e.get("folder_id") or e.get("kind") == "folder"
+        )
+    ]
     if not entries:
         return WindowStateResponse(windows=[], updated_at=row.updated_at)
 
@@ -121,9 +129,20 @@ async def get_window_state(
     visible = []
     for e in entries:
         minimized = bool(e.get("is_minimized"))
-        if e.get("folder_id"):
+        if e.get("kind") == "folder" or e.get("folder_id"):
             fid = _uuid(e.get("folder_id"))
-            folder = alive_folders.get(fid) if fid else None
+            if fid is None:
+                # The workspace's home. There is no folder row to check, so
+                # what is asked is whether they are still in that workspace —
+                # and without one there is nothing a home window could show.
+                wid = _uuid(e.get("workspace_id"))
+                if wid is None or not await access_service.is_workspace_member(db, current_user, wid):
+                    continue
+                visible.append(WindowEntry(
+                    kind="folder", folder_id=None, workspace_id=wid, is_minimized=minimized
+                ))
+                continue
+            folder = alive_folders.get(fid)
             if not folder:
                 continue
             if not await access_service.can_access_folder(db, current_user, fid):
@@ -257,10 +276,15 @@ async def put_window_state(
     """Replace the user's open-window list (last write wins)."""
     entries = []
     for w in req.windows[:MAX_WINDOWS]:
-        if w.kind == "folder" and w.folder_id:
+        if w.kind == "folder":
+            # No folder id means the workspace's home, which is a place like
+            # any other; it is kept, and the workspace it belongs to is what
+            # says whose home it is.
+            if w.folder_id is None and w.workspace_id is None:
+                continue
             entries.append({
                 "kind": "folder",
-                "folder_id": str(w.folder_id),
+                "folder_id": str(w.folder_id) if w.folder_id else None,
                 "workspace_id": str(w.workspace_id) if w.workspace_id else None,
                 "is_minimized": bool(w.is_minimized),
             })
