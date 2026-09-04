@@ -92,7 +92,14 @@ export default function PreviewWindow({
 
   // Minimize plays a shrink-toward-dock animation before the window actually
   // unmounts, since the parent flips isMinimized to true immediately.
-  const [minimizePhase, setMinimizePhase] = useState('none'); // 'none' | 'closing' | 'hidden'
+  //
+  // A window that is *already* minimized when it appears — every minimized
+  // window after a page is reloaded, since the taskbar remembers them — has no
+  // shrinking to do and starts hidden. Starting it at 'none' drew it open over
+  // the desktop, and its own minimize button then did nothing at all: the
+  // state it would have set was the state it was already in, so nothing
+  // changed and nothing re-rendered.
+  const [minimizePhase, setMinimizePhase] = useState(isMinimized ? 'hidden' : 'none'); // 'none' | 'closing' | 'hidden'
   const prevIsMinimizedRef = useRef(isMinimized);
   useEffect(() => {
     if (isMinimized && !prevIsMinimizedRef.current) {
