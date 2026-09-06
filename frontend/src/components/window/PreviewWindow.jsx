@@ -36,7 +36,7 @@ import {
   Trash2,
   Paperclip
 } from '../../utils/icons';
-import { getMediaPreviewUrl, downloadFileChunked, getFileDetail } from '../../api';
+import { getMediaPreviewUrl, downloadFileChunked, getFileDetail, ensureMediaToken, clearMediaToken } from '../../api';
 import { useNoteEditor, BN_THEME, blocksToMarkdownTableSafe } from '../../hooks/useNoteEditor';
 import AttachExistingFileModal from '../editor/AttachExistingFileModal';
 import FileLinksPanel, { useFileLinks } from './FileLinksPanel';
@@ -135,8 +135,19 @@ export default function PreviewWindow({
   useEffect(() => {
     if (!file) return;
 
-    const url = getMediaPreviewUrl(file.id);
-    setMediaUrl(url);
+    setMediaUrl(getMediaPreviewUrl(file.id));
+    // A preview URL carries a media token that lives fifteen minutes, and
+    // nothing on this screen refreshes it — so a window opened later in a
+    // session was built with a token that had expired, or with none at all,
+    // and every picture, video and PDF in it answered 401. Asked for before
+    // the URL is used, and only replaced if the token really changed, so a
+    // <video> is not reloaded for nothing.
+    let cancelled = false;
+    ensureMediaToken().then(() => {
+      if (cancelled) return;
+      const fresh = getMediaPreviewUrl(file.id);
+      setMediaUrl((current) => (current === fresh ? current : fresh));
+    });
 
     const fileNameLower = file.name?.toLowerCase() || '';
     const isDoc = file.file_type === 'docx' || file.file_type === 'xlsx' || file.file_type === 'text' ||
@@ -159,7 +170,33 @@ export default function PreviewWindow({
     } else {
       setFileDetail(file);
     }
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file?.id]);
+
+  /**
+   * A picture or a player that failed, tried once more with a token that
+   * works.
+   *
+   * A media element cannot say *why* it failed — an expired token looks
+   * exactly like a broken file from inside an <img> or a <video> — and it
+   * never retries by itself. This is the same recovery the thumbnails in the
+   * file grid and the taskbar already do.
+   */
+  const mediaRetriedRef = useRef(false);
+  useEffect(() => { mediaRetriedRef.current = false; }, [file?.id]);
+  // Once something has loaded, the window has earned another attempt: a
+  // window left open all afternoon outlives more than one token.
+  const handleMediaLoaded = useCallback(() => { mediaRetriedRef.current = false; }, []);
+
+  const refreshMediaUrl = useCallback(async () => {
+    if (mediaRetriedRef.current || !file?.id) return null;
+    mediaRetriedRef.current = true;
+    clearMediaToken();
+    await ensureMediaToken();
+    const fresh = getMediaPreviewUrl(file.id);
+    setMediaUrl(fresh);
+    return fresh;
   }, [file?.id]);
 
   // Clicking a picture in a document opens the file it came from, so the way
@@ -677,6 +714,8 @@ export default function PreviewWindow({
             <img
               src={mediaUrl}
               alt={resolvedFile.name}
+              onError={refreshMediaUrl}
+              onLoad={handleMediaLoaded}
               style={{
                 transform: `scale(${zoomLevel}) rotate(${rotation}deg) translate(${pan.x / zoomLevel}px, ${pan.y / zoomLevel}px)`,
                 transition: isPanning ? 'none' : 'transform 0.15s ease'
@@ -689,6 +728,8 @@ export default function PreviewWindow({
               src={mediaUrl}
               file={file}
               onDownload={handleDownload}
+              onRecoverSrc={refreshMediaUrl}
+              onLoaded={handleMediaLoaded}
               autoPlay={false}
             />
           </div>
@@ -698,7 +739,7 @@ export default function PreviewWindow({
             <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text-primary)', marginBottom: '1rem' }}>
               {resolvedFile.name}
             </div>
-            <audio controls src={mediaUrl} style={{ width: '85%', maxWidth: 420 }} />
+            <audio controls src={mediaUrl} onError={refreshMediaUrl} onLoadedData={handleMediaLoaded} style={{ width: '85%', maxWidth: 420 }} />
           </div>
         ) : isPdf ? (
           <div className="os-pdf-viewport">

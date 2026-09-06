@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Film, Play, Download, AlertCircle, Volume2, Sparkles } from '../../utils/icons';
 import { getThumbnailUrl } from '../../api';
 
@@ -6,6 +6,12 @@ export default function VideoPlayer({
   src,
   file,
   onDownload,
+  // Asked for a URL that works when this one stops working. Returns the new
+  // one, or null when it has already been tried.
+  onRecoverSrc,
+  // Told when something actually loaded, so the caller knows its recovery
+  // worked and may try again the next time this happens.
+  onLoaded,
   autoPlay = false,
   className = '',
   style = {}
@@ -27,16 +33,54 @@ export default function VideoPlayer({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  // Where playback was when the source failed, so recovering does not send
+  // the viewer back to the beginning of a long video.
+  const resumeRef = useRef(null);
+
   const handleLoadedData = () => {
     setIsLoading(false);
     setIsError(false);
+    onLoaded?.();
+    const resume = resumeRef.current;
+    resumeRef.current = null;
+    if (resume && videoRef.current) {
+      if (resume.time > 0) videoRef.current.currentTime = resume.time;
+      if (resume.playing) videoRef.current.play().catch(() => {});
+    }
   };
 
-  const handleError = (e) => {
+  /**
+   * A video that stops playing has not necessarily got anything wrong with it.
+   *
+   * The media token in the URL lives fifteen minutes and a video can be
+   * watched for longer than that; when it expires the next range request is
+   * refused and the element reports the same "cannot play" it reports for a
+   * codec it does not understand. So the source is asked for again — once —
+   * before the file is blamed, and playback picks up where it left off.
+   */
+  const handleError = async () => {
+    const video = videoRef.current;
+    if (onRecoverSrc) {
+      const at = video?.currentTime || 0;
+      const wasPlaying = !!video && !video.paused && !video.ended;
+      const fresh = await onRecoverSrc();
+      if (fresh) {
+        resumeRef.current = { time: at, playing: wasPlaying || autoPlay };
+        setIsLoading(true);
+        setIsError(false);
+        return;
+      }
+    }
     setIsLoading(false);
     setIsError(true);
-    setErrorMessage('브라우저에서 직접 재생할 수 없는 코덱이거나 파일이 손상되었습니다.');
+    setErrorMessage('영상을 불러오지 못했습니다. 브라우저가 지원하지 않는 코덱이거나 파일이 손상되었을 수 있습니다.');
   };
+
+  // A new source that arrived after a failure has to actually be loaded: the
+  // element gives up on the old one and does not reload on its own.
+  useEffect(() => {
+    if (videoRef.current && resumeRef.current) videoRef.current.load();
+  }, [src]);
 
   const handleWaiting = () => {
     setIsLoading(true);
