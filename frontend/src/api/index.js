@@ -1,6 +1,93 @@
 const API_BASE = '/api';
 
 /**
+ * The end of a session, noticed once.
+ *
+ * A session token lasts a week and every call carried it; when it ran out,
+ * each request answered 401 on its own and each call site reported whatever
+ * failure it knew how to report — "저장하지 못했습니다", "불러오지 못했습니다" —
+ * so an expired session looked like the app breaking at random. Every call to
+ * this app's API goes through `apiFetch` below, so the answer is recognised in
+ * one place and said once, plainly.
+ */
+const sessionEndedListeners = new Set();
+let sessionHasEnded = false;
+
+export function onSessionExpired(listener) {
+  sessionEndedListeners.add(listener);
+  return () => sessionEndedListeners.delete(listener);
+}
+
+/** Called after signing back in, so the next expiry is noticed too. */
+export function resumeSession() {
+  sessionHasEnded = false;
+}
+
+function noticeSessionEnded() {
+  if (sessionHasEnded) return;
+  sessionHasEnded = true;
+  // The token is no good; holding on to it would only keep answering 401.
+  // Nothing on screen is touched — that is the caller's business, and there
+  // may be a document open with something in it that has not been saved yet.
+  setStoredToken(null);
+  sessionEndedListeners.forEach((listener) => {
+    try { listener(); } catch (e) { console.warn('[Session] listener failed:', e); }
+  });
+}
+
+/**
+ * Every request this app makes to its own API.
+ *
+ * A 401 while a token was being sent means that token is finished — a request
+ * made without one (signing in, checking an invitation) is a different thing
+ * and is left to its caller.
+ */
+async function apiFetch(input, init) {
+  const hadToken = !!getStoredToken();
+  const res = await fetch(input, init);
+  if (res.status === 401 && hadToken) noticeSessionEnded();
+  return res;
+}
+
+// How long before a token runs out to ask for a new one. A week-long session
+// that is in use never reaches its last day; one that has been left alone does,
+// and ends, because nobody is there to ask.
+const SESSION_RENEW_WITHIN_MS = 2 * 24 * 60 * 60 * 1000;
+
+function tokenExpiresAt(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Keep a session that is being used from running out.
+ *
+ * Asked on start, on coming back to the tab, and on a slow timer — all cheap,
+ * because it only calls the server when the token is actually near its end.
+ */
+export async function renewSessionIfNeeded() {
+  const token = getStoredToken();
+  if (!token) return false;
+  const expiresAt = tokenExpiresAt(token);
+  if (expiresAt === null) return false;
+  if (expiresAt - Date.now() > SESSION_RENEW_WITHIN_MS) return false;
+  try {
+    const res = await apiFetch(`${API_BASE}/auth/refresh`, { method: 'POST', headers: authHeaders() });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.access_token) setStoredToken(data.access_token);
+    return true;
+  } catch (e) {
+    // Offline, or the backend is between deploys. It will be asked again.
+    return false;
+  }
+}
+
+/**
  * Auth Token Helpers
  */
 export function getStoredToken() {
@@ -10,6 +97,8 @@ export function getStoredToken() {
 export function setStoredToken(token) {
   if (token) {
     localStorage.setItem('kb_auth_token', token);
+    // A token means a session again, so the next one that ends is noticed.
+    resumeSession();
     ensureMediaToken();
   } else {
     localStorage.removeItem('kb_auth_token');
@@ -42,7 +131,7 @@ let mediaTokenCache = { token: null, expiresAt: 0 };
 let mediaTokenRefreshPromise = null;
 
 async function fetchMediaToken() {
-  const res = await fetch(`${API_BASE}/auth/media-token`, {
+  const res = await apiFetch(`${API_BASE}/auth/media-token`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -94,7 +183,7 @@ setInterval(() => { if (getStoredToken()) ensureMediaToken(); }, 5 * 60 * 1000);
 
 export async function getAuthConfig() {
   try {
-    const res = await fetch(`${API_BASE}/auth/config`);
+    const res = await apiFetch(`${API_BASE}/auth/config`);
     if (!res.ok) return { google_client_id: '' };
     return res.json();
   } catch (e) {
@@ -118,7 +207,7 @@ export function browserLanguage() {
 }
 
 export async function loginWithGoogle(idToken, inviteToken = null) {
-  const res = await fetch(`${API_BASE}/auth/google`, {
+  const res = await apiFetch(`${API_BASE}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id_token: idToken, invite_token: inviteToken, language: browserLanguage() }),
@@ -133,7 +222,7 @@ export async function loginWithGoogle(idToken, inviteToken = null) {
 }
 
 export async function registerWithPassword(email, password, name = '', inviteToken = null, username = '') {
-  const res = await fetch(`${API_BASE}/auth/register-password`, {
+  const res = await apiFetch(`${API_BASE}/auth/register-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -152,13 +241,13 @@ export async function registerWithPassword(email, password, name = '', inviteTok
 
 /** Open to unauthenticated callers so the signup form can check as you type. */
 export async function checkUsernameAvailable(username) {
-  const res = await fetch(`${API_BASE}/auth/username-available?username=${encodeURIComponent(username)}`);
+  const res = await apiFetch(`${API_BASE}/auth/username-available?username=${encodeURIComponent(username)}`);
   if (!res.ok) return { available: false };
   return res.json();
 }
 
 export async function loginWithPassword(email, password) {
-  const res = await fetch(`${API_BASE}/auth/login-password`, {
+  const res = await apiFetch(`${API_BASE}/auth/login-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -173,7 +262,7 @@ export async function loginWithPassword(email, password) {
 }
 
 export async function devLogin(email, name = '') {
-  const res = await fetch(`${API_BASE}/auth/dev-login`, {
+  const res = await apiFetch(`${API_BASE}/auth/dev-login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, name }),
@@ -191,7 +280,7 @@ export async function getMe() {
   const token = getStoredToken();
   if (!token) return null;
 
-  const res = await fetch(`${API_BASE}/auth/me`, {
+  const res = await apiFetch(`${API_BASE}/auth/me`, {
     headers: authHeaders(),
   });
   if (!res.ok) {
@@ -209,7 +298,7 @@ export async function getMe() {
  *  shared space the uploader's name is the only thing identifying who put a
  *  file there. */
 export async function updateMyName(name) {
-  const res = await fetch(`${API_BASE}/auth/me/name`, {
+  const res = await apiFetch(`${API_BASE}/auth/me/name`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name }),
@@ -220,7 +309,7 @@ export async function updateMyName(name) {
 }
 
 export async function checkNameAvailable(name) {
-  const res = await fetch(`${API_BASE}/auth/me/name-available?name=${encodeURIComponent(name)}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/auth/me/name-available?name=${encodeURIComponent(name)}`, { headers: authHeaders() });
   if (!res.ok) return { available: false };
   return res.json();
 }
@@ -231,19 +320,19 @@ export async function listRootFolders({ workspace_id, search = '', page = 1, pag
   const params = new URLSearchParams({ root_only: 'true', paged: 'true', page: String(page), page_size: String(page_size) });
   if (workspace_id) params.append('workspace_id', workspace_id);
   if (search) params.append('search', search);
-  const res = await fetch(`${API_BASE}/folders?${params.toString()}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/folders?${params.toString()}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('폴더 목록을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function listFolderGrants(folderId) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}/grants`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}/grants`, { headers: authHeaders() });
   if (!res.ok) throw new Error('공유 설정을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function addFolderGrant(folderId, email) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}/grants`, {
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}/grants`, {
     method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ email }),
   });
   const body = await res.json().catch(() => null);
@@ -252,19 +341,19 @@ export async function addFolderGrant(folderId, email) {
 }
 
 export async function removeFolderGrant(folderId, userId) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}/grants/${userId}`, { method: 'DELETE', headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}/grants/${userId}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) throw new Error('권한을 회수하지 못했습니다.');
   return res.json();
 }
 
 export async function getReportReasons() {
-  const res = await fetch(`${API_BASE}/reports/reasons`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/reports/reasons`, { headers: authHeaders() });
   if (!res.ok) throw new Error('신고 사유를 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function reportContent(fileId, reason, detail = '') {
-  const res = await fetch(`${API_BASE}/reports`, {
+  const res = await apiFetch(`${API_BASE}/reports`, {
     method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ file_id: fileId, reason, detail }),
   });
@@ -274,19 +363,19 @@ export async function reportContent(fileId, reason, detail = '') {
 }
 
 export async function listReports(status = 'pending') {
-  const res = await fetch(`${API_BASE}/reports?status=${status}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/reports?status=${status}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('신고 목록을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function getPendingReportCount() {
-  const res = await fetch(`${API_BASE}/reports/pending-count`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/reports/pending-count`, { headers: authHeaders() });
   if (!res.ok) return { pending: 0 };
   return res.json();
 }
 
 export async function resolveReport(reportId, action, note = '') {
-  const res = await fetch(`${API_BASE}/reports/${reportId}/resolve`, {
+  const res = await apiFetch(`${API_BASE}/reports/${reportId}/resolve`, {
     method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ action, note }),
   });
@@ -296,13 +385,13 @@ export async function resolveReport(reportId, action, note = '') {
 }
 
 export async function getSharedPolicy() {
-  const res = await fetch(`${API_BASE}/admin/shared-policy`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/admin/shared-policy`, { headers: authHeaders() });
   if (!res.ok) throw new Error('공용 워크스페이스 정책을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function updateSharedPolicy(patch) {
-  const res = await fetch(`${API_BASE}/admin/shared-policy`, {
+  const res = await apiFetch(`${API_BASE}/admin/shared-policy`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(patch),
@@ -322,7 +411,7 @@ export function logout() {
  * Admin User Management API
  */
 export async function getAdminUsers() {
-  const res = await fetch(`${API_BASE}/admin/users`, {
+  const res = await apiFetch(`${API_BASE}/admin/users`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('관리자 회원 목록 조회 실패');
@@ -330,7 +419,7 @@ export async function getAdminUsers() {
 }
 
 export async function toggleApproveUser(userId, isApproved) {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}/approve`, {
+  const res = await apiFetch(`${API_BASE}/admin/users/${userId}/approve`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ is_approved: isApproved }),
@@ -340,7 +429,7 @@ export async function toggleApproveUser(userId, isApproved) {
 }
 
 export async function toggleAdminUser(userId, isAdmin) {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}/admin`, {
+  const res = await apiFetch(`${API_BASE}/admin/users/${userId}/admin`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ is_superadmin: isAdmin }),
@@ -350,7 +439,7 @@ export async function toggleAdminUser(userId, isAdmin) {
 }
 
 export async function deleteAdminUser(userId) {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+  const res = await apiFetch(`${API_BASE}/admin/users/${userId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -359,7 +448,7 @@ export async function deleteAdminUser(userId) {
 }
 
 export async function updateUserQuota(userId, storageQuotaBytes) {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}/quota`, {
+  const res = await apiFetch(`${API_BASE}/admin/users/${userId}/quota`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ storage_quota_bytes: storageQuotaBytes }),
@@ -375,7 +464,7 @@ export async function updateUserQuota(userId, storageQuotaBytes) {
  * Workspaces API
  */
 export async function listWorkspaces() {
-  const res = await fetch(`${API_BASE}/workspaces`, {
+  const res = await apiFetch(`${API_BASE}/workspaces`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('워크스페이스 목록 조회 실패');
@@ -383,7 +472,7 @@ export async function listWorkspaces() {
 }
 
 export async function createWorkspace({ name, description = '', icon = 'briefcase' }) {
-  const res = await fetch(`${API_BASE}/workspaces`, {
+  const res = await apiFetch(`${API_BASE}/workspaces`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, description, icon }),
@@ -396,7 +485,7 @@ export async function createWorkspace({ name, description = '', icon = 'briefcas
 }
 
 export async function getWorkspace(workspaceId) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('워크스페이스 상세 조회 실패');
@@ -404,7 +493,7 @@ export async function getWorkspace(workspaceId) {
 }
 
 export async function updateWorkspace(workspaceId, { name, description, icon }) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, description, icon }),
@@ -417,7 +506,7 @@ export async function updateWorkspace(workspaceId, { name, description, icon }) 
 }
 
 export async function deleteWorkspace(workspaceId) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -439,7 +528,7 @@ export async function listWorkspaceMembers(workspaceId, { q = '', page = 1, page
   if (q) params.set('q', q);
   if (paged) { params.set('paged', 'true'); params.set('page', String(page)); params.set('page_size', String(pageSize)); }
   const suffix = params.toString() ? `?${params}` : '';
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members${suffix}`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}/members${suffix}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('멤버 목록 조회 실패');
@@ -447,7 +536,7 @@ export async function listWorkspaceMembers(workspaceId, { q = '', page = 1, page
 }
 
 export async function inviteWorkspaceMember(workspaceId, { email, role = 'member' }) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}/members`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email, role }),
@@ -460,7 +549,7 @@ export async function inviteWorkspaceMember(workspaceId, { email, role = 'member
 }
 
 export async function updateWorkspaceMemberRole(workspaceId, userId, role) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members/${userId}`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}/members/${userId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ role }),
@@ -473,7 +562,7 @@ export async function updateWorkspaceMemberRole(workspaceId, userId, role) {
 }
 
 export async function removeWorkspaceMember(workspaceId, userId) {
-  const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/members/${userId}`, {
+  const res = await apiFetch(`${API_BASE}/workspaces/${workspaceId}/members/${userId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -491,7 +580,7 @@ export async function listInvitations(workspaceId = null) {
   const params = new URLSearchParams();
   if (workspaceId) params.append('workspace_id', workspaceId);
 
-  const res = await fetch(`${API_BASE}/invitations?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/invitations?${params.toString()}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('초대 목록 조회 실패');
@@ -499,7 +588,7 @@ export async function listInvitations(workspaceId = null) {
 }
 
 export async function createInvitation({ email, workspace_id = null, role = 'member' }) {
-  const res = await fetch(`${API_BASE}/invitations`, {
+  const res = await apiFetch(`${API_BASE}/invitations`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email, workspace_id, role }),
@@ -512,7 +601,7 @@ export async function createInvitation({ email, workspace_id = null, role = 'mem
 }
 
 export async function cancelInvitation(invitationId) {
-  const res = await fetch(`${API_BASE}/invitations/${invitationId}`, {
+  const res = await apiFetch(`${API_BASE}/invitations/${invitationId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -524,7 +613,7 @@ export async function cancelInvitation(invitationId) {
 }
 
 export async function verifyInvitationToken(token) {
-  const res = await fetch(`${API_BASE}/invitations/verify/${token}`);
+  const res = await apiFetch(`${API_BASE}/invitations/verify/${token}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || '초대 링크 검증 실패');
@@ -533,7 +622,7 @@ export async function verifyInvitationToken(token) {
 }
 
 export async function acceptInvitation({ token, name = '', password = '' }) {
-  const res = await fetch(`${API_BASE}/invitations/accept`, {
+  const res = await apiFetch(`${API_BASE}/invitations/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, name, password }),
@@ -551,7 +640,7 @@ export async function acceptInvitation({ token, name = '', password = '' }) {
  * Storage & Configuration API
  */
 export async function getStorageConfig() {
-  const res = await fetch(`${API_BASE}/storage/config`, {
+  const res = await apiFetch(`${API_BASE}/storage/config`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to load storage config');
@@ -562,7 +651,7 @@ export async function getSystemStats(workspaceId = null) {
   const params = new URLSearchParams();
   if (workspaceId) params.append('workspace_id', workspaceId);
   const qs = params.toString();
-  const res = await fetch(`${API_BASE}/system/stats${qs ? '?' + qs : ''}`, {
+  const res = await apiFetch(`${API_BASE}/system/stats${qs ? '?' + qs : ''}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to load system stats');
@@ -576,7 +665,7 @@ export async function getFolderTree(workspaceId = null) {
   const params = new URLSearchParams();
   if (workspaceId) params.append('workspace_id', workspaceId);
 
-  const res = await fetch(`${API_BASE}/folders/tree?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/folders/tree?${params.toString()}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to load folder tree');
@@ -584,7 +673,7 @@ export async function getFolderTree(workspaceId = null) {
 }
 
 export async function createFolder({ name, parent_id = null, workspace_id = null, icon = 'folder', color = null }) {
-  const res = await fetch(`${API_BASE}/folders`, {
+  const res = await apiFetch(`${API_BASE}/folders`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, parent_id, workspace_id, icon, color }),
@@ -599,7 +688,7 @@ export async function createFolder({ name, parent_id = null, workspace_id = null
 }
 
 export async function updateFolder(folderId, { name, parent_id, workspace_id, icon, color }) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}`, {
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, parent_id, workspace_id, icon, color }),
@@ -612,7 +701,7 @@ export async function updateFolder(folderId, { name, parent_id, workspace_id, ic
 }
 
 export async function renameFolder(folderId, name) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}/rename`, {
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}/rename`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name }),
@@ -622,7 +711,7 @@ export async function renameFolder(folderId, name) {
 }
 
 export async function moveToTrashFolder(folderId) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}/trash`, {
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}/trash`, {
     method: 'PUT',
     headers: authHeaders(),
   });
@@ -631,7 +720,7 @@ export async function moveToTrashFolder(folderId) {
 }
 
 export async function restoreFolder(folderId) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}/restore`, {
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}/restore`, {
     method: 'PUT',
     headers: authHeaders(),
   });
@@ -640,7 +729,7 @@ export async function restoreFolder(folderId) {
 }
 
 export async function deleteFolder(folderId) {
-  const res = await fetch(`${API_BASE}/folders/${folderId}`, {
+  const res = await apiFetch(`${API_BASE}/folders/${folderId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -666,7 +755,7 @@ export async function listFolders({
   if (page_size !== null && page_size !== undefined) params.append('page_size', page_size);
   if (paged) params.append('paged', 'true');
 
-  const res = await fetch(`${API_BASE}/folders?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/folders?${params.toString()}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to list folders');
@@ -685,7 +774,7 @@ export async function listFileIds({ workspace_id = null, folder_id = null, root_
   if (file_type) params.append('file_type', file_type);
   if (is_favorite !== null && is_favorite !== undefined) params.append('is_favorite', is_favorite);
 
-  const res = await fetch(`${API_BASE}/files/ids?${params.toString()}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/files/ids?${params.toString()}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('파일 목록을 불러오지 못했습니다.');
   return res.json();
 }
@@ -721,7 +810,7 @@ export async function listFiles({
   if (page_size !== null && page_size !== undefined) params.append('page_size', page_size);
   if (paged) params.append('paged', 'true');
 
-  const res = await fetch(`${API_BASE}/files?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/files?${params.toString()}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to list files');
@@ -749,7 +838,7 @@ export async function getFilesWatermark({
   if (file_type) params.append('file_type', file_type);
   if (is_favorite !== null && is_favorite !== undefined) params.append('is_favorite', is_favorite);
 
-  const res = await fetch(`${API_BASE}/files/watermark?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/files/watermark?${params.toString()}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to get files watermark');
@@ -758,7 +847,7 @@ export async function getFilesWatermark({
 
 
 export async function getFileDetail(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to get file detail');
@@ -766,7 +855,7 @@ export async function getFileDetail(fileId) {
 }
 
 export async function createMarkdownNote({ name, folder_id = null, workspace_id = null, content = '', tags = [] }) {
-  const res = await fetch(`${API_BASE}/files/notes`, {
+  const res = await apiFetch(`${API_BASE}/files/notes`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, folder_id, workspace_id, content, tags }),
@@ -776,7 +865,7 @@ export async function createMarkdownNote({ name, folder_id = null, workspace_id 
 }
 
 export async function updateMarkdownNote(fileId, { name, folder_id, workspace_id, content, tags, is_favorite }) {
-  const res = await fetch(`${API_BASE}/files/notes/${fileId}`, {
+  const res = await apiFetch(`${API_BASE}/files/notes/${fileId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, folder_id, workspace_id, content, tags, is_favorite }),
@@ -789,7 +878,7 @@ export async function updateMarkdownNote(fileId, { name, folder_id, workspace_id
 }
 
 export async function listFileVersions(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/versions`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/versions`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to list versions');
@@ -797,7 +886,7 @@ export async function listFileVersions(fileId) {
 }
 
 export async function getFileVersion(fileId, versionId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/versions/${versionId}`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/versions/${versionId}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to get version');
@@ -805,7 +894,7 @@ export async function getFileVersion(fileId, versionId) {
 }
 
 export async function restoreFileVersion(fileId, versionId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/versions/${versionId}/restore`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/versions/${versionId}/restore`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -814,7 +903,7 @@ export async function restoreFileVersion(fileId, versionId) {
 }
 
 export async function moveFile(fileId, folder_id) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/move`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/move`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ folder_id }),
@@ -824,7 +913,7 @@ export async function moveFile(fileId, folder_id) {
 }
 
 export async function renameFile(fileId, name) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/rename`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/rename`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name }),
@@ -834,7 +923,7 @@ export async function renameFile(fileId, name) {
 }
 
 export async function moveToTrashFile(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/trash`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/trash`, {
     method: 'PUT',
     headers: authHeaders(),
   });
@@ -843,7 +932,7 @@ export async function moveToTrashFile(fileId) {
 }
 
 export async function restoreFile(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/restore`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/restore`, {
     method: 'PUT',
     headers: authHeaders(),
   });
@@ -852,7 +941,7 @@ export async function restoreFile(fileId) {
 }
 
 export async function deleteFile(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}`, {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -867,7 +956,7 @@ export async function listTrash(workspaceId = null) {
   const params = new URLSearchParams();
   if (workspaceId) params.append('workspace_id', workspaceId);
 
-  const res = await fetch(`${API_BASE}/trash?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/trash?${params.toString()}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('휴지통 목록을 불러오지 못했습니다');
@@ -875,7 +964,7 @@ export async function listTrash(workspaceId = null) {
 }
 
 export async function deletePermanentFile(fileId) {
-  const res = await fetch(`${API_BASE}/trash/files/${fileId}`, {
+  const res = await apiFetch(`${API_BASE}/trash/files/${fileId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -884,7 +973,7 @@ export async function deletePermanentFile(fileId) {
 }
 
 export async function deletePermanentFolder(folderId) {
-  const res = await fetch(`${API_BASE}/trash/folders/${folderId}`, {
+  const res = await apiFetch(`${API_BASE}/trash/folders/${folderId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -896,7 +985,7 @@ export async function emptyTrash(workspaceId = null) {
   const params = new URLSearchParams();
   if (workspaceId) params.append('workspace_id', workspaceId);
 
-  const res = await fetch(`${API_BASE}/trash/empty?${params.toString()}`, {
+  const res = await apiFetch(`${API_BASE}/trash/empty?${params.toString()}`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -920,7 +1009,7 @@ export function getThumbnailUrl(fileId) {
 }
 
 export async function getPresignedDownloadUrl(fileId) {
-  const res = await fetch(`${API_BASE}/storage/presigned-download/${fileId}`, {
+  const res = await apiFetch(`${API_BASE}/storage/presigned-download/${fileId}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('Failed to get presigned download url');
@@ -934,7 +1023,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3, baseDelay = 100
   let lastError = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await fetch(url, options);
+      const res = await apiFetch(url, options);
       if (!res.ok && (res.status >= 500 || res.status === 429)) {
         throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
       }
@@ -1211,7 +1300,7 @@ export async function batchMoveFiles(workspaceId, fileIds, targetFolderId = null
  * and refuses as a whole.
  */
 export async function batchMoveFolders(workspaceId, folderIds, targetFolderId = null) {
-  const res = await fetch(`${API_BASE}/folders/batch-move`, {
+  const res = await apiFetch(`${API_BASE}/folders/batch-move`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
@@ -1259,7 +1348,7 @@ export async function batchCopyItems(
 /** The user's copy queue: jobs still running plus recently finished ones, so a
  *  browser that was closed mid-copy can come back and see the outcome. */
 export async function listCopyJobs() {
-  const res = await fetch(`${API_BASE}/files/copy-jobs`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/files/copy-jobs`, { headers: authHeaders() });
   if (!res.ok) throw new Error('복사 작업 목록을 불러오지 못했습니다.');
   return res.json();
 }
@@ -1267,7 +1356,7 @@ export async function listCopyJobs() {
 /** Stop a queued or in-progress copy. A running one stops at the next file
  *  boundary; what it already copied stays. */
 export async function cancelCopyJob(jobId) {
-  const res = await fetch(`${API_BASE}/files/copy-jobs/${jobId}/cancel`, {
+  const res = await apiFetch(`${API_BASE}/files/copy-jobs/${jobId}/cancel`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -1287,7 +1376,7 @@ export async function listFavorites({ workspaceId = null, kind = 'all', q = '', 
   const params = new URLSearchParams({ kind, page: String(page), page_size: String(pageSize) });
   if (workspaceId) params.set('workspace_id', workspaceId);
   if (q && q.trim()) params.set('q', q.trim());
-  const res = await fetch(`${API_BASE}/favorites?${params}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/favorites?${params}`, { headers: authHeaders() });
   if (!res.ok) {
     const d = await res.json().catch(() => null);
     throw new Error(d?.detail || '즐겨찾기를 불러오지 못했습니다.');
@@ -1296,7 +1385,7 @@ export async function listFavorites({ workspaceId = null, kind = 'all', q = '', 
 }
 
 export async function setFavorite(targetType, targetId, isFavorite) {
-  const res = await fetch(`${API_BASE}/favorites`, {
+  const res = await apiFetch(`${API_BASE}/favorites`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ target_type: targetType, target_id: targetId, is_favorite: isFavorite }),
@@ -1310,7 +1399,7 @@ export async function setFavorite(targetType, targetId, isFavorite) {
 
 /** Every favourited id of one kind, so a listing can draw its stars in one go. */
 export async function listFavoriteIds(kind = 'folder') {
-  const res = await fetch(`${API_BASE}/favorites/ids?kind=${kind}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/favorites/ids?kind=${kind}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('즐겨찾기 목록을 불러오지 못했습니다.');
   return res.json();
 }
@@ -1323,13 +1412,13 @@ export async function listFavoriteIds(kind = 'folder') {
  * ----------------------------------------------------------------------- */
 
 export async function getBoardMeta() {
-  const res = await fetch(`${API_BASE}/boards/meta`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/boards/meta`, { headers: authHeaders() });
   if (!res.ok) throw new Error('일정 설정을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function createBoard({ name, workspaceId = null, folderId = null }) {
-  const res = await fetch(`${API_BASE}/boards`, {
+  const res = await apiFetch(`${API_BASE}/boards`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, workspace_id: workspaceId, folder_id: folderId }),
@@ -1342,7 +1431,7 @@ export async function createBoard({ name, workspaceId = null, folderId = null })
 }
 
 export async function getBoard(fileId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/boards/${fileId}`, { headers: authHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || `일정을 불러오지 못했습니다. (${res.status})`);
@@ -1355,14 +1444,14 @@ export async function getBoard(fileId) {
  * and the 할 일 it belongs to. One call so no view invents its own answer.
  */
 export async function getFileLinks(fileId) {
-  const res = await fetch(`${API_BASE}/files/${fileId}/links`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/links`, { headers: authHeaders() });
   if (!res.ok) throw new Error('연결 정보를 불러오지 못했습니다.');
   return res.json();
 }
 
 /** For several files at once — asked before a delete so it can name names. */
 export async function getFilesAttachedTo(fileIds) {
-  const res = await fetch(`${API_BASE}/files/links/attached-to`, {
+  const res = await apiFetch(`${API_BASE}/files/links/attached-to`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ file_ids: fileIds }),
@@ -1372,13 +1461,13 @@ export async function getFilesAttachedTo(fileIds) {
 }
 
 export async function getBoardTask(fileId, taskId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('작업을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function createBoardTask(fileId, payload) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks`, {
+  const res = await apiFetch(`${API_BASE}/boards/${fileId}/tasks`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
@@ -1391,7 +1480,7 @@ export async function createBoardTask(fileId, payload) {
 }
 
 export async function updateBoardTask(fileId, taskId, payload) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, {
+  const res = await apiFetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
@@ -1404,7 +1493,7 @@ export async function updateBoardTask(fileId, taskId, payload) {
 }
 
 export async function deleteBoardTask(fileId, taskId) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, {
+  const res = await apiFetch(`${API_BASE}/boards/${fileId}/tasks/${taskId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -1422,7 +1511,7 @@ export async function deleteBoardTask(fileId, taskId) {
  * neither of them chose.
  */
 export async function reorderBoardTasks(fileId, parentTaskId, taskIds) {
-  const res = await fetch(`${API_BASE}/boards/${fileId}/reorder`, {
+  const res = await apiFetch(`${API_BASE}/boards/${fileId}/reorder`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ parent_task_id: parentTaskId || null, task_ids: taskIds }),
@@ -1444,7 +1533,7 @@ export async function reorderBoardTasks(fileId, parentTaskId, taskIds) {
 export async function uploadAvatar(file) {
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`${API_BASE}/auth/avatar`, {
+  const res = await apiFetch(`${API_BASE}/auth/avatar`, {
     method: 'POST',
     headers: authHeaders(),
     body: form,
@@ -1458,7 +1547,7 @@ export async function uploadAvatar(file) {
 
 /** Go back to the photo the identity provider supplies. */
 export async function removeAvatar() {
-  const res = await fetch(`${API_BASE}/auth/avatar`, { method: 'DELETE', headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/auth/avatar`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || `되돌리지 못했습니다. (${res.status})`);
@@ -1468,13 +1557,13 @@ export async function removeAvatar() {
 
 /** When the daily deadline mail goes out, and by whose clock. */
 export async function getDigestSettings(workspaceId) {
-  const res = await fetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('알림 설정을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function saveDigestSettings(workspaceId, payload) {
-  const res = await fetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, {
+  const res = await apiFetch(`${API_BASE}/boards/digest-settings?workspace_id=${workspaceId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
@@ -1488,7 +1577,7 @@ export async function saveDigestSettings(workspaceId, payload) {
 
 /** This person's own send time and sections; null on a field follows the default again. */
 export async function saveMyDigestSettings(workspaceId, payload) {
-  const res = await fetch(`${API_BASE}/boards/digest-settings/me?workspace_id=${workspaceId}`, {
+  const res = await apiFetch(`${API_BASE}/boards/digest-settings/me?workspace_id=${workspaceId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
@@ -1501,7 +1590,7 @@ export async function saveMyDigestSettings(workspaceId, payload) {
 }
 
 export async function sendTestDigest(workspaceId) {
-  const res = await fetch(`${API_BASE}/boards/digest-settings/test?workspace_id=${workspaceId}`, {
+  const res = await apiFetch(`${API_BASE}/boards/digest-settings/test?workspace_id=${workspaceId}`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -1515,7 +1604,7 @@ export async function sendTestDigest(workspaceId) {
 /** Every task in a workspace, soonest deadline first then most important. */
 /** Everyone with a 할 일 in this workspace, the person asking first. */
 export async function listBoardAssignees(workspaceId) {
-  const res = await fetch(`${API_BASE}/boards/assignees?workspace_id=${workspaceId}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/boards/assignees?workspace_id=${workspaceId}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('담당자 목록을 불러오지 못했습니다.');
   const body = await res.json();
   return body.items || [];
@@ -1538,7 +1627,7 @@ export async function listWorkspaceTasks({
   if (priority) params.set('priority', priority);
   if (fromDate) params.set('from_date', fromDate);
   if (toDate) params.set('to_date', toDate);
-  const res = await fetch(`${API_BASE}/boards/tasks?${params}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/boards/tasks?${params}`, { headers: authHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.detail || `일정을 불러오지 못했습니다. (${res.status})`);
@@ -1548,13 +1637,13 @@ export async function listWorkspaceTasks({
 
 /** The shared workspace and the storage pool behind it (admin only). */
 export async function getSharedWorkspaceInfo() {
-  const res = await fetch(`${API_BASE}/admin/shared-workspace`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/admin/shared-workspace`, { headers: authHeaders() });
   if (!res.ok) throw new Error('공용 워크스페이스 정보를 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function setSharedWorkspaceQuota(bytes) {
-  const res = await fetch(`${API_BASE}/admin/shared-workspace/quota`, {
+  const res = await apiFetch(`${API_BASE}/admin/shared-workspace/quota`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ storage_quota_bytes: bytes }),
@@ -1572,7 +1661,7 @@ export async function setSharedWorkspaceQuota(bytes) {
 /** Grant or withdraw a user's write access to the shared workspace. They keep
  *  read access either way — it is the only space some users have. */
 export async function setUserSharedWrite(userId, canWrite) {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}/shared-write`, {
+  const res = await apiFetch(`${API_BASE}/admin/users/${userId}/shared-write`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ can_write_shared: canWrite }),
@@ -1582,13 +1671,13 @@ export async function setUserSharedWrite(userId, canWrite) {
 }
 
 export async function listAdminCopyJobs(limit = 100) {
-  const res = await fetch(`${API_BASE}/admin/copy-jobs?limit=${limit}`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/admin/copy-jobs?limit=${limit}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('복사 작업 이력을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function dismissCopyJob(jobId) {
-  const res = await fetch(`${API_BASE}/files/copy-jobs/${jobId}`, {
+  const res = await apiFetch(`${API_BASE}/files/copy-jobs/${jobId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -1611,7 +1700,7 @@ export async function searchDocuments({
   offset = 0,
   min_similarity = 0.2
 }) {
-  const res = await fetch(`${API_BASE}/search`, {
+  const res = await apiFetch(`${API_BASE}/search`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
@@ -1654,7 +1743,7 @@ async function fetchWithTimeout(url, options = {}, { signal, timeoutMs = 30000, 
     if (signal) signal.addEventListener('abort', onUserAbort);
 
     try {
-      const res = await fetch(url, { ...options, signal: timeoutController.signal });
+      const res = await apiFetch(url, { ...options, signal: timeoutController.signal });
       if (!res.ok && RETRYABLE_HTTP_STATUS.has(res.status) && attempt < retries) {
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
         continue;
@@ -1859,7 +1948,7 @@ export async function uploadNoteImage(file, workspaceId = null, folderId = null)
  */
 /** Every handle an account has held, newest first. Paged. */
 export async function getUsernameHistory(userId, page = 1, pageSize = 10) {
-  const res = await fetch(
+  const res = await apiFetch(
     `${API_BASE}/auth/users/${userId}/username-history?page=${page}&page_size=${pageSize}`,
     { headers: authHeaders() },
   );
@@ -1869,7 +1958,7 @@ export async function getUsernameHistory(userId, page = 1, pageSize = 10) {
 
 /** Change your handle. The personal folder in the shared workspace follows it. */
 export async function updateMyUsername(username) {
-  const res = await fetch(`${API_BASE}/auth/me/username`, {
+  const res = await apiFetch(`${API_BASE}/auth/me/username`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ username }),
@@ -1882,7 +1971,7 @@ export async function updateMyUsername(username) {
 }
 
 export async function checkMyUsernameAvailable(username) {
-  const res = await fetch(`${API_BASE}/auth/username-available?username=${encodeURIComponent(username)}`, {
+  const res = await apiFetch(`${API_BASE}/auth/username-available?username=${encodeURIComponent(username)}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error('아이디를 확인하지 못했습니다.');
@@ -1891,13 +1980,13 @@ export async function checkMyUsernameAvailable(username) {
 
 /** The languages an account may be set to, named in each language. */
 export async function listLanguages() {
-  const res = await fetch(`${API_BASE}/auth/languages`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/auth/languages`, { headers: authHeaders() });
   if (!res.ok) throw new Error('언어 목록을 불러오지 못했습니다.');
   return res.json();
 }
 
 export async function updateMyLanguage(language) {
-  const res = await fetch(`${API_BASE}/auth/me/language`, {
+  const res = await apiFetch(`${API_BASE}/auth/me/language`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ language }),
@@ -1910,13 +1999,13 @@ export async function updateMyLanguage(language) {
 }
 
 export async function getWindowState() {
-  const res = await fetch(`${API_BASE}/window-state`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/window-state`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to load window state');
   return res.json();
 }
 
 export async function saveWindowState(windows) {
-  const res = await fetch(`${API_BASE}/window-state`, {
+  const res = await apiFetch(`${API_BASE}/window-state`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ windows }),
@@ -1928,7 +2017,7 @@ export async function saveWindowState(windows) {
 /** Cheap poll target: just the timestamp, so clients only fetch the full
  *  window state when it has actually changed. */
 export async function getWindowStateVersion() {
-  const res = await fetch(`${API_BASE}/window-state/version`, { headers: authHeaders() });
+  const res = await apiFetch(`${API_BASE}/window-state/version`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to load window state version');
   return res.json();
 }
@@ -1944,7 +2033,7 @@ export async function getWindowStateVersion() {
  * accepts a short-lived media-scoped token there for exactly that reason.
  */
 export async function openWindowStateStream({ signal, onOpen, onVersion } = {}) {
-  const res = await fetch(`${API_BASE}/window-state/stream`, {
+  const res = await apiFetch(`${API_BASE}/window-state/stream`, {
     headers: authHeaders({ Accept: 'text/event-stream' }),
     signal,
   });

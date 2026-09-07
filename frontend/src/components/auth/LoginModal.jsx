@@ -17,7 +17,7 @@ import { loginWithGoogle, loginWithPassword, registerWithPassword, getAuthConfig
 // Set via VITE_ENABLE_PASSWORD_AUTH in .env if password test login is needed
 const SHOW_TEST_AUTH = import.meta.env.VITE_ENABLE_PASSWORD_AUTH === 'true';
 
-export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken = null }) {
+export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken = null, notice = null }) {
   const [activeTab, setActiveTab] = useState('google'); // 'google' | 'password'
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [username, setUsername] = useState('');
@@ -174,11 +174,32 @@ export default function LoginModal({ isOpen, onLoginSuccess, initialInviteToken 
         <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
           Project Run : Finder
         </h2>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4, marginBottom: '1.5rem' }}>
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: 4, marginBottom: notice ? '1rem' : '1.5rem' }}>
           {inviteInfo 
             ? `${inviteInfo.inviter_name || '관리자'}님의 초대를 수락하고 시작하세요.` 
             : 'AI 지식 관리 플랫폼에 로그인해 주세요.'}
         </p>
+
+        {/* Why this is here, when it appeared over an app somebody was using. */}
+        {notice && (
+          <div style={{
+            padding: '0.65rem 0.85rem',
+            background: 'rgba(245, 158, 11, 0.12)',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--accent-amber)',
+            fontSize: '0.8rem',
+            lineHeight: 1.5,
+            marginBottom: '1.25rem',
+            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 6,
+          }}>
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{notice}</span>
+          </div>
+        )}
 
         {/* Invite Banner */}
         {inviteInfo && (

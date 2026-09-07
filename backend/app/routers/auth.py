@@ -455,6 +455,31 @@ async def get_me(current_user: User = Depends(get_current_user)):
     """Return currently authenticated user and approval status."""
     return current_user
 
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_session(current_user: User = Depends(get_current_user)):
+    """
+    A new session token for a session that is still valid.
+
+    The token lasts a week and nothing renewed it, so it ran out on a fixed
+    date whatever the person was doing — mid-sentence in a document, as often
+    as not, and the app had no way of saying so. The client asks for this once
+    the token is into its last stretch, which keeps a session that is in use
+    from ending underneath the person using it. A session that really has been
+    left alone for a week still ends: there is nobody there to ask for this.
+    """
+    token_payload = {
+        "sub": str(current_user.id),
+        "email": current_user.email,
+        "is_superadmin": current_user.is_superadmin,
+        "is_approved": current_user.is_approved,
+    }
+    return TokenResponse(
+        access_token=create_access_token(token_payload),
+        token_type="bearer",
+        user=current_user.to_dict(),
+    )
+
+
 @router.post("/media-token")
 async def issue_media_token(current_user: User = Depends(get_current_user)):
     """

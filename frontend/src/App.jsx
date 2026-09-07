@@ -84,7 +84,9 @@ import {
   batchMoveFolders,
   batchCopyItems,
   listFileIds,
-  getPendingReportCount
+  getPendingReportCount,
+  onSessionExpired,
+  renewSessionIfNeeded,
 } from './api';
 import { useDialog } from './context/DialogContext';
 import { useToast } from './context/ToastContext';
@@ -438,6 +440,37 @@ export default function App() {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  /**
+   * The session ended while the app was open.
+   *
+   * Nothing is torn down: the windows stay where they are and a document with
+   * something unsaved in it keeps it, because signing back in lets the
+   * autosave that has been failing finish its work. Only offered once there is
+   * somebody to sign back in as — at startup an expired token is simply no
+   * session, and the ordinary login screen is the right answer.
+   */
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const currentUserRef = useRef(null);
+  currentUserRef.current = currentUser;
+
+  useEffect(() => onSessionExpired(() => {
+    if (currentUserRef.current) setSessionExpired(true);
+  }), []);
+
+  // Keep a session that is in use from running out in the first place. Cheap:
+  // it only asks the server when the token is near its end.
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    renewSessionIfNeeded();
+    const interval = setInterval(renewSessionIfNeeded, 30 * 60 * 1000);
+    const onVisible = () => { if (document.visibilityState === 'visible') renewSessionIfNeeded(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentUser?.id]);
 
   const [isWorkspacesLoaded, setIsWorkspacesLoaded] = useState(false);
   const [transfers, setTransfers] = useState([]);
@@ -2214,6 +2247,21 @@ export default function App() {
   // 5. Main Knowledge Base App
   return (
     <div className="app-container">
+      {/* The session ended under them. Over the app, not instead of it: what
+          is on screen is still theirs, and a document with unsaved text keeps
+          it — the autosave that has been failing finishes the moment they are
+          signed back in. */}
+      {sessionExpired && (
+        <LoginModal
+          isOpen
+          notice="로그인 세션이 만료되었습니다. 다시 로그인하면 하던 작업을 그대로 이어서 하실 수 있습니다."
+          onLoginSuccess={(user) => {
+            setSessionExpired(false);
+            setCurrentUser(user);
+          }}
+        />
+      )}
+
       {/* Mobile Drawer Backdrop */}
       {!isSidebarCollapsed && (
         <div 
