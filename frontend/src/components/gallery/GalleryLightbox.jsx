@@ -142,7 +142,14 @@ export default function GalleryLightbox({
 
   // A swipe on a phone is the same gesture as an arrow key on a desk.
   const touchStart = useRef(null);
-  const onTouchStart = (e) => { touchStart.current = e.touches[0]?.clientX ?? null; };
+  const onTouchStart = (e) => {
+    // Any touch brings the chrome back. The only thing that woke it was
+    // mouse movement, which a phone never reports, and the swipe handler below
+    // returns early on a tap — so on a phone, once the close button and the
+    // caption had faded, nothing could be done to ask for them again.
+    wake();
+    touchStart.current = e.touches[0]?.clientX ?? null;
+  };
   const onTouchEnd = (e) => {
     const start = touchStart.current;
     const end = e.changedTouches[0]?.clientX;
