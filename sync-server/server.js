@@ -8,7 +8,7 @@ const BACKEND_INTERNAL_URL = process.env.BACKEND_INTERNAL_URL || 'http://backend
 // for a session that was already open at that moment (a brand new connection
 // attempt is always checked immediately via onAuthenticate, regardless of
 // this interval).
-const REVALIDATE_INTERVAL_MS = 2 * 60 * 1000;
+const REVALIDATE_INTERVAL_MS = Number(process.env.REVALIDATE_INTERVAL_MS || 2 * 60 * 1000);
 
 // The durable copy of a document is still the `content` markdown column in
 // Postgres, written by the clients (see useNoteEditor.js). This server does not
@@ -121,17 +121,40 @@ async function storeCollabState(fileId, state, preferredToken) {
   throw new Error(`backend answered ${lastStatus ?? 'nothing usable'}`);
 }
 
-async function canAccessFile(token, fileId) {
-  if (!token) return false;
+// Three answers, not two. "The backend says no" and "the backend could not be
+// asked" are different things, and treating the second as the first is what
+// made a deploy throw everyone out of the document they were editing: the
+// backend restarts for a few seconds, every check fails, and every client is
+// told it has no permission — which is both untrue and, for a connection that
+// was already allowed, the wrong thing to do about it.
+const ALLOWED = 'allowed';
+const REFUSED = 'refused';
+const UNKNOWN = 'unknown';
+
+async function checkFileAccess(token, fileId) {
+  if (!token) return REFUSED;
   try {
     const res = await fetch(`${BACKEND_INTERNAL_URL}/api/files/${fileId}`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000)
     });
-    return res.ok;
+    if (res.ok) return ALLOWED;
+    if (res.status === 401 || res.status === 403 || res.status === 404) return REFUSED;
+    return UNKNOWN;   // 500, 502, anything else the backend says while unwell
   } catch {
-    return false;
+    return UNKNOWN;   // never answered at all
   }
+}
+
+async function canAccessFile(token, fileId) {
+  // A new connection is only let in on a clear yes, but one unlucky moment
+  // should not turn somebody away, so an unclear answer is asked again.
+  let verdict = await checkFileAccess(token, fileId);
+  if (verdict === UNKNOWN) {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    verdict = await checkFileAccess(token, fileId);
+  }
+  return verdict === ALLOWED;
 }
 
 const server = new Server({
@@ -168,7 +191,12 @@ const server = new Server({
   // until they disconnect on their own (onAuthenticate only runs once, at
   // the initial handshake).
   async onTokenSync({ token, documentName, connection }) {
-    if (!(await canAccessFile(token, documentName))) {
+    // Only an actual refusal ends a session that is already under way. If the
+    // backend cannot be reached, the person carries on editing and is asked
+    // again at the next sweep — the same as any other minute in which nothing
+    // was checked at all.
+    if (await checkFileAccess(token, documentName) === REFUSED) {
+      console.log(`[sync] access withdrawn, closing: ${documentName}`);
       connection.close();
     }
   },
