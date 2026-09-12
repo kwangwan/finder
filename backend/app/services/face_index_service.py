@@ -86,7 +86,14 @@ async def find_faces(file_item: FileItem) -> list:
                 if found:
                     return found
             # Storage that will not sign, or a container the decoder cannot
-            # read over the network: fall back to having the whole file.
+            # read over the network: fall back to having the whole file. Not
+            # for the very large ones — pulling six gigabytes across to look at
+            # forty frames holds up everything behind it for ten minutes, and
+            # the reading-in-place path above is the one that is supposed to
+            # handle those.
+            if (file_item.size_bytes or 0) > face_service.VIDEO_MAX_BYTES:
+                logger.info("[Faces] %s is too large to fetch whole, skipped", file_item.name)
+                return []
             path = await run_in_threadpool(
                 face_service.write_temp_video,
                 s3_service.stream_object(file_item.s3_key),

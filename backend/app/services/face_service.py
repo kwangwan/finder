@@ -90,7 +90,7 @@ MIN_FACE_FRACTION = 44 / 2048
 # is a day of machine time against an hour.
 VIDEO_MOMENTS = int(os.getenv("FACE_VIDEO_MOMENTS", "40"))
 SECONDS_PER_MOMENT = 4
-VIDEO_OPEN_TIMEOUT = 30
+VIDEO_OPEN_TIMEOUT = 60
 MAX_FACES_PER_VIDEO = 900
 VIDEO_MAX_BYTES = 1024 * 1024 * 1024
 
@@ -226,6 +226,25 @@ def faces_in_image_bytes(data: bytes) -> List[dict]:
     return faces_in_image(image)
 
 
+# PyAV renamed this between versions and the old name is simply gone, which
+# turns one bad seek into "module 'av' has no attribute 'AVError'" and loses
+# the whole film — silently, because the caller treats a film it could not read
+# as a film with nobody in it.
+_AV_ERROR = getattr(av, "FFmpegError", getattr(av, "AVError", Exception))
+
+# What the decoder is allowed to do over HTTP. `multiple_requests` is the one
+# that matters: without it ffmpeg opens the URL once and cannot ask for another
+# byte range, so every seek fails with an I/O error and the film is read as
+# empty. The reconnects are for a long read across a home network.
+HTTP_OPTIONS = {
+    "multiple_requests": "1",
+    "reconnect": "1",
+    "reconnect_streamed": "1",
+    "reconnect_on_network_error": "1",
+    "reconnect_delay_max": "5",
+}
+
+
 def _keyframes_sequentially(container, stream, cap: int):
     """Every keyframe there is, up to a limit."""
     for index, frame in enumerate(container.decode(stream)):
@@ -249,7 +268,7 @@ def _keyframes_spread(container, stream, duration: float, cap: int):
         try:
             container.seek(int(at / stream.time_base), stream=stream)
             frame = next(container.decode(stream), None)
-        except (av.AVError, StopIteration, ValueError):
+        except (_AV_ERROR, StopIteration, ValueError):
             continue
         if frame is None or frame.pts is None or frame.pts in seen:
             continue
@@ -279,7 +298,12 @@ def faces_in_video(source) -> List[dict]:
     what lets a six-gigabyte clip be looked at at all.
     """
     try:
-        container = av.open(source, timeout=VIDEO_OPEN_TIMEOUT)
+        is_url = isinstance(source, str) and source.startswith(("http://", "https://"))
+        container = av.open(
+            source,
+            timeout=VIDEO_OPEN_TIMEOUT,
+            options=HTTP_OPTIONS if is_url else None,
+        )
     except Exception as e:
         logger.warning("[Faces] could not open a film: %s", e)
         return []
