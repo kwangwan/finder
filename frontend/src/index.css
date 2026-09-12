@@ -2771,7 +2771,12 @@ h1, h2, h3, h4, h5, h6,
   user-select: none;
   -webkit-user-select: none;
   column-gap: 8px;
-  row-gap: 4px;
+  /* When it does grow to a second row, the two rows need to look like two
+     rows — the same breathing space above and below as at the sides, and the
+     buttons gathered at the right edge rather than floating wherever the
+     title left them. */
+  row-gap: 2px;
+  padding-bottom: 5px;
 }
 
 .os-window-header:active {
@@ -2839,7 +2844,6 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .window-menu { position: relative; display: inline-flex; }
-.window-action-btn.is-on { background: var(--bg-hover); color: var(--text-primary); }
 .window-menu-pop { padding: 4px; }
 .window-menu-pop [role="menu"] { display: flex; flex-direction: column; min-width: 190px; }
 .window-menu-pop button {
@@ -2864,7 +2868,7 @@ h1, h2, h3, h4, h5, h6,
 .window-header-actions {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   /* Shrinkable so the wrap below can actually engage; the buttons inside keep
      their own size, so this squeezes the row rather than the controls. It only
      ever engages once the header has already wrapped, because the title's
@@ -2891,10 +2895,14 @@ h1, h2, h3, h4, h5, h6,
 
 .window-action-btn {
   flex-shrink: 0;
-  height: 24px;
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
+  height: 26px;
+  border-radius: 7px;
+  /* Nothing of its own. These sit on the window's drag handle, and a chip in a
+     different grey than the strip it is lying on reads as a piece that did not
+     quite land — worse in a row of them. The shape appears under the pointer,
+     where it is needed. */
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
@@ -2908,15 +2916,22 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .window-action-btn.icon-only {
-  width: 24px;
+  width: 26px;
   padding: 0;
   justify-content: center;
 }
 
-.window-action-btn:hover {
-  background: var(--bg-tertiary);
+.window-action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+.window-action-btn:disabled { opacity: 0.45; cursor: default; }
+/* Held open: the button keeps the pressed look for as long as its menu is. */
+.window-action-btn.is-on {
+  background: var(--bg-hover);
   border-color: var(--border-medium);
+  color: var(--text-primary);
 }
 
 .window-action-btn.edit-btn {

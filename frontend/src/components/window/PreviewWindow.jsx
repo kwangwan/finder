@@ -10,7 +10,7 @@ import '@blocknote/mantine/style.css';
 import {
   X,
   Minus,
-  MoreHorizontal,
+  MoreVertical,
   Maximize2,
   Minimize2,
   Download,
@@ -631,7 +631,7 @@ export default function PreviewWindow({
                 onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
                 title="이 문서로 할 수 있는 것"
               >
-                <MoreHorizontal size={14} />
+                <MoreVertical size={15} />
               </button>
               {isMenuOpen && (
                 <Popover anchorRef={menuRef} align="right" onClose={() => setMenuOpen(false)} className="window-menu-pop">
