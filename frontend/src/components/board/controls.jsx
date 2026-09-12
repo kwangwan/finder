@@ -21,6 +21,11 @@ export function Popover({ anchorRef, onClose, align = 'left', children, classNam
       const el = ref.current;
       if (!a || !el) return;
       const r = a.getBoundingClientRect();
+      // At least as wide as the thing it belongs to. A menu that sizes itself
+      // to its longest label looks unrelated to the full-width select it
+      // dropped out of; it may still grow past the anchor for a long label,
+      // which is the part worth keeping.
+      el.style.minWidth = `${Math.round(r.width)}px`;
       const w = el.offsetWidth || 200;
       const h = el.offsetHeight || 160;
       const margin = 8;
