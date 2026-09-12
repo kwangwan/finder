@@ -16,7 +16,7 @@ by year picture and is what makes the scrubber possible.
 """
 import math
 import uuid
-from datetime import datetime, timezone as dt_timezone
+from datetime import date as dt_date, datetime, timezone as dt_timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -73,6 +73,14 @@ def _media_conditions(workspace_id: uuid.UUID, kind: str):
     return conditions
 
 
+def _as_day(value: str) -> dt_date:
+    """A YYYY-MM-DD from the query string, as a day."""
+    try:
+        return dt_date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="날짜를 읽을 수 없습니다.")
+
+
 def _apply_filters(
     conditions: list,
     *,
@@ -107,10 +115,14 @@ def _apply_filters(
         conditions.append(func.extract("year", local_taken) == year)
     if month:
         conditions.append(func.extract("month", local_taken) == month)
+    # Read into a real date rather than handed over as text. Postgres has no
+    # operator for `date >= text`, and declaring the cast in the statement does
+    # not help — the driver still has a string to send. Parsing here also means
+    # a malformed day is refused rather than raised from inside the query.
     if date_from:
-        conditions.append(func.date(local_taken) >= date_from)
+        conditions.append(func.date(local_taken) >= _as_day(date_from))
     if date_to:
-        conditions.append(func.date(local_taken) <= date_to)
+        conditions.append(func.date(local_taken) <= _as_day(date_to))
 
     if placed_only:
         conditions.append(FileItem.gps_latitude.isnot(None))
@@ -455,7 +467,16 @@ MAX_PATH_PHOTOS = 150_000
 _METRES_PER_DEGREE = 111_320.0
 
 
-def _stops_along(rows) -> list:
+def _local_day(moment, zone) -> Optional[str]:
+    """The calendar day a moment falls on, where the photographs were taken."""
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt_timezone.utc)
+    return moment.astimezone(zone).date().isoformat()
+
+
+def _stops_along(rows, zone) -> list:
     """
     A run of photographs in one spot, gathered into the stop it was.
 
@@ -484,6 +505,7 @@ def _stops_along(rows) -> list:
                                   max(bounds[2], lat), max(bounds[3], lon)]
                 if row.taken:
                     stop["until"] = row.taken.isoformat()
+                    stop["day_to"] = _local_day(row.taken, zone)
                 continue
         anchor = (lat, lon)
         stops.append({
@@ -498,6 +520,11 @@ def _stops_along(rows) -> list:
             "bounds": [lat, lon, lat, lon],
             "taken_at": row.taken.isoformat() if row.taken else None,
             "until": row.taken.isoformat() if row.taken else None,
+            # The days this stop covers, worked out here rather than in the
+            # browser: the days belong to the workspace's clock, and the
+            # browser's is whichever one the reader happens to be sitting in.
+            "day_from": _local_day(row.taken, zone),
+            "day_to": _local_day(row.taken, zone),
             "_lat": lat,
             "_lon": lon,
         })
@@ -575,7 +602,7 @@ async def gallery_path(
     )).all()
 
     return {
-        "points": _stops_along(rows),
+        "points": _stops_along(rows, zone),
         "total_count": total,
         "counted": len(rows),
         "undated": max(total - len(rows), 0),
@@ -595,6 +622,12 @@ async def gallery_place(
     month: Optional[int] = Query(None, ge=1, le=12),
     uploader: Optional[uuid.UUID] = None,
     bbox: Optional[str] = Query(None, description="south,west,north,east — the ground a dot covers"),
+    # Arriving from the trail asks a narrower question: not "this place", but
+    # "this place while we were there". Days rather than moments, because the
+    # panel is a day timeline and because a day is the same day for everyone
+    # reading the same workspace.
+    date_from: Optional[str] = Query(None, description="YYYY-MM-DD, in the workspace's clock"),
+    date_to: Optional[str] = Query(None, description="YYYY-MM-DD, in the workspace's clock"),
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
@@ -613,11 +646,19 @@ async def gallery_place(
     await _require_member(db, current_user, workspace_id)
     zone = _zone(tz)
 
-    conditions = _apply_filters(
-        _media_conditions(workspace_id, kind),
-        q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=None, placed_only=True, uploader=uploader,
-    )
+    # Built twice: once for the whole place, once narrowed to the days asked
+    # for. The ground is added to both below, so the only difference between
+    # them is the stay — which is what lets the panel say "this is an afternoon
+    # of a place that holds far more".
+    def base(from_day, to_day):
+        return _apply_filters(
+            _media_conditions(workspace_id, kind),
+            q=q, zone=zone, year=year, month=month,
+            date_from=from_day, date_to=to_day, bbox=None, placed_only=True, uploader=uploader,
+        )
+
+    conditions = base(date_from, date_to)
+    whole_place = base(None, None)
 
     if bbox:
         # Asked for by the exact ground a dot on the map covers, so what the
@@ -629,22 +670,33 @@ async def gallery_place(
         except (ValueError, AttributeError):
             raise HTTPException(status_code=400, detail="범위를 읽을 수 없습니다.")
         slack = 1e-7
-        conditions += [
+        ground = [
             FileItem.gps_latitude.between(south - slack, north + slack),
             FileItem.gps_longitude.between(west - slack, east + slack),
         ]
     else:
-        import math as _math
         lat_span = radius_km / 111.0
-        lon_span = radius_km / max(1.0, 111.0 * _math.cos(_math.radians(latitude)))
-        conditions += [
+        lon_span = radius_km / max(1.0, 111.0 * math.cos(math.radians(latitude)))
+        ground = [
             FileItem.gps_latitude.between(latitude - lat_span, latitude + lat_span),
             FileItem.gps_longitude.between(longitude - lon_span, longitude + lon_span),
         ]
+    conditions += ground
+    whole_place += ground
 
     total = (await db.execute(
         select(func.count(FileItem.id)).where(and_(*conditions))
     )).scalar_one()
+
+    # What the place holds altogether, when the question was narrowed to one
+    # stay. Without it the panel would show an afternoon and look like the
+    # whole of somewhere — and a viewer has no way to tell the difference
+    # between "this is all there is here" and "this is all we asked for".
+    place_total = total
+    if date_from or date_to:
+        place_total = (await db.execute(
+            select(func.count(FileItem.id)).where(and_(*whole_place))
+        )).scalar_one()
     taken = func.coalesce(FileItem.taken_at, FileItem.created_at)
     span = (await db.execute(
         select(func.min(taken), func.max(taken)).where(and_(*conditions))
@@ -658,6 +710,7 @@ async def gallery_place(
     return {
         "items": [_item(f) for f in rows],
         "total_count": total,
+        "place_total_count": place_total,
         "page": page,
         "page_size": page_size,
         "total_pages": (total + page_size - 1) // page_size if total else 0,

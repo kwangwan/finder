@@ -62,13 +62,17 @@ const LANGUAGE_FIELD = {
 const MIN_LEG_PX = 30;
 
 /** A stop, read back off the feature the map was clicked on. */
-function asStop({ id, lat, lon, bounds }) {
+function asStop({ id, lat, lon, bounds, dayFrom, dayTo }) {
   const box = String(bounds || '').split(',').map(Number);
   return {
     id,
     latitude: lat,
     longitude: lon,
     bounds: box.length === 4 && box.every(Number.isFinite) ? box : null,
+    // The days of this stay. A place is not a visit: come back to the same
+    // corner two years later and it is the same place and a different
+    // afternoon, and arriving here along the trail asked about the afternoon.
+    stay: dayFrom ? { from: dayFrom, to: dayTo || dayFrom } : null,
   };
 }
 
@@ -94,6 +98,8 @@ function legibleStops(map, stops) {
       // It now stands for the merged stop's photographs as well, so it has to
       // stand for their ground as well — otherwise opening it would show only
       // the part it started as.
+      // The stay it now stands for runs to the end of the last one folded in.
+      into.day_to = stop.day_to || into.day_to;
       if (stop.bounds && into.bounds) {
         into.bounds = [
           Math.min(into.bounds[0], stop.bounds[0]), Math.min(into.bounds[1], stop.bounds[1]),
@@ -208,7 +214,7 @@ function bowedLeg(from, to) {
   return coordinates;
 }
 
-function clusterElement(cluster, isLarge, isSelected, onClick) {
+function clusterElement(cluster, isLarge, isSelected, onClick, onDoubleClick) {
   const count = cluster.count;
   const size = count > 500 ? 74 : count > 100 ? 62 : count > 20 ? 54 : 44;
   const label = count > 999 ? `${Math.round(count / 1000)}k` : count;
@@ -221,7 +227,19 @@ function clusterElement(cluster, isLarge, isSelected, onClick) {
       ${cluster.sample_id ? `<img src="${getThumbnailUrl(cluster.sample_id)}" alt="" loading="lazy" />` : ''}
       <span class="gal-cluster-count">${label}</span>
     </div>`;
-  element.addEventListener('click', (e) => { e.stopPropagation(); onClick(cluster); });
+  element.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // The second click of a double-click is not a click on this dot; it is
+    // half of the other gesture, and opening the same panel again for it would
+    // mean a second request for something already on screen.
+    if (e.detail > 1) return;
+    onClick(cluster);
+  });
+  element.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onDoubleClick(cluster);
+  });
   return element;
 }
 
@@ -235,6 +253,7 @@ export default function GalleryMap({
   onOpenCluster,
   onPickPathPoint,
   onFollowLeg,
+  onZoomCluster,
   selectedId,
 }) {
   const holderRef = useRef(null);
@@ -250,7 +269,7 @@ export default function GalleryMap({
   // to exist at that moment — closed over the state of a map that had not
   // finished loading. Read through a ref, they are always the current ones.
   const handlers = useRef({});
-  handlers.current = { onPickPathPoint, onFollowLeg };
+  handlers.current = { onPickPathPoint, onFollowLeg, onOpenCluster, onZoomCluster };
 
   const report = useCallback(() => {
     const map = mapRef.current;
@@ -360,14 +379,15 @@ export default function GalleryMap({
         // to say so itself — otherwise working along a row of them is done
         // blind.
         !!selectedId && cluster.sample_id === selectedId,
-        (c) => onOpenCluster?.(c),
+        (c) => handlers.current.onOpenCluster?.(c),
+        (c) => handlers.current.onZoomCluster?.(c),
       );
       const marker = new Marker({ element, anchor: 'center' })
         .setLngLat([cluster.longitude, cluster.latitude])
         .addTo(map);
       markersRef.current.push(marker);
     });
-  }, [clusters, selectedId, onOpenCluster]);
+  }, [clusters, selectedId]);
 
   /**
    * The photographs of this period, joined in the order they were taken.
@@ -415,6 +435,8 @@ export default function GalleryMap({
           toLat: to.latitude,
           toLon: to.longitude,
           toBounds: (to.bounds || []).join(','),
+          toDayFrom: to.day_from || '',
+          toDayTo: to.day_to || '',
         },
       });
     }
@@ -431,6 +453,8 @@ export default function GalleryMap({
           lat: p.latitude,
           lon: p.longitude,
           bounds: (p.bounds || []).join(','),
+          dayFrom: p.day_from || '',
+          dayTo: p.day_to || '',
           first: index === 0,
           last: index === points.length - 1,
         },
@@ -479,6 +503,8 @@ export default function GalleryMap({
           lat: properties.toLat,
           lon: properties.toLon,
           bounds: properties.toBounds,
+          dayFrom: properties.toDayFrom,
+          dayTo: properties.toDayTo,
         }));
       });
       map.on('mouseenter', 'gal-path-hit', () => { map.getCanvas().style.cursor = 'pointer'; });

@@ -341,12 +341,15 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
    * was asked to do, and even then it keeps the height it was given.
    */
   const openPlace = useCallback(async (latitude, longitude, {
-    zoom: atZoom, bounds, move = false, sampleId = null,
+    zoom: atZoom, bounds, move = false, sampleId = null, stay = null,
   } = {}) => {
     const zoom = atZoom ?? 14;
     const radiusKm = placeRadiusKm(zoom);
     const area = bounds ? { bbox: bounds.join(',') } : { radius_km: radiusKm };
-    const base = { latitude, longitude, radiusKm, bounds: bounds || null, sampleId };
+    // Arriving along the trail is asking about a stay, not a place. Home is one
+    // place and a hundred visits; the dot that was clicked was one of them.
+    if (stay) { area.date_from = stay.from; area.date_to = stay.to; }
+    const base = { latitude, longitude, radiusKm, bounds: bounds || null, sampleId, stay };
     setPlace({ ...base, loading: true, items: [], total: 0, page: 0, totalPages: 0 });
     if (move) setFocusPoint({ latitude, longitude, zoom });
     try {
@@ -355,7 +358,8 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       });
       setPlace({
         ...base, loading: false, items: data.items,
-        total: data.total_count, page: data.page, totalPages: data.total_pages,
+        total: data.total_count, placeTotal: data.place_total_count ?? data.total_count,
+        page: data.page, totalPages: data.total_pages,
         first: data.first_taken_at, last: data.last_taken_at,
       });
     } catch (e) {
@@ -377,6 +381,8 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       const data = await getGalleryPlace(workspaceId, place.latitude, place.longitude, {
         ...filters,
         ...(place.bounds ? { bbox: place.bounds.join(',') } : { radius_km: place.radiusKm }),
+        // The next page has to be a page of the same question.
+        ...(place.stay ? { date_from: place.stay.from, date_to: place.stay.to } : {}),
         page: place.page + 1, page_size: PLACE_PAGE,
       });
       setPlace((current) => (current && current.latitude === place.latitude ? {
@@ -543,8 +549,50 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
         </div>
       )}
 
-      <div className={`gal-body ${mode === 'map' ? 'is-map' : ''}`}>
-        {mode === 'map' ? (
+      {/* A face search answers a question that has no year, no map and no
+          period, so it takes the screen whichever view asked it. It used to be
+          tested after the map, which meant pressing "이 사람 찾기" on a
+          photograph opened from the map ran the search and then drew the map
+          over it — from the outside, a button that did nothing. Leaving the
+          search puts the map back exactly as it was. */}
+      <div className={`gal-body ${mode === 'map' && !faceSearch ? 'is-map' : ''}`}>
+        {faceSearch ? (
+          <div className="gal-scroll">
+            <div className="gal-face-bar">
+              <span className="gal-face-chip">
+                <img
+                  src={getThumbnailUrl(faceSearch.fromItem.id)}
+                  alt=""
+                  style={{
+                    // The thumbnail, pushed around so the face fills the circle.
+                    objectPosition: `${faceSearch.face.box[0] * 100 + faceSearch.face.box[2] * 50}% `
+                      + `${faceSearch.face.box[1] * 100 + faceSearch.face.box[3] * 50}%`,
+                    transform: `scale(${Math.min(4, Math.max(1.6, 0.55 / Math.max(0.06, faceSearch.face.box[2])))})`,
+                  }}
+                />
+              </span>
+              <div className="gal-face-said">
+                <strong>이 사람이 나온 사진</strong>
+                <span>
+                  {faceSearch.loading && !faceSearch.items.length
+                    ? '찾는 중…'
+                    : `${faceSearch.total.toLocaleString()}개를 찾았습니다`}
+                </span>
+              </div>
+              <button type="button" className="gal-face-back" onClick={() => setFaceSearch(null)}>
+                <X size={13} /> 갤러리로 돌아가기
+              </button>
+            </div>
+            <GalleryGrid
+              items={faceSearch.items}
+              onOpen={openAt}
+              onReachEnd={loadMoreFaces}
+              isLoadingMore={faceSearch.loading}
+              hasMore={faceSearch.page < faceSearch.totalPages}
+              emptyMessage={faceSearch.loading ? '찾는 중…' : '이 사람이 나온 다른 사진을 찾지 못했습니다.'}
+            />
+          </div>
+        ) : mode === 'map' ? (
           <>
             <div className="gal-map-wrap">
               <GalleryMap
@@ -558,13 +606,21 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 onOpenCluster={(cluster) => openPlace(cluster.latitude, cluster.longitude, {
                   zoom: mapView?.zoom, bounds: cluster.bounds, sampleId: cluster.sample_id,
                 })}
+                // Reading a dot and rearranging the map are two gestures, so
+                // they are two gestures: one press reads, two goes closer.
+                onZoomCluster={(cluster) => setFocusPoint({
+                  latitude: cluster.latitude,
+                  longitude: cluster.longitude,
+                  zoom: stepIn(mapView?.zoom),
+                })}
                 onPickPathPoint={(stop) => openPlace(stop.latitude, stop.longitude, {
-                  zoom: mapView?.zoom, bounds: stop.bounds, sampleId: stop.id,
+                  zoom: mapView?.zoom, bounds: stop.bounds, sampleId: stop.id, stay: stop.stay,
                 })}
                 // Following an arrow is going where it points, at the height
                 // you are already looking from — not diving into it.
                 onFollowLeg={(stop) => openPlace(stop.latitude, stop.longitude, {
-                  zoom: mapView?.zoom || 13, bounds: stop.bounds, sampleId: stop.id, move: true,
+                  zoom: mapView?.zoom || 13, bounds: stop.bounds, sampleId: stop.id,
+                  stay: stop.stay, move: true,
                 })}
               />
               <div className="gal-map-tools">
@@ -620,6 +676,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                     zoom: stepIn(mapView?.zoom),
                   })}
                   canZoomIn={(mapView?.zoom || 0) < 16}
+                  // The same ground, without the days — the place rather than
+                  // the visit.
+                  onShowWholePlace={() => openPlace(place.latitude, place.longitude, {
+                    zoom: mapView?.zoom, bounds: place.bounds, sampleId: place.sampleId,
+                  })}
                 />
               ) : (
                 <>
@@ -633,42 +694,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               )}
             </aside>
           </>
-        ) : faceSearch ? (
-          <div className="gal-scroll">
-            <div className="gal-face-bar">
-              <span className="gal-face-chip">
-                <img
-                  src={getThumbnailUrl(faceSearch.fromItem.id)}
-                  alt=""
-                  style={{
-                    // The thumbnail, pushed around so the face fills the circle.
-                    objectPosition: `${faceSearch.face.box[0] * 100 + faceSearch.face.box[2] * 50}% `
-                      + `${faceSearch.face.box[1] * 100 + faceSearch.face.box[3] * 50}%`,
-                    transform: `scale(${Math.min(4, Math.max(1.6, 0.55 / Math.max(0.06, faceSearch.face.box[2])))})`,
-                  }}
-                />
-              </span>
-              <div className="gal-face-said">
-                <strong>이 사람이 나온 사진</strong>
-                <span>
-                  {faceSearch.loading && !faceSearch.items.length
-                    ? '찾는 중…'
-                    : `${faceSearch.total.toLocaleString()}개를 찾았습니다`}
-                </span>
-              </div>
-              <button type="button" className="gal-face-back" onClick={() => setFaceSearch(null)}>
-                <X size={13} /> 갤러리로 돌아가기
-              </button>
-            </div>
-            <GalleryGrid
-              items={faceSearch.items}
-              onOpen={openAt}
-              onReachEnd={loadMoreFaces}
-              isLoadingMore={faceSearch.loading}
-              hasMore={faceSearch.page < faceSearch.totalPages}
-              emptyMessage={faceSearch.loading ? '찾는 중…' : '이 사람이 나온 다른 사진을 찾지 못했습니다.'}
-            />
-          </div>
         ) : (
           <>
             <div className="gal-scroll">

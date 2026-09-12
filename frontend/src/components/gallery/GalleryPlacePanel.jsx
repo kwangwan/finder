@@ -32,7 +32,16 @@ function dayLabel(item) {
   return `${year}${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAYS[date.getDay()]})`;
 }
 
-export default function GalleryPlacePanel({ place, onBack, onOpen, onLoadMore, onZoomIn, canZoomIn }) {
+function dayText(day) {
+  const parts = String(day || '').split('-');
+  if (parts.length !== 3) return day;
+  const [y, m, d] = parts;
+  return `${y}년 ${Number(m)}월 ${Number(d)}일`;
+}
+
+export default function GalleryPlacePanel({
+  place, onBack, onOpen, onLoadMore, onZoomIn, canZoomIn, onShowWholePlace,
+}) {
   const sentinelRef = useRef(null);
   const hasMore = place.page < place.totalPages;
 
@@ -60,6 +69,12 @@ export default function GalleryPlacePanel({ place, onBack, onOpen, onLoadMore, o
     return groups;
   }, [place.items]);
 
+  const stay = place.stay || null;
+  const stayText = stay
+    ? (stay.from === stay.to ? dayText(stay.from) : `${dayText(stay.from)} – ${dayText(stay.to)}`)
+    : null;
+  const rest = Math.max((place.placeTotal ?? place.total) - place.total, 0);
+
   const span = (() => {
     if (!place.first) return null;
     const from = place.first.slice(0, 7).replace('-', '.');
@@ -73,16 +88,31 @@ export default function GalleryPlacePanel({ place, onBack, onOpen, onLoadMore, o
         <button type="button" className="gal-place-back" onClick={onBack}>
           <ChevronLeft size={13} /> 연도별로
         </button>
-        <strong>이 장소의 사진</strong>
+        <strong>{stay ? '이때 이 자리에서' : '이 장소의 사진'}</strong>
         <span>
           {place.loading && !place.items.length ? '찾는 중…' : `${place.total.toLocaleString()}개`}
-          {span && !place.loading && ` · ${span}`}
+          {stay && !place.loading && ` · ${stayText}`}
+          {!stay && span && !place.loading && ` · ${span}`}
         </span>
+        {/* Narrowed to one visit, which is what was clicked — but a place is
+            not its visits, and a panel showing an afternoon looks exactly like
+            a panel showing everything there ever was here. So it says which
+            one this is, and the rest is one press away. */}
+        {stay && !place.loading && (
+          <span className="gal-place-scope">
+            {rest > 0 ? (
+              <>
+                이 장소에는 다른 때 찍은 사진 {rest.toLocaleString()}개가 더 있습니다.
+                <button type="button" onClick={onShowWholePlace}>이 장소 전체 보기</button>
+              </>
+            ) : '이 장소에서 찍은 사진은 이게 전부입니다.'}
+          </span>
+        )}
         {/* Pressing a dot no longer moves the map, so that it stays possible to
             read the dot next door. Breaking this one apart into smaller dots is
             the other wish, and it is asked for here. */}
         {canZoomIn && (
-          <button type="button" className="gal-place-zoom" onClick={onZoomIn} title="이 지점을 한 단계 확대합니다. 묶여 있던 사진이 더 작은 단위로 나뉩니다.">
+          <button type="button" className="gal-place-zoom" onClick={onZoomIn} title="이 지점을 한 단계 확대합니다. 묶여 있던 사진이 더 작은 단위로 나뉩니다.&#10;지도에서 사진을 두 번 눌러도 같습니다.">
             <Maximize2 size={12} /> 가까이서 보기
           </button>
         )}

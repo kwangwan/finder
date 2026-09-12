@@ -7754,6 +7754,27 @@ input.bd-name:focus {
 }
 .gal-place-back:hover { color: var(--text-primary); }
 
+.gal-place-scope {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.gal-place-scope button {
+  display: inline;
+  margin-left: 0.3rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #8ab4ff;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.gal-place-scope button:hover { color: var(--text-primary); }
+
 .gal-place-zoom {
   align-self: flex-start;
   display: inline-flex;
