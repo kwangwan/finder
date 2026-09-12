@@ -70,8 +70,18 @@ async def _face_index_worker():
                     print(f"[{settings.APP_NAME}] Face models unavailable: {e}")
                     await asyncio.sleep(3600)
                     continue
-            await face_index_service.sweep(batch_size=4, limit=20)
-            await asyncio.sleep(20)
+            # Four at a time with a pause between is the right manners for
+            # keeping up with what people upload, and far too polite for a
+            # backlog of eleven thousand. Measured, a batch of twelve spends
+            # 5.5 seconds fetching and 0.7 looking — the work is almost
+            # entirely waiting for storage, so the way to go faster is to wait
+            # for more of it at once, not to think harder.
+            behind = pending > 200
+            await face_index_service.sweep(
+                batch_size=24 if behind else 4,
+                limit=240 if behind else 20,
+            )
+            await asyncio.sleep(2 if behind else 20)
         except asyncio.CancelledError:
             raise
         except Exception as e:

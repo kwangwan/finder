@@ -30,9 +30,9 @@ import os
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import List, Optional
-
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional
 
 import av
 import cv2
@@ -94,9 +94,6 @@ VIDEO_OPEN_TIMEOUT = 30
 MAX_FACES_PER_VIDEO = 900
 VIDEO_MAX_BYTES = 1024 * 1024 * 1024
 
-_detector = None
-_detector_size = None
-_recogniser = None
 
 
 def _download(spec: dict, target: Path) -> None:
@@ -137,44 +134,54 @@ def models_ready() -> bool:
 
 
 # The models are shared objects with state — the detector is told the size of
-# the picture it is about to look at, and then looks at it. The sweep examines
-# several files at once, so without this one thread sets the size for its
-# photograph while another is midway through a different one, and the network
-# runs against a buffer shaped for somebody else's image. It fails loudly when
-# the shapes disagree ("buf.shape() == m.shape()"), and the file is written off
-# as unreadable and marked as looked at, which is the quiet part: it is never
-# examined again.
+# the picture it is about to look at, and then looks at it. Two threads sharing
+# one is a thread setting the size for its photograph while another is midway
+# through a different one: the network runs against a buffer shaped for
+# somebody else's image, fails on the mismatch, and the file is written off as
+# unreadable and marked as looked at. That last part is the quiet one — it is
+# never examined again.
 #
-# Held around the model work only. The waiting — fetching megabytes from
-# storage — is outside it, and that was what the concurrency was for.
-_cv_lock = threading.Lock()
+# A lock fixes that and costs the parallelism: detection is most of the work,
+# so serialising it makes the whole sweep as fast as one core. Each thread gets
+# its own models instead, and the threads are a pool of a known size, so the
+# number of copies is a number we chose rather than however many threads the
+# server happened to use. A copy is about 37MB, nearly all of it the
+# recogniser.
+_models = threading.local()
+
+FACE_WORKERS = int(os.getenv("FACE_WORKERS", "0") or 0) or max(2, min(6, (os.cpu_count() or 4)))
+
+# Everything that touches a model runs here, and only here.
+cv_pool = ThreadPoolExecutor(max_workers=FACE_WORKERS, thread_name_prefix="face")
 
 
 def _get_detector(width: int, height: int):
     """
-    YuNet, sized for this picture. Call with _cv_lock held.
+    YuNet, sized for this picture. This thread's own.
 
     The detector is told the exact size of what it is about to look at, so it
     is kept and re-sized rather than rebuilt per photograph.
     """
-    global _detector, _detector_size
-    if _detector is None:
-        _detector = cv2.FaceDetectorYN.create(
+    detector = getattr(_models, "detector", None)
+    if detector is None:
+        detector = cv2.FaceDetectorYN.create(
             str(_model_path("yunet")), "", (width, height),
             score_threshold=MIN_DETECTION_SCORE, nms_threshold=0.3, top_k=200,
         )
-        _detector_size = (width, height)
-    elif _detector_size != (width, height):
-        _detector.setInputSize((width, height))
-        _detector_size = (width, height)
-    return _detector
+        _models.detector = detector
+        _models.detector_size = (width, height)
+    elif getattr(_models, "detector_size", None) != (width, height):
+        detector.setInputSize((width, height))
+        _models.detector_size = (width, height)
+    return detector
 
 
 def _get_recogniser():
-    global _recogniser
-    if _recogniser is None:
-        _recogniser = cv2.FaceRecognizerSF.create(str(_model_path("sface")), "")
-    return _recogniser
+    recogniser = getattr(_models, "recogniser", None)
+    if recogniser is None:
+        recogniser = cv2.FaceRecognizerSF.create(str(_model_path("sface")), "")
+        _models.recogniser = recogniser
+    return recogniser
 
 
 def _prepare(image: np.ndarray):
@@ -205,17 +212,15 @@ def faces_in_image(image: np.ndarray, frame_time: Optional[float] = None) -> Lis
 
     work, _ = _prepare(image)
     height, width = work.shape[:2]
-    with _cv_lock:
-        detector = _get_detector(width, height)
-        _, detections = detector.detect(work)
-        if detections is None:
-            return []
-        recogniser = _get_recogniser()
-        return _describe(work, detections, recogniser, width, height, frame_time)
+    detector = _get_detector(width, height)
+    _, detections = detector.detect(work)
+    if detections is None:
+        return []
+    return _describe(work, detections, _get_recogniser(), width, height, frame_time)
 
 
 def _describe(work, detections, recogniser, width, height, frame_time):
-    """The numbers that identify each detected face. Call with _cv_lock held."""
+    """The numbers that identify each detected face."""
     faces = []
     for row in detections:
         x, y, w, h = row[:4]

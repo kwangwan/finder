@@ -49,6 +49,18 @@ def _faces_for_downloaded_video(path: str):
             pass
 
 
+async def _looking(fn, *args):
+    """
+    Run something that uses the models, on the threads that own them.
+
+    Fetching a file can happen on any thread and does; looking at one may only
+    happen on the small pool that holds a set of models each, which is what
+    keeps the number of copies bounded while detection still runs several at a
+    time.
+    """
+    return await asyncio.get_running_loop().run_in_executor(face_service.cv_pool, fn, *args)
+
+
 async def find_faces(file_item: FileItem) -> list:
     """
     Look at one file and come back with the faces in it.
@@ -60,7 +72,7 @@ async def find_faces(file_item: FileItem) -> list:
     try:
         if file_item.file_type == "image":
             data = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
-            return await run_in_threadpool(_faces_for_image, data) if data else []
+            return await _looking(_faces_for_image, data) if data else []
         if file_item.file_type == "video":
             # Read where it lies. The decoder asks for the byte ranges holding
             # the keyframes it wants, so a film is looked at without being
@@ -70,7 +82,7 @@ async def find_faces(file_item: FileItem) -> list:
                 s3_service.internal_presigned_get_url, file_item.s3_key
             )
             if url:
-                found = await run_in_threadpool(_faces_for_video, url)
+                found = await _looking(_faces_for_video, url)
                 if found:
                     return found
             # Storage that will not sign, or a container the decoder cannot
@@ -79,7 +91,7 @@ async def find_faces(file_item: FileItem) -> list:
                 face_service.write_temp_video,
                 s3_service.stream_object(file_item.s3_key),
             )
-            return await run_in_threadpool(_faces_for_downloaded_video, path)
+            return await _looking(_faces_for_downloaded_video, path)
     except Exception as e:
         # An image this decoder cannot read is not going to become readable,
         # so the file is still marked as looked at by the caller — otherwise
