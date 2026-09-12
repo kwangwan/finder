@@ -7,7 +7,7 @@ from sqlalchemy import select, desc, or_, func
 
 from app.core.database import get_db
 from app.models.user import User
-from app.models import CopyJob
+from app.models import CopyJob, WorkspaceMember
 from app.schemas.auth import UserResponse, UserApproveRequest, UserAdminRequest, UserQuotaRequest
 from app.core.security import get_current_admin_user
 from pydantic import BaseModel, Field
@@ -57,7 +57,24 @@ async def update_user_admin_status(
         raise HTTPException(status_code=404, detail="User not found")
 
     if user.id == admin_user.id and not req.is_superadmin:
-        raise HTTPException(status_code=400, detail="Cannot revoke your own admin rights")
+        raise HTTPException(status_code=400, detail="본인의 관리자 권한은 스스로 해제할 수 없습니다.")
+
+    # Somebody has to be able to approve the next person, change a quota, and
+    # appoint the next administrator. Taking the last one away leaves an app
+    # nobody can administer, and no way back in through the app itself.
+    if user.is_superadmin and not req.is_superadmin:
+        remaining = (await db.execute(
+            select(func.count(User.id)).where(
+                User.is_superadmin == True,  # noqa: E712
+                User.id != user_id,
+                User.is_active == True,  # noqa: E712
+            )
+        )).scalar_one_or_none() or 0
+        if remaining == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="마지막 최고 관리자입니다. 다른 계정을 최고 관리자로 지정한 뒤에 해제해 주세요.",
+            )
 
     user.is_superadmin = req.is_superadmin
     # If made admin, also ensure is_approved is True
@@ -84,7 +101,47 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     if user.id == admin_user.id:
-        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+        raise HTTPException(status_code=400, detail="본인 계정은 삭제할 수 없습니다.")
+
+    # A workspace belongs to whoever owns it, in the database's own words:
+    # kb_workspaces.owner_id deletes ON CASCADE, and a workspace takes its
+    # folders and files with it. So deleting an account quietly deletes every
+    # workspace it owns — and the loop below then deletes those files out of
+    # storage too, which is the part that cannot be undone.
+    #
+    # For the shared workspace that is the whole company's material, and for a
+    # workspace with other people in it, it is their work as much as this
+    # person's. Ownership is handed over first; then the account can go.
+    owned = (await db.execute(
+        select(Workspace).where(Workspace.owner_id == user_id)
+    )).scalars().all()
+
+    shared_owned = [ws for ws in owned if ws.is_shared]
+    if shared_owned:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"이 계정이 공용 워크스페이스('{shared_owned[0].name}')의 소유자입니다. "
+                "소유자를 다른 계정으로 넘긴 뒤에 삭제해 주세요. 지금 삭제하면 그 안의 모든 자료가 함께 지워집니다."
+            ),
+        )
+
+    for ws in owned:
+        others = (await db.execute(
+            select(func.count(WorkspaceMember.id)).where(
+                WorkspaceMember.workspace_id == ws.id,
+                WorkspaceMember.user_id != user_id,
+            )
+        )).scalar_one_or_none() or 0
+        if others:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"'{ws.name}' 워크스페이스에 다른 구성원 {others}명이 있습니다. "
+                    "소유자를 넘기거나 워크스페이스를 먼저 정리한 뒤에 삭제해 주세요. "
+                    "지금 삭제하면 그 워크스페이스와 그 안의 자료가 함께 지워집니다."
+                ),
+            )
 
     # Clean up MinIO S3 objects for files in workspaces owned by this user.
     # (Deleting the user below cascades to owned workspaces/files at the DB level,
