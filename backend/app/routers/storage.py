@@ -40,6 +40,41 @@ from app.services import media_metadata_service
 router = APIRouter(prefix="/api/storage", tags=["Storage & Uploads"])
 
 
+async def _open_s3_stream(s3_key: str, range_header: Optional[str] = None):
+    """
+    Ask storage for an object, or one range of it, and ask a second time on a
+    connection of its own if the first attempt is refused.
+
+    Storage is reached over the same public hostname as everything else here,
+    so a proxy stands between the signature and the server that checks it.
+    Occasionally a request has arrived there without the very header its
+    signature says it carries, and was answered "AccessDenied: There were
+    headers present in the request which were not signed". It happened five
+    times in two minutes while one video was opened after another, and each
+    time the browser had already been told 206: it received a partial-content
+    answer holding no content, and reported the video as unplayable — a codec
+    problem, by its reckoning, which is what the viewer was then told.
+
+    Nothing has reached the client at the point this runs, so a second attempt
+    is free and invisible. It goes out on a client with its own connection
+    pool, so it cannot be handed the same connection the first one used.
+    """
+    params = {"Bucket": s3_service.bucket_name, "Key": s3_key}
+    if range_header:
+        params["Range"] = range_header
+    try:
+        return await run_in_threadpool(lambda: s3_service.client.get_object(**params))
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code")
+        # A key that is genuinely missing, or a range past the end of the
+        # object, will say the same thing however many times it is asked.
+        if code in ("NoSuchKey", "NoSuchBucket", "InvalidRange"):
+            raise
+        print(f"[S3] retrying {code} for {s3_key} ({range_header or 'whole object'}) on a new connection")
+        retry_client = await run_in_threadpool(s3_service.new_client)
+        return await run_in_threadpool(lambda: retry_client.get_object(**params))
+
+
 async def _stream_s3_object(s3_key: str, chunk_size: int = 1024 * 1024):
     """
     Yield an S3/MinIO object's bytes in chunks instead of buffering the whole
@@ -51,7 +86,7 @@ async def _stream_s3_object(s3_key: str, chunk_size: int = 1024 * 1024):
     whole file before playing anything. Each chunk read is offloaded via
     run_in_threadpool since boto3's StreamingBody.read() is a blocking call.
     """
-    resp = await run_in_threadpool(s3_service.client.get_object, Bucket=s3_service.bucket_name, Key=s3_key)
+    resp = await _open_s3_stream(s3_key)
     body = resp["Body"]
     try:
         while True:
@@ -76,12 +111,7 @@ async def _stream_s3_range(s3_key: str, start: int, end: int, chunk_size: int = 
     makes the larger opening slice below affordable: a bigger range no longer
     delays the first byte, it only keeps the pipe full for longer.
     """
-    resp = await run_in_threadpool(
-        s3_service.client.get_object,
-        Bucket=s3_service.bucket_name,
-        Key=s3_key,
-        Range=f"bytes={start}-{end}",
-    )
+    resp = await _open_s3_stream(s3_key, f"bytes={start}-{end}")
     body = resp["Body"]
     try:
         while True:

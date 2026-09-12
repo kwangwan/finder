@@ -184,15 +184,19 @@ export default function PreviewWindow({
    * never retries by itself. This is the same recovery the thumbnails in the
    * file grid and the taskbar already do.
    */
-  const mediaRetriedRef = useRef(false);
-  useEffect(() => { mediaRetriedRef.current = false; }, [file?.id]);
-  // Once something has loaded, the window has earned another attempt: a
+  // A few, not one: a video is asked for in pieces, and a single refusal on
+  // the way — a connection dropped, a range the server could not answer — is
+  // not evidence that the file is unopenable.
+  const MEDIA_REFRESHES = 3;
+  const mediaRetriesRef = useRef(0);
+  useEffect(() => { mediaRetriesRef.current = 0; }, [file?.id]);
+  // Once something has loaded, the window has earned its attempts back: a
   // window left open all afternoon outlives more than one token.
-  const handleMediaLoaded = useCallback(() => { mediaRetriedRef.current = false; }, []);
+  const handleMediaLoaded = useCallback(() => { mediaRetriesRef.current = 0; }, []);
 
   const refreshMediaUrl = useCallback(async () => {
-    if (mediaRetriedRef.current || !file?.id) return null;
-    mediaRetriedRef.current = true;
+    if (mediaRetriesRef.current >= MEDIA_REFRESHES || !file?.id) return null;
+    mediaRetriesRef.current += 1;
     clearMediaToken();
     await ensureMediaToken();
     const fresh = getMediaPreviewUrl(file.id);

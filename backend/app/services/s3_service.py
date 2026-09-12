@@ -57,21 +57,33 @@ class S3Service:
         self.local_dir = LOCAL_STORAGE_DIR
 
         try:
-            self.client = boto3.client(
-                "s3",
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=settings.MINIO_PUBLIC_ROOT_USER,
-                aws_secret_access_key=settings.MINIO_PUBLIC_ROOT_PASSWORD,
-                region_name=self.region_name,
-                config=Config(
-                    signature_version="s3v4",
-                    s3={"addressing_style": "path"}
-                )
-            )
+            self.client = self.new_client()
             self._ensure_bucket()
         except Exception as e:
             print(f"[S3 Init Warning] Could not connect to S3 client: {e}")
             self.client = None
+
+    def new_client(self):
+        """
+        A client of its own, with its own pool of connections.
+
+        Everything here shares `self.client`, which is what boto3 asks for.
+        This exists for the one case where sharing is the problem: a request
+        that failed on a connection that cannot be trusted to carry the next
+        one (see `_open_s3_stream` in routers/storage.py). Asking again on a
+        client with its own pool cannot land back on that same connection.
+        """
+        return boto3.client(
+            "s3",
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=settings.MINIO_PUBLIC_ROOT_USER,
+            aws_secret_access_key=settings.MINIO_PUBLIC_ROOT_PASSWORD,
+            region_name=self.region_name,
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"}
+            )
+        )
 
     def _get_local_path(self, s3_key: str) -> Path:
         """Get local filesystem path for a given s3_key.

@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Film, Play, Download, AlertCircle, Volume2, Sparkles } from '../../utils/icons';
 import { getThumbnailUrl } from '../../api';
 
+const RECOVERY_ATTEMPTS = 3;
+
 export default function VideoPlayer({
   src,
   file,
@@ -37,9 +39,15 @@ export default function VideoPlayer({
   // the viewer back to the beginning of a long video.
   const resumeRef = useRef(null);
 
+  // How many times a video that stopped is given another go before the file
+  // is blamed. Reset by anything actually loading, so a long viewing is not
+  // spending a budget it filled hours ago.
+  const attemptsRef = useRef(0);
+
   const handleLoadedData = () => {
     setIsLoading(false);
     setIsError(false);
+    attemptsRef.current = 0;
     onLoaded?.();
     const resume = resumeRef.current;
     resumeRef.current = null;
@@ -52,28 +60,49 @@ export default function VideoPlayer({
   /**
    * A video that stops playing has not necessarily got anything wrong with it.
    *
-   * The media token in the URL lives fifteen minutes and a video can be
-   * watched for longer than that; when it expires the next range request is
-   * refused and the element reports the same "cannot play" it reports for a
-   * codec it does not understand. So the source is asked for again — once —
-   * before the file is blamed, and playback picks up where it left off.
+   * A media element reports one thing — "cannot play" — for an expired token,
+   * a connection that dropped, a range the server refused, and a codec it
+   * genuinely does not understand. Only `error.code` tells them apart, and
+   * only one of those four is the file's fault:
+   *
+   * - ABORTED is not a failure at all. It is what the element says when the
+   *   source is changed under it or the window it lives in goes away, and
+   *   answering it used to spend the single retry the next real failure
+   *   needed — so a video opened after another one had just been closed
+   *   announced itself as unplayable on its first hiccup.
+   * - DECODE means the bytes arrived and could not be made sense of. That is
+   *   worth saying out loud, and worth saying accurately.
+   * - Everything else is the way in, not the file: asked for again, a few
+   *   times, picking up where playback left off.
    */
   const handleError = async () => {
     const video = videoRef.current;
-    if (onRecoverSrc) {
+    const code = video?.error?.code;
+    if (code === 1 /* MEDIA_ERR_ABORTED */) return;
+
+    const decodeFailed = code === 3 /* MEDIA_ERR_DECODE */;
+    if (!decodeFailed && attemptsRef.current < RECOVERY_ATTEMPTS) {
+      attemptsRef.current += 1;
       const at = video?.currentTime || 0;
       const wasPlaying = !!video && !video.paused && !video.ended;
-      const fresh = await onRecoverSrc();
-      if (fresh) {
-        resumeRef.current = { time: at, playing: wasPlaying || autoPlay };
-        setIsLoading(true);
-        setIsError(false);
-        return;
+      resumeRef.current = { time: at, playing: wasPlaying || autoPlay };
+      setIsLoading(true);
+      setIsError(false);
+      const fresh = await onRecoverSrc?.();
+      // A fresh address reloads through the effect below. The same address is
+      // worth trying again too — what failed was the journey, not the file —
+      // after a pause that grows with each attempt.
+      if (!fresh) {
+        window.setTimeout(() => { videoRef.current?.load(); }, 600 * attemptsRef.current);
       }
+      return;
     }
+
     setIsLoading(false);
     setIsError(true);
-    setErrorMessage('영상을 불러오지 못했습니다. 브라우저가 지원하지 않는 코덱이거나 파일이 손상되었을 수 있습니다.');
+    setErrorMessage(decodeFailed
+      ? '영상이 손상되었거나 브라우저가 지원하지 않는 코덱입니다.'
+      : '영상을 불러오지 못했습니다. 연결이 끊겼거나 서버가 영상을 보내지 못했습니다.');
   };
 
   // A new source that arrived after a failure has to actually be loaded: the
