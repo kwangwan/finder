@@ -11,6 +11,8 @@ import {
   X,
   Minus,
   MoreVertical,
+  Edit3,
+  Info,
   Maximize2,
   Minimize2,
   Download,
@@ -38,7 +40,7 @@ import {
   Trash2,
   Paperclip
 } from '../../utils/icons';
-import { getMediaPreviewUrl, downloadFileChunked, getFileDetail, ensureMediaToken, clearMediaToken } from '../../api';
+import { getMediaPreviewUrl, downloadFileChunked, getFileDetail, renameFile, ensureMediaToken, clearMediaToken } from '../../api';
 import { useNoteEditor, BN_THEME, blocksToMarkdownTableSafe } from '../../hooks/useNoteEditor';
 import AttachExistingFileModal from '../editor/AttachExistingFileModal';
 import DocumentToolbar from '../editor/DocumentToolbar';
@@ -250,7 +252,6 @@ export default function PreviewWindow({
   // The last title we told the rest of the app about, so an autosave that
   // changed only the body does not set every list reloading.
   const renamedNameRef = useRef(file?.name || '');
-  const titleInputRef = useRef(null);
 
   const noteEditor = useNoteEditor({
     file: fileDetail,
@@ -275,7 +276,6 @@ export default function PreviewWindow({
   useEffect(() => {
     const name = file?.name;
     if (!isMarkdown || !name || name === noteEditor.title) return;
-    if (document.activeElement === titleInputRef.current) return;
     renamedNameRef.current = name;
     noteEditor.adoptExternalTitle(name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,6 +317,30 @@ export default function PreviewWindow({
   // last-saved snapshot.
   const menuRef = useRef(null);
   const [isMenuOpen, setMenuOpen] = useState(false);
+  const [isRenaming, setRenaming] = useState(false);
+  const [renameTo, setRenameTo] = useState('');
+  const [renameError, setRenameError] = useState(null);
+  const [isSavingName, setSavingName] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+
+  const commitRename = async () => {
+    const name = renameTo.trim();
+    if (!name || name === resolvedFile.name) { setRenaming(false); return; }
+    setSavingName(true);
+    setRenameError(null);
+    try {
+      const updated = await renameFile(resolvedFile.id, name);
+      const saved = updated?.name || name;
+      setFileDetail((current) => ({ ...current, name: saved }));
+      onUpdateWindowFile(id, { name: saved });
+      onFileRenamed?.(resolvedFile.id, saved);
+      setRenaming(false);
+    } catch (e) {
+      setRenameError(e.message || '이름을 바꾸지 못했습니다.');
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const handleCopyContent = () => {
     const content = isMarkdown && noteEditor.editor
@@ -357,30 +381,6 @@ export default function PreviewWindow({
   // ==========================================
   // Mouse & Touch Dragging (Window Movement)
   // ==========================================
-  // The editable title input spans most of the header's width, leaving too
-  // little bare header area to grab for dragging. Mirror how a real OS
-  // title-bar rename field behaves: mousedown on the (not-yet-focused) input
-  // starts a drag like anywhere else on the header, and only actually
-  // focuses the input for editing if the pointer never really moved (a
-  // plain click, not a drag). Once the input IS focused, this is skipped
-  // entirely — normal text-editing clicks just place the caret.
-  const handleTitleMouseDown = (e) => {
-    const input = e.currentTarget;
-    if (document.activeElement === input) return; // already editing — normal caret click
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) return; // let mobile just focus normally
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    handleDragStart(e);
-    const onUp = (upEvent) => {
-      window.removeEventListener('mouseup', onUp);
-      if (Math.abs(upEvent.clientX - startX) < 4 && Math.abs(upEvent.clientY - startY) < 4) {
-        input.focus();
-      }
-    };
-    window.addEventListener('mouseup', onUp);
-  };
 
   // Image pan & zoom handlers
   const handleImageMouseDown = (e) => {
@@ -448,6 +448,16 @@ export default function PreviewWindow({
    * what it is instead of being a shape you have to hover to identify.
    */
   const menuItems = [];
+  if (!isBoard) {
+    // Renaming used to be "click the title and type", which is invisible until
+    // discovered and, on a document, indistinguishable from putting the cursor
+    // somewhere. It is a thing you do to the file, so it lives with the other
+    // things you do to the file.
+    menuItems.push({ key: 'rename', label: '이름 바꾸기', icon: <Edit3 size={13} />,
+                     run: () => { setRenameTo(resolvedFile.name || ''); setRenaming(true); } });
+  }
+  menuItems.push({ key: 'about', label: '상세 정보', icon: <Info size={13} />,
+                   run: () => setShowAbout(true) });
   if (isMarkdown) {
     menuItems.push(
       { key: 'history', label: '문서 히스토리', icon: <Clock size={13} />,
@@ -459,10 +469,12 @@ export default function PreviewWindow({
         run: () => onToggleFavorite(fileDetail || file) },
       { key: 'md', label: '마크다운으로 내려받기', icon: <Download size={13} />,
         run: () => noteEditor.handleExportMarkdown() },
+      // Red is for the one thing in here that cannot be undone. Exporting a
+      // PDF is not that, and wearing the warning colour made it look like it.
       { key: 'pdf', label: noteEditor.isExportingPdf ? 'PDF 만드는 중…' : 'PDF로 내보내기',
         icon: noteEditor.isExportingPdf
-          ? <Loader2 size={13} className="spin" color="var(--accent-rose)" />
-          : <FileText size={13} color="var(--accent-rose)" />,
+          ? <Loader2 size={13} className="spin" />
+          : <FileText size={13} />,
         disabled: noteEditor.isExportingPdf,
         run: () => noteEditor.handleExportPdf() },
     );
@@ -494,6 +506,50 @@ export default function PreviewWindow({
         : undefined,
       run: () => onDeleteFile(resolvedFile.id),
     });
+  }
+
+  /**
+   * What is known about this file.
+   *
+   * The header has room for a name and nothing else, so everything else about
+   * a file — how big, when, by whom, and for a photograph what took it and
+   * where — had nowhere to be said. Only the lines that have an answer are
+   * shown; a file with no camera should not have an empty "카메라" row.
+   */
+  const aboutRows = [];
+  {
+    const bytes = resolvedFile.size_bytes;
+    const when = (iso) => {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return null;
+      return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}. `
+        + `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+    const size = bytes == null ? null
+      : bytes < 1024 ? `${bytes} B`
+        : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB`
+          : bytes < 1024 ** 3 ? `${(bytes / 1024 ** 2).toFixed(1)} MB`
+            : `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+    const add = (label, value) => { if (value) aboutRows.push([label, value]); };
+    add('이름', resolvedFile.name);
+    add('종류', resolvedFile.file_type);
+    add('크기', size);
+    add('올린 사람', resolvedFile.created_by_name || resolvedFile.owner_name);
+    add('올린 날짜', when(resolvedFile.created_at));
+    add('마지막 수정', when(resolvedFile.updated_at));
+    add('촬영 시각', when(resolvedFile.taken_at));
+    if (resolvedFile.width && resolvedFile.height) {
+      add('크기(픽셀)', `${resolvedFile.width} × ${resolvedFile.height}`);
+    }
+    if (resolvedFile.duration_seconds) {
+      const total = Math.round(resolvedFile.duration_seconds);
+      add('길이', `${Math.floor(total / 60)}분 ${String(total % 60).padStart(2, '0')}초`);
+    }
+    add('카메라', [resolvedFile.camera_make, resolvedFile.camera_model].filter(Boolean).join(' '));
+    if (resolvedFile.gps_latitude != null && resolvedFile.gps_longitude != null) {
+      add('위치', `${resolvedFile.gps_latitude.toFixed(5)}, ${resolvedFile.gps_longitude.toFixed(5)}`);
+    }
   }
 
   return (
@@ -528,19 +584,7 @@ export default function PreviewWindow({
           <div className="window-file-icon">
             {getHeaderIcon()}
           </div>
-          {isMarkdown ? (
-            <input
-              ref={titleInputRef}
-              type="text"
-              className="window-title-input"
-              value={noteEditor.title}
-              onChange={noteEditor.handleTitleChange}
-              onMouseDown={handleTitleMouseDown}
-              placeholder="문서 제목을 입력하세요..."
-            />
-          ) : (
-            <span className="window-title-text">{resolvedFile.name}</span>
-          )}
+          <span className="window-title-text">{resolvedFile.name}</span>
           {isMarkdown && (
             <span
               className="window-save-status"
@@ -689,6 +733,62 @@ export default function PreviewWindow({
               <X size={14} />
             </button>
           </div>
+
+      {(isRenaming || showAbout) && (
+        <div
+          className="window-dialog-back"
+          onMouseDown={(e) => { e.stopPropagation(); setRenaming(false); setShowAbout(false); }}
+          role="presentation"
+        >
+          <div className="window-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog">
+            {isRenaming ? (
+              <>
+                <header><strong>이름 바꾸기</strong></header>
+                <div className="window-dialog-body">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={renameTo}
+                    onChange={(e) => setRenameTo(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitRename();
+                      if (e.key === 'Escape') setRenaming(false);
+                    }}
+                    placeholder="새 이름"
+                  />
+                  {renameError && <p className="window-dialog-error">{renameError}</p>}
+                </div>
+                <footer>
+                  <button type="button" onClick={() => setRenaming(false)}>취소</button>
+                  <button
+                    type="button"
+                    className="is-primary"
+                    disabled={isSavingName || !renameTo.trim()}
+                    onClick={commitRename}
+                  >
+                    {isSavingName ? '바꾸는 중…' : '바꾸기'}
+                  </button>
+                </footer>
+              </>
+            ) : (
+              <>
+                <header><strong>상세 정보</strong></header>
+                <dl className="window-about">
+                  {aboutRows.map(([label, value]) => (
+                    <React.Fragment key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+                <footer>
+                  <button type="button" className="is-primary" onClick={() => setShowAbout(false)}>닫기</button>
+                </footer>
+              </>
+            )}
+          </div>
+        </div>
+      )}
         </div>
       </div>
 

@@ -2758,10 +2758,12 @@ h1, h2, h3, h4, h5, h6,
 
 /* Header & Controls */
 .os-window-header {
-  /* Grows to a second row in a narrow window — see .window-title-box. */
+  /* One row, always. It used to grow a second one so a long name could be
+     read in full, which cost a strip of every narrow window for something the
+     상세 정보 now answers properly. The name gives way with an ellipsis. */
   min-height: 38px;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px 4px 12px;
@@ -2771,12 +2773,6 @@ h1, h2, h3, h4, h5, h6,
   user-select: none;
   -webkit-user-select: none;
   column-gap: 8px;
-  /* When it does grow to a second row, the two rows need to look like two
-     rows — the same breathing space above and below as at the sides, and the
-     buttons gathered at the right edge rather than floating wherever the
-     title left them. */
-  row-gap: 2px;
-  padding-bottom: 5px;
 }
 
 .os-window-header:active {
@@ -2788,16 +2784,14 @@ h1, h2, h3, h4, h5, h6,
   align-items: center;
   gap: 8px;
   flex: 1 1 0;
-  /* The floor that drives the header's second row. The action buttons never
-     shrink, so in a narrow window they used to take the whole row and squeeze
-     the title down to nothing — the file name was simply invisible. Once the
-     title can no longer get this much space, flex-wrap moves the buttons to
-     their own row and the title gets the full width instead.
-     Expressed as a minimum rather than a width breakpoint on purpose: the
-     button count varies by file type (a document carries history, export and
-     attachment controls a plain file does not), so each window wraps at the
-     width where its own header actually runs out of room. */
-  min-width: 180px;
+  /* Free to shrink to nothing, because the name is no longer the only place
+     the name can be read. What is left of it ends in an ellipsis. */
+  min-width: 0;
+}
+.window-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .window-file-icon {
@@ -2843,6 +2837,88 @@ h1, h2, h3, h4, h5, h6,
   flex-shrink: 0;
 }
 
+/* ── 창 안의 작은 대화상자 ─────────────────────────────────────────────── */
+.window-dialog-back {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.4);
+}
+.window-dialog {
+  width: min(340px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px -20px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+.window-dialog > header {
+  padding: 0.8rem 1rem 0.55rem;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.85rem;
+}
+.window-dialog-body { padding: 0.9rem 1rem; }
+.window-dialog-body input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.window-dialog-body input:focus { outline: none; border-color: var(--accent-primary); }
+.window-dialog-error { margin: 0.5rem 0 0; font-size: 0.74rem; color: var(--accent-rose); }
+.window-dialog > footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding: 0.7rem 1rem 0.85rem;
+  border-top: 1px solid var(--border-subtle);
+}
+.window-dialog > footer button {
+  padding: 0.42rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.window-dialog > footer button.is-primary {
+  border-color: transparent;
+  background: var(--accent-primary);
+  color: #fff;
+  font-weight: 600;
+}
+.window-dialog > footer button:disabled { opacity: 0.5; cursor: default; }
+
+.window-about {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.42rem 0.9rem;
+  overflow-y: auto;
+  font-size: 0.78rem;
+}
+.window-about dt { color: var(--text-muted); white-space: nowrap; }
+.window-about dd {
+  margin: 0;
+  color: var(--text-primary);
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}
+
 .window-menu { position: relative; display: inline-flex; }
 .window-menu-pop { padding: 4px; }
 .window-menu-pop [role="menu"] { display: flex; flex-direction: column; min-width: 190px; }
@@ -2881,7 +2957,7 @@ h1, h2, h3, h4, h5, h6,
   /* At the smallest window size a document's full set of buttons is wider
      than the window itself, and without this they overflow the header —
      silently cutting off the last one, which is the close button. */
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
