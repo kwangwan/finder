@@ -6,7 +6,11 @@ services:
     volumes:
       - ./backend/storage_data:/app/storage_data
     ports:
-      - "8001:8001"
+      # Host-local only. nginx reaches this over the compose network
+      # (http://backend:8001) and the tunnel runs on this machine, so nothing
+      # outside needs it — published on every interface it was an unproxied
+      # copy of the whole API, docs included, to anyone on the network.
+      - "127.0.0.1:8001:8001"
     restart: unless-stopped
 
   frontend:
@@ -24,7 +28,8 @@ services:
     environment:
       - BACKEND_INTERNAL_URL=http://backend:8001
     ports:
-      - "1234:1234"
+      # Host-local only, for the same reason: the tunnel connects from here.
+      - "127.0.0.1:1234:1234"
     depends_on:
       - backend
     restart: unless-stopped

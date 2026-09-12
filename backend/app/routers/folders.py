@@ -28,6 +28,7 @@ from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
 from app.services import folder_limit_service
 from app.services import favorite_service
 from app.core.config import settings
+from app.services.name_rules import validate_item_name
 
 router = APIRouter(prefix="/api/folders", tags=["Folders"])
 
@@ -289,8 +290,13 @@ async def create_folder(
 
     await folder_limit_service.require_room(db, workspace_id, req.parent_id)
 
+    try:
+        folder_name = validate_item_name(req.name, "폴더 이름")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     folder = Folder(
-        name=req.name,
+        name=folder_name,
         parent_id=req.parent_id,
         workspace_id=workspace_id,
         created_by=current_user.id,
@@ -415,7 +421,10 @@ async def update_folder(
         raise HTTPException(status_code=403, detail="폴더를 수정할 권한이 없습니다.")
 
     if req.name is not None:
-        folder.name = req.name.strip()
+        try:
+            folder.name = validate_item_name(req.name, "폴더 이름")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # `parent_id: null` is a meaningful value here — it means "move to the
     # workspace root" — and is indistinguishable from "field omitted" by
@@ -498,7 +507,10 @@ async def rename_folder(
     if not await access_service.can_access_folder(db, current_user, folder_id):
         raise HTTPException(status_code=403, detail="폴더명을 변경할 권한이 없습니다.")
 
-    folder.name = req.name.strip()
+    try:
+        folder.name = validate_item_name(req.name, "폴더 이름")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(folder)
 
@@ -691,6 +703,13 @@ async def ensure_folder_path(
     clean_path = req.relative_path.strip().replace('\\', '/')
     await access_service.require_write_at(db, current_user, req.workspace_id, req.parent_id)
     parts = [p.strip() for p in clean_path.split('/') if p.strip()]
+    # An uploaded tree names its own folders. "." and ".." are not names, and
+    # a folder called ".." would be a path pretending to be a name for
+    # everything that later writes one out.
+    try:
+        parts = [validate_item_name(p, "폴더 이름") for p in parts]
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if not parts:
         folder_name = ""

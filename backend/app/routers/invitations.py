@@ -12,7 +12,11 @@ from app.core.database import get_db
 from app.models import User, Workspace, WorkspaceMember, Invitation
 from app.schemas.invitation import CreateInvitationRequest, AcceptInvitationRequest, InvitationResponse
 from app.schemas.auth import TokenResponse
-from app.core.security import get_current_approved_user, get_current_user, create_access_token, hash_password
+from app.core.security import (
+    get_current_approved_user, get_current_user, create_access_token, hash_password,
+    verify_password, decode_access_token, security_scheme,
+)
+from fastapi.security import HTTPAuthorizationCredentials
 from app.services.email_service import email_service
 
 router = APIRouter(prefix="/api/invitations", tags=["Invitations"])
@@ -204,9 +208,46 @@ async def verify_invitation_token(token: str, db: AsyncSession = Depends(get_db)
     return inv.to_dict()
 
 
+async def _proves_this_account(
+    db: AsyncSession,
+    user: User,
+    req: AcceptInvitationRequest,
+    credentials: Optional[HTTPAuthorizationCredentials],
+) -> bool:
+    """Is the caller the person whose account this is?"""
+    if credentials:
+        payload = decode_access_token(credentials.credentials)
+        # A media-scoped token is not a session and cannot stand in for one.
+        if payload and payload.get("scope") != "media" and payload.get("sub") == str(user.id):
+            return True
+    password = getattr(req, "password", None)
+    if password and user.hashed_password and verify_password(password, user.hashed_password):
+        return True
+    return False
+
+
 @router.post("/accept", response_model=TokenResponse)
-async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Depends(get_db)):
-    """Accept invitation and complete user signup/login."""
+async def accept_invitation(
+    req: AcceptInvitationRequest,
+    db: AsyncSession = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+):
+    """
+    Accept an invitation: join the workspace, and sign in.
+
+    An invitation link is a bearer token — it is emailed, and whoever holds it
+    may use it. That is fine for opening a *new* account at the invited
+    address, which is the only thing the link is meant to do. It was not fine
+    for an address that already has an account: this route signed the caller
+    in as that account and handed back a session token, without ever asking
+    for its password. Anybody able to create an invitation (any workspace
+    owner — which is anybody, since anybody can make a workspace) could invite
+    an existing user's address, read the token straight out of the response,
+    and take over that account, including an administrator's.
+
+    So an existing account has to be proved: either the caller is already
+    signed in as it, or they know its password.
+    """
     res = await db.execute(
         select(Invitation).options(
             selectinload(Invitation.workspace)
@@ -243,6 +284,11 @@ async def accept_invitation(req: AcceptInvitationRequest, db: AsyncSession = Dep
         await db.commit()
         await db.refresh(user)
     else:
+        if not await _proves_this_account(db, user, req, credentials):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="이미 가입된 계정입니다. 로그인한 뒤 초대를 수락해 주세요.",
+            )
         # If existing user, auto-approve if invited by admin
         if inv.is_admin_invite:
             user.is_approved = True

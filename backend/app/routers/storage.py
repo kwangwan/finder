@@ -313,185 +313,57 @@ async def download_file_chunk(
         media_type=res["content_type"]
     )
 
-@router.post("/multipart/initiate", response_model=MultipartInitResponse)
-async def initiate_multipart_upload(
-    req: MultipartInitRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user)
-):
-    """Initiate S3 multipart upload for large files based on MINIO_MAX_CHUNK_SIZE_MB."""
-    workspace_id = req.workspace_id
-    if not workspace_id and req.folder_id:
-        folder = await db.get(Folder, req.folder_id)
-        if folder:
-            workspace_id = folder.workspace_id
-    await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
-    await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.filename)
-    await quota_service.check_quota(db, workspace_id, current_user, req.size_bytes)
+# The browser-direct multipart upload (POST /multipart/{initiate,part-urls,
+# complete,abort}) used to live here and is gone.
+#
+# Nothing called it any more — every upload goes through /chunk/* instead,
+# which streams each part through this server because a browser talking
+# straight to storage does not survive the tunnel. What it left behind was an
+# opening: /multipart/part-urls signed a PUT for whatever key the caller
+# named, so any signed-in account could have been handed permission to write
+# over any object in the bucket, and /multipart/{initiate,complete} never
+# asked whether the caller belonged to the workspace they were filing into.
+# A dead route is still a live route.
 
-    file_uuid = uuid.uuid4()
-    s3_key = build_storage_key("uploads", file_uuid, req.filename)
-    
-    chunk_bytes = settings.MINIO_MAX_CHUNK_SIZE_MB * 1024 * 1024
-    total_parts = math.ceil(req.size_bytes / chunk_bytes) if req.size_bytes > 0 else 1
-
-    try:
-        upload_id = s3_service.create_multipart_upload(
-            s3_key=s3_key,
-            content_type=req.content_type
-        )
-        return MultipartInitResponse(
-            upload_id=upload_id,
-            s3_key=s3_key,
-            chunk_size_mb=settings.MINIO_MAX_CHUNK_SIZE_MB,
-            chunk_size_bytes=chunk_bytes,
-            total_parts=total_parts
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initiate multipart upload: {str(e)}")
-
-@router.post("/multipart/part-urls", response_model=MultipartPartUrlsResponse)
-async def get_multipart_part_urls(
-    req: MultipartPartUrlsRequest,
-    current_user: User = Depends(get_current_approved_user)
-):
-    """Generate presigned PUT URLs for each requested part number."""
-    try:
-        parts = s3_service.generate_multipart_presigned_urls(
-            s3_key=req.s3_key,
-            upload_id=req.upload_id,
-            part_numbers=req.part_numbers
-        )
-        return MultipartPartUrlsResponse(parts=parts)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate part URLs: {str(e)}")
-
-@router.post("/multipart/complete", response_model=FileResponse)
-async def complete_multipart_upload(
-    req: MultipartCompleteRequest,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_approved_user)
-):
-    """Complete S3 multipart upload and save file metadata in PostgreSQL."""
-    # Where this lands is decided here, not at /multipart/initiate — the
-    # request carries its own folder_id, so a start in a folder you may write
-    # says nothing about the folder you are about to finish in. Asked before
-    # the object is finalised, so a refusal leaves nothing behind.
-    if req.folder_id and not await access_service.can_access_folder(db, current_user, req.folder_id):
-        raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
-    target_workspace_id = req.workspace_id
-    if req.folder_id and not target_workspace_id:
-        target_folder = await db.get(Folder, req.folder_id)
-        if target_folder:
-            target_workspace_id = target_folder.workspace_id
-    await access_service.require_write_at(db, current_user, target_workspace_id, req.folder_id)
-
-    try:
-        s3_service.complete_multipart_upload(
-            s3_key=req.s3_key,
-            upload_id=req.upload_id,
-            parts=[p.dict() for p in req.parts]
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to complete multipart upload on S3: {str(e)}")
-
-    # Detect file type
-    name_lower = req.filename.lower()
-    file_type = req.file_type or "other"
-    is_markdown = False
-    if name_lower.endswith(".md"):
-        file_type = "note"
-        is_markdown = True
-    elif name_lower.endswith(".pdf"):
-        file_type = "pdf"
-    elif name_lower.endswith((".docx", ".doc")):
-        file_type = "docx"
-    elif name_lower.endswith((".xlsx", ".xls")):
-        file_type = "xlsx"
-    elif name_lower.endswith((".txt", ".json", ".csv", ".py", ".js", ".html", ".css", ".yaml", ".yml")):
-        file_type = "text"
-    elif name_lower.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")):
-        file_type = "image"
-    elif name_lower.endswith((".zip", ".tar", ".gz", ".7z", ".rar")):
-        file_type = "archive"
-
-    workspace_id = req.workspace_id
-    if req.folder_id:
-        if not await access_service.can_access_folder(db, current_user, req.folder_id):
-            raise HTTPException(status_code=403, detail="폴더에 접근할 권한이 없습니다.")
-        folder = await db.get(Folder, req.folder_id)
-        if folder:
-            if workspace_id and folder.workspace_id and workspace_id != folder.workspace_id:
-                raise HTTPException(status_code=400, detail="지정한 폴더와 워크스페이스가 일치하지 않습니다.")
-            if not workspace_id:
-                workspace_id = folder.workspace_id
-
-    if workspace_id:
-        if not await access_service.is_workspace_member(db, current_user, workspace_id):
-            raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
-
-    # Generate thumbnail for media files if applicable
-    thumbnail_s3_key = None
-    if file_type in ("image", "video"):
-        try:
-            # Download bytes from S3 (or range for video) to generate thumbnail
-            media_bytes = await run_in_threadpool(s3_service.get_object_content, req.s3_key)
-            if media_bytes:
-                file_uuid = req.s3_key.split("/")[1] if "/" in req.s3_key else str(uuid.uuid4())
-                thumbnail_s3_key = await run_in_threadpool(
-                    thumbnail_service.create_and_store_thumbnail,
-                    file_uuid=file_uuid,
-                    filename=req.filename,
-                    file_bytes=media_bytes,
-                    file_type=file_type
-                )
-        except Exception as thumb_err:
-            print(f"[Thumbnail Warning] Multipart thumbnail generation failed: {thumb_err}")
-
-    file_item = FileItem(
-        folder_id=req.folder_id,
-        workspace_id=workspace_id,
-        created_by=current_user.id,
-        name=req.filename,
-        file_type=file_type,
-        mime_type=req.mime_type,
-        size_bytes=req.size_bytes,
-        s3_key=req.s3_key,
-        thumbnail_s3_key=thumbnail_s3_key,
-        is_markdown=is_markdown
-    )
-    db.add(file_item)
-    await db.commit()
-    await db.refresh(file_item)
-
-    # Update workspace owner storage usage
-    await quota_service.record_storage_added(db, workspace_id, current_user, req.size_bytes or 0)
-
-    # Index embeddings. Never fatal: the file is stored and committed by now.
-    await document_service.index_file_chunks_safely(db, file_item)
-
-    # Capture metadata (EXIF / MP4 moov) — off the response path,
-    # since it costs two more ranged reads from storage and is only
-    # ever shown later in the file-info panel.
-    background_tasks.add_task(_scan_media_metadata, file_item.id)
-
-    resp = FileResponse.model_validate(file_item)
-    if file_item.thumbnail_s3_key:
-        resp.thumbnail_url = f"/api/storage/thumbnail/{file_item.id}"
-    return resp
-
-@router.post("/multipart/abort")
-async def abort_multipart_upload(
-    req: MultipartAbortRequest,
-    current_user: User = Depends(get_current_approved_user)
-):
-    """Abort multipart upload session."""
-    s3_service.abort_multipart_upload(s3_key=req.s3_key, upload_id=req.upload_id)
-    return {"status": "aborted"}
 
 TEMP_CHUNKS_DIR = Path(__file__).resolve().parent.parent.parent / "storage_data" / "temp_chunks"
 TEMP_CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _chunk_session_dir(upload_id) -> Path:
+    """
+    The directory holding one upload's parts, named by an id this server issued.
+
+    `upload_id` arrives from the client and used to be joined to the temporary
+    directory exactly as it came. An id of `../../..` names a directory
+    somewhere else entirely — and this path is handed to `shutil.rmtree` when
+    an upload is abandoned, so a single request could have deleted any
+    directory the server can write to. Every id this server issues is a UUID,
+    so anything that is not one is refused before it can name anything at all.
+    """
+    try:
+        canonical = str(uuid.UUID(str(upload_id)))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="업로드 세션을 찾을 수 없습니다.")
+    return TEMP_CHUNKS_DIR / canonical
+
+
+def _require_chunk_session_owner(meta: dict, current_user: User) -> None:
+    """
+    An upload session belongs to whoever started it.
+
+    The id is unguessable, which is not the same as private: it travels in
+    request bodies and logs. Nobody else may add parts to someone's upload,
+    finish it, or abandon it — which would also hand back a quota reservation
+    made against another account. Sessions started before this was recorded
+    have nobody to compare against and are left alone; they expire within
+    hours.
+    """
+    started_by = meta.get("uploaded_by")
+    if not started_by or current_user.is_superadmin:
+        return
+    if str(current_user.id) != started_by:
+        raise HTTPException(status_code=404, detail="업로드 세션을 찾을 수 없습니다.")
 
 
 def _read_chunk_session_meta(session_dir: Path) -> Optional[dict]:
@@ -713,7 +585,7 @@ async def init_chunk_upload(
         raise
 
     upload_id = str(uuid.uuid4())
-    session_dir = TEMP_CHUNKS_DIR / upload_id
+    session_dir = _chunk_session_dir(upload_id)
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "meta.json").write_text(json.dumps({
         "s3_key": s3_key,
@@ -724,6 +596,7 @@ async def init_chunk_upload(
         "folder_id": str(req.folder_id) if req.folder_id else None,
         "mime_type": req.content_type,
         "owner_id": str(owner.id),
+        "uploaded_by": str(current_user.id),
         "reserved_bytes": req.size_bytes,
         "bytes_by_part": {},
     }))
@@ -749,10 +622,11 @@ async def upload_chunk_part(
     """Stream an individual chunk part (5MB) directly into the session's MinIO
     multipart upload — never touches local disk, so completion doesn't need to
     re-upload the whole file (see /chunk/init)."""
-    session_dir = TEMP_CHUNKS_DIR / upload_id
+    session_dir = _chunk_session_dir(upload_id)
     meta = _read_chunk_session_meta(session_dir)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload session expired or not found")
+    _require_chunk_session_owner(meta, current_user)
 
     chunk_bytes = await chunk.read()
 
@@ -858,10 +732,11 @@ async def complete_chunk_upload(
     # being asked to land.
     await access_service.require_write_at(db, current_user, req.workspace_id, req.folder_id)
 
-    session_dir = TEMP_CHUNKS_DIR / req.upload_id
+    session_dir = _chunk_session_dir(req.upload_id)
     meta = _read_chunk_session_meta(session_dir)
     if not meta:
         raise HTTPException(status_code=404, detail="Upload session not found")
+    _require_chunk_session_owner(meta, current_user)
 
     s3_key = meta["s3_key"]
     file_uuid = uuid.UUID(s3_key.split("/")[1])
@@ -1037,9 +912,10 @@ async def abort_chunk_upload(
     """Abort a chunked upload: cancels the MinIO multipart upload (discarding
     any parts already streamed to it), releases its quota reservation, and
     removes the local session."""
-    session_dir = TEMP_CHUNKS_DIR / req.upload_id
+    session_dir = _chunk_session_dir(req.upload_id)
     if session_dir.exists():
         meta = _read_chunk_session_meta(session_dir)
+        _require_chunk_session_owner(meta or {}, current_user)
         _abort_chunk_session(session_dir)
         if meta:
             await quota_service.release_reservation(db, meta.get("owner_id"), meta.get("reserved_bytes", 0))
@@ -1203,6 +1079,43 @@ def get_media_mime_type(filename: str, stored_mime: Optional[str] = None) -> str
     if name_lower.endswith(".txt"): return "text/plain; charset=utf-8"
     return stored_mime or "application/octet-stream"
 
+# What a browser is allowed to *interpret* when it previews a file.
+#
+# A preview is served from this app's own origin, where the session token
+# lives in localStorage. Anything the browser executes there is executing as
+# the person looking at it. The stored MIME type comes from whoever uploaded
+# the file, so "text/html" was enough: upload a page, wait for a colleague to
+# open it, and it ran with their session. Pictures, sound, video and PDFs are
+# handed over as they are; text of every kind is shown as text and never as
+# markup; anything else is downloaded rather than opened.
+_INLINE_MEDIA_PREFIXES = ("image/", "video/", "audio/")
+_INLINE_MEDIA_TYPES = {"application/pdf"}
+_AS_PLAIN_TEXT_PREFIXES = ("text/",)
+_AS_PLAIN_TEXT_TYPES = {
+    "application/json", "application/xml", "application/javascript",
+    "application/x-yaml", "application/toml", "application/sql",
+}
+
+
+def _preview_serving(filename: str, stored_mime: Optional[str]) -> tuple:
+    """(media type, disposition) for showing this file in a browser."""
+    mime = get_media_mime_type(filename, stored_mime)
+    base = mime.split(";")[0].strip().lower()
+    if base == "image/svg+xml":
+        # Sanitised before it is sent — see the SVG branch in preview_file.
+        return mime, "inline"
+    if base.startswith(_INLINE_MEDIA_PREFIXES) or base in _INLINE_MEDIA_TYPES:
+        return mime, "inline"
+    if base.startswith(_AS_PLAIN_TEXT_PREFIXES) or base in _AS_PLAIN_TEXT_TYPES:
+        return "text/plain; charset=utf-8", "inline"
+    return "application/octet-stream", "attachment"
+
+
+# Sent with everything served out of storage. Without it a browser is free to
+# decide for itself that a file called .txt is really HTML, and run it.
+_NO_SNIFF = {"X-Content-Type-Options": "nosniff"}
+
+
 @router.get("/preview/{file_id}")
 async def preview_file(
     file_id: uuid.UUID,
@@ -1220,7 +1133,7 @@ async def preview_file(
     if not file_item or not file_item.s3_key:
         raise HTTPException(status_code=404, detail="File or storage key not found")
 
-    mime_type = get_media_mime_type(file_item.name, file_item.mime_type)
+    mime_type, disposition = _preview_serving(file_item.name, file_item.mime_type)
     safe_name = urllib.parse.quote(file_item.name)
     is_svg = mime_type == "image/svg+xml"
 
@@ -1245,8 +1158,9 @@ async def preview_file(
                     "Content-Range": f"bytes {start}-{end}/{file_item.size_bytes}",
                     "Accept-Ranges": "bytes",
                     "Content-Length": str(end - start + 1),
-                    "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
-                    "Cache-Control": "public, max-age=3600"
+                    "Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}",
+                    "Cache-Control": "public, max-age=3600",
+                    **_NO_SNIFF,
                 },
                 media_type=mime_type
             )
@@ -1259,9 +1173,10 @@ async def preview_file(
                 "Content-Range": res["content_range"] or f"bytes 0-{len(res['body'])-1}/{file_item.size_bytes}",
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(len(res["body"])),
-                "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
+                "Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}",
                 "Content-Type": mime_type,
-                "Cache-Control": "public, max-age=3600"
+                "Cache-Control": "public, max-age=3600",
+                **_NO_SNIFF,
             }
             return Response(
                 content=res["body"],
@@ -1294,7 +1209,8 @@ async def preview_file(
                 "Content-Type": mime_type,
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(len(raw_bytes)),
-                "Cache-Control": "public, max-age=3600"
+                "Cache-Control": "public, max-age=3600",
+                **_NO_SNIFF,
             },
             media_type=mime_type
         )
@@ -1309,10 +1225,11 @@ async def preview_file(
         _stream_s3_object(file_item.s3_key),
         status_code=status.HTTP_200_OK,
         headers={
-            "Content-Disposition": f"inline; filename*=UTF-8''{safe_name}",
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_item.size_bytes) if file_item.size_bytes else "",
-            "Cache-Control": "public, max-age=3600"
+            "Cache-Control": "public, max-age=3600",
+            **_NO_SNIFF,
         },
         media_type=mime_type
     )
@@ -1353,7 +1270,8 @@ async def direct_file_download(
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(len(res["body"])),
                 "Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}",
-                "Content-Type": "application/octet-stream"
+                "Content-Type": "application/octet-stream",
+                **_NO_SNIFF,
             }
             return Response(
                 content=res["body"],
@@ -1370,7 +1288,8 @@ async def direct_file_download(
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}",
             "Content-Length": str(file_item.size_bytes) if file_item.size_bytes else "",
-            "Accept-Ranges": "bytes"
+            "Accept-Ranges": "bytes",
+            **_NO_SNIFF,
         },
         media_type="application/octet-stream"
     )

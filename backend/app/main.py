@@ -145,7 +145,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
+    # The interactive docs describe every route, its parameters and its shapes
+    # — a map of the whole surface, handed out before anyone signs in. Useful
+    # while building, nothing but a head start for a stranger in production.
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 # CORS configuration: restricted to the app's own known origins. `allow_origins=["*"]`

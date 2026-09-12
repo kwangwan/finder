@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import uuid
 import re
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
@@ -26,8 +26,40 @@ from app.core.security import (
     hash_password, verify_password,
     get_current_approved_user
 )
+from app.services.login_throttle import login_throttle, login_keys, client_address
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+
+async def signup_was_invited(db: AsyncSession, email: str, invite_token: str | None) -> bool:
+    """
+    Whether somebody here asked for this person.
+
+    Anyone can open an account — the sign-up form is on the public internet —
+    and an account that is approved the moment it is made is a member of the
+    shared workspace, which is where everything the company keeps together
+    lives. Approval is what stands between the two, so it is granted to people
+    who were invited (by the link they were sent, or by an invitation already
+    waiting for their address) and asked for otherwise. Capacity is still a
+    separate matter, settled by the quota an administrator gives out.
+    """
+    email = (email or "").lower().strip()
+    if not email:
+        return False
+    if invite_token:
+        res = await db.execute(select(Invitation).where(Invitation.token == invite_token))
+        inv = res.scalar_one_or_none()
+        # The link belongs to the address it was sent to. Without this, one
+        # invitation could open any number of accounts under any address.
+        if inv and inv.status == "pending" and not inv.is_expired and inv.email.lower().strip() == email:
+            return True
+    res = await db.execute(
+        select(Invitation).where(
+            func.lower(Invitation.email) == email,
+            Invitation.status == "pending",
+        )
+    )
+    return any(not inv.is_expired for inv in res.scalars().all())
+
 
 async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token: str | None = None):
     """If a valid invitation token is provided OR if there are pending invitations for this user's email,
@@ -37,7 +69,15 @@ async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token
     if invite_token:
         inv_res = await db.execute(select(Invitation).where(Invitation.token == invite_token))
         inv = inv_res.scalar_one_or_none()
-        if inv and inv.status == "pending" and not inv.is_expired:
+        # An invitation is addressed to somebody. The link reaches them by
+        # email and nothing stops it being passed on, so it is only honoured
+        # for the address it names — otherwise a forwarded link let anyone
+        # into that workspace, and an administrator's invitation approved
+        # whichever account presented it.
+        if (
+            inv and inv.status == "pending" and not inv.is_expired
+            and inv.email.lower().strip() == (user.email or "").lower().strip()
+        ):
             invitations_to_process.append(inv)
     
     # Also find any pending valid invitations matching user's email
@@ -263,7 +303,7 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
         is_superadmin=is_first_user,
         language=normalize_language(req.language),
-        is_approved=True,
+        is_approved=is_first_user or await signup_was_invited(db, email, req.invite_token),
         is_active=True,
         storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
         last_login_at=datetime.now(timezone.utc)
@@ -294,19 +334,35 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
     )
 
 @router.post("/login-password", response_model=TokenResponse)
-async def login_with_password(req: PasswordLoginRequest, db: AsyncSession = Depends(get_db)):
-    """Authenticate test account with Email & Password."""
+async def login_with_password(
+    req: PasswordLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate account with Email & Password."""
     email = req.email.lower().strip()
+    keys = login_keys(email, client_address(request))
+
+    wait = login_throttle.retry_after(*keys)
+    if wait:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(wait)},
+        )
 
     res = await db.execute(select(User).where(User.email == email))
     user = res.scalar_one_or_none()
 
     if not user or not user.hashed_password or not verify_password(req.password, user.hashed_password):
+        login_throttle.record_failure(*keys)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="이메일 또는 비밀번호가 일치하지 않습니다."
         )
 
+    # Whoever just proved they own this account is not the one being kept out.
+    login_throttle.clear(keys[0])
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
@@ -366,7 +422,7 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             google_id=google_profile.get("google_id"),
             is_superadmin=is_first_user,
             language=normalize_language(req.language),
-            is_approved=True,
+            is_approved=is_first_user or await signup_was_invited(db, email, req.invite_token),
             is_active=True,
             storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
             last_login_at=datetime.now(timezone.utc)

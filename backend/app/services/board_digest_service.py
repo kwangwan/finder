@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.models import AppSetting, BoardTask, BoardTaskAssignee, FileItem, User, Workspace
+from app.models import AppSetting, BoardTask, BoardTaskAssignee, FileItem, User, Workspace, WorkspaceMember
 from app.models.board import BOARD_FILE_TYPE, DONE_STATUS, PRIORITY_LABELS, PRIORITY_RANK
 from app.services.email_service import email_service
 
@@ -357,6 +357,23 @@ async def collect_for_workspace(db: AsyncSession, workspace_id, config: dict) ->
             )
         )).scalars().all()
     }
+
+    # Being assigned something is not the same as still being here. Taking
+    # somebody out of a workspace does not go through their old assignments,
+    # so without this they would keep receiving the names of that team's work
+    # by email, indefinitely. Everyone approved belongs to the shared
+    # workspace, so there is nobody to exclude there.
+    workspace = await db.get(Workspace, workspace_id)
+    if not (workspace and workspace.is_shared):
+        member_ids = {
+            row[0] for row in (await db.execute(
+                select(WorkspaceMember.user_id).where(WorkspaceMember.workspace_id == workspace_id)
+            )).all()
+        }
+        users = {
+            uid: user for uid, user in users.items()
+            if uid in member_ids or user.is_superadmin
+        }
 
     per_user = {}
     for task, board in rows:

@@ -3,6 +3,8 @@ import threading
 import zipfile
 from typing import List, Optional, Tuple
 
+from app.services.name_rules import safe_archive_path
+
 from app.services.s3_service import s3_service
 
 
@@ -15,6 +17,7 @@ def dedupe_archive_paths(paths: List[str]) -> List[str]:
     etc., checked against every path already produced so a disambiguated name
     can never itself collide with something else in the archive.
     """
+    paths = [safe_archive_path(p) for p in paths]
     used = set(paths)
     seen_count = {}
     result = []

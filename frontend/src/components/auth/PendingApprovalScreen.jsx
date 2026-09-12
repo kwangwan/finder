@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { Clock, ShieldAlert, RefreshCw, LogOut, CheckCircle, Copy, Terminal } from '../../utils/icons';
+import { Clock, RefreshCw, LogOut } from '../../utils/icons';
 import { getMe, logout } from '../../api';
 
 export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
   const [isChecking, setIsChecking] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const checkStatus = async () => {
     setIsChecking(true);
@@ -18,14 +17,6 @@ export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
     } finally {
       setIsChecking(false);
     }
-  };
-
-  const sqlQuery = `UPDATE kb_users SET is_approved = true WHERE email = '${user?.email}';`;
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(sqlQuery);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -94,44 +85,13 @@ export default function PendingApprovalScreen({ user, onApproved, onLogout }) {
           </div>
         </div>
 
-        {/* SQL Manual Approval Guide for Administrator */}
-        <div style={{
-          background: 'rgba(0, 0, 0, 0.3)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)',
-          padding: '1rem',
-          textAlign: 'left',
-          marginBottom: '1.5rem',
-          fontSize: '0.78rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: 'var(--accent-cyan)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Terminal size={14} /> 관리자용 계정 승인 DB 쿼리:
-            </span>
-            <button 
-              className="btn-icon" 
-              onClick={handleCopySql} 
-              title="쿼리 복사"
-              style={{ fontSize: '0.72rem', padding: '0.2rem 0.4rem' }}
-            >
-              {copied ? <CheckCircle size={14} color="var(--accent-emerald)" /> : <Copy size={14} />}
-            </button>
-          </div>
-          <code style={{
-            display: 'block',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--text-secondary)',
-            wordBreak: 'break-all',
-            background: 'var(--bg-primary)',
-            padding: '0.5rem',
-            borderRadius: 'var(--radius-sm)'
-          }}>
-            {sqlQuery}
-          </code>
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
-            * 최고 관리자는 웹 UI의 <strong>[관리자 콘솔 &gt; 사용자 관리]</strong>에서도 원클릭으로 승인할 수 있습니다.
-          </div>
-        </div>
+        {/* What happens next, said to the person waiting — not to whoever
+            built this. The panel here used to print the SQL statement that
+            approves an account, with a copy button, to anybody who had just
+            signed up: the table, the column, and the exact thing to ask for. */}
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+          관리자가 승인하면 바로 이용하실 수 있습니다. 승인되었다면 아래에서 다시 확인해 주세요.
+        </p>
 
         {/* Buttons */}
         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>

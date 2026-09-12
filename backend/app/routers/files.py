@@ -35,6 +35,7 @@ from app.services.quota_service import quota_service
 from app.services.deletion_service import deletion_service
 from app.services.zip_stream_service import stream_zip, dedupe_archive_paths
 from app.core.config import settings
+from app.services.name_rules import validate_item_name
 
 router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
 
@@ -717,7 +718,10 @@ async def create_markdown_note(
             raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
         await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
 
-    name = req.name.strip()
+    try:
+        name = validate_item_name(req.name, "문서 이름")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     display_name = name
     content_bytes = len(req.content.encode("utf-8"))
     await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, content_bytes, name)
@@ -974,6 +978,14 @@ async def put_collab_state(
     file_item = await db.get(FileItem, file_id)
     if not file_item or file_item.is_trashed:
         raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    # Asked first, and separately: whether somebody may *change* something
+    # only means anything once they are allowed to see it at all. Outside the
+    # shared workspace the write check answers yes to everyone, so without
+    # this a document in a workspace the caller has never been a member of
+    # could have had its editing room written over — and the sync server
+    # opens the next session from that room.
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
     state = await request.body()
@@ -1134,11 +1146,16 @@ async def create_file_metadata(
     await access_service.require_write_at(db, current_user, workspace_id, req.folder_id)
     await shared_policy_service.enforce_upload_rules(db, current_user, workspace_id, req.size_bytes or 0, req.name)
 
+    try:
+        metadata_name = validate_item_name(req.name, "파일 이름")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     file_item = FileItem(
         folder_id=req.folder_id,
         workspace_id=workspace_id,
         created_by=current_user.id,
-        name=req.name,
+        name=metadata_name,
         file_type=req.file_type,
         mime_type=req.mime_type,
         size_bytes=req.size_bytes,
@@ -1214,7 +1231,10 @@ async def rename_file(
         raise HTTPException(status_code=404, detail="File not found")
     await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
 
-    file_item.name = req.name.strip()
+    try:
+        file_item.name = validate_item_name(req.name, "파일 이름")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await link_service.rename_owning_task(db, file_item)
     await db.commit()
     await db.refresh(file_item)
