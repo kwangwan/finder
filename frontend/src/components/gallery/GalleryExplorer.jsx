@@ -14,7 +14,7 @@ import GalleryMap from './GalleryMap';
 import TimelineRail from './TimelineRail';
 import GalleryPlacePanel from './GalleryPlacePanel';
 import { Dropdown, Popover } from '../board/controls';
-import { ChevronDown } from '../../utils/icons';
+import { ChevronDown, SlidersHorizontal, Info } from '../../utils/icons';
 
 /**
  * 갤러리 — the whole library, by when and by where.
@@ -92,6 +92,22 @@ function MultiPick({ label, allLabel, options, values, onChange }) {
 }
 
 const PAGE_SIZE = 80;
+
+/** Whether this is a screen with no room to lay things side by side. */
+function useNarrow(query = '(max-width: 900px)') {
+  const [narrow, setNarrow] = useState(() => {
+    try { return window.matchMedia(query).matches; } catch (e) { return false; }
+  });
+  useEffect(() => {
+    let media;
+    try { media = window.matchMedia(query); } catch (e) { return undefined; }
+    const listen = () => setNarrow(media.matches);
+    listen();
+    media.addEventListener('change', listen);
+    return () => media.removeEventListener('change', listen);
+  }, [query]);
+  return narrow;
+}
 
 function useDebounced(value, delay = 320) {
   const [settled, setSettled] = useState(value);
@@ -197,6 +213,12 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [showPath, setShowPath] = useState(false);
   const [path, setPath] = useState(null);
   const [place, setPlace] = useState(null);
+
+  const narrow = useNarrow();
+  // On a narrow screen the counts and the filters each live behind a button:
+  // one to ask what is here, one to narrow it.
+  const [showFacts, setShowFacts] = useState(false);
+  const [filterSheet, setFilterSheet] = useState(false);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({
@@ -509,6 +531,82 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const uploaderName = uploader ? uploaders.find((p) => p.id === uploader)?.name : null;
   const placed = summary?.placed_count || 0;
 
+  const activeFilters = [q, kind !== 'all', uploader, camera.length, hasPlace]
+    .filter(Boolean).length;
+
+  const clearFilters = () => {
+    setYear(null); setMonth(null); setQueryText(''); setKind('all');
+    setUploader(''); setCamera([]); setHasPlace('');
+  };
+
+  const filterControls = (
+    <>
+            <div className="gal-search">
+              <Search size={14} />
+              <input
+                value={queryText}
+                onChange={(e) => setQueryText(e.target.value)}
+                placeholder="파일 이름으로 찾기"
+                aria-label="갤러리 검색"
+              />
+              {queryText && (
+                <button type="button" onClick={() => setQueryText('')} title="지우기"><X size={13} /></button>
+              )}
+            </div>
+
+            <div className="gal-seg" role="group" aria-label="종류">
+              <button type="button" className={kind === 'all' ? 'is-on' : ''} onClick={() => setKind('all')}>전체</button>
+              <button type="button" className={kind === 'image' ? 'is-on' : ''} onClick={() => setKind('image')} title="사진만">
+                <ImageIcon size={13} />
+              </button>
+              <button type="button" className={kind === 'video' ? 'is-on' : ''} onClick={() => setKind('video')} title="영상만">
+                <Film size={13} />
+              </button>
+            </div>
+
+            {uploaders.length > 1 && (
+              <Dropdown
+                value={uploader}
+                label="올린 사람으로 거르기"
+                options={[
+                  { value: '', label: `올린 사람 전체` },
+                  ...uploaders.map((person, index) => ({
+                    value: person.id,
+                    label: `${person.name}${index === 0 ? ' (나)' : ''} · ${person.count.toLocaleString()}`,
+                  })),
+                ]}
+                onChange={(value) => { setUploader(value); setPlace(null); }}
+              />
+            )}
+
+            {cameras.length > 1 && (
+              <MultiPick
+                label="카메라"
+                allLabel="카메라 전체"
+                values={camera}
+                options={cameras.map((c) => ({
+                  value: c.name,
+                  short: c.name,
+                  label: `${c.name} · ${c.count.toLocaleString()}`,
+                }))}
+                onChange={(next) => { setCamera(next); setPlace(null); }}
+              />
+            )}
+
+            <Dropdown
+              value={hasPlace}
+              label="위치로 거르기"
+              options={[
+                { value: '', label: '위치 상관없이' },
+                { value: 'yes', label: '지도에 있는 것' },
+                { value: 'no', label: '위치 없는 것' },
+              ]}
+              onChange={(value) => { setHasPlace(value); setPlace(null); }}
+            />
+
+    </>
+  );
+
   return (
     <main className="gal-root">
       <header className="gal-head">
@@ -517,8 +615,19 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             <ImageIcon size={18} color="var(--accent-primary)" />
             <h1>갤러리</h1>
             {summary && <span className="gal-head-count">{summary.total_count.toLocaleString()}개</span>}
+            {narrow && summary && (
+              <button
+                type="button"
+                className={`gal-facts-open ${showFacts ? 'is-on' : ''}`}
+                aria-expanded={showFacts}
+                aria-label="이 갤러리에 무엇이 얼마나 있는지"
+                onClick={() => setShowFacts((v) => !v)}
+              >
+                <Info size={14} />
+              </button>
+            )}
           </div>
-          <p>
+          <p className={narrow && !showFacts ? 'is-folded' : ''}>
             {workspaceName && <span className="gal-ws">{workspaceName}</span>}
             {summary ? (
               <>
@@ -555,70 +664,21 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
           </p>
         </div>
 
+        {/* On a phone the whole row would not fit, and sliding it sideways is a
+            gesture nobody discovers. Only the two views stay out — they are what
+            the page is switched between — and everything that narrows the library
+            goes behind one button that says how many narrowings are on. */}
         <div className="gal-tools">
-          <div className="gal-search">
-            <Search size={14} />
-            <input
-              value={queryText}
-              onChange={(e) => setQueryText(e.target.value)}
-              placeholder="파일 이름으로 찾기"
-              aria-label="갤러리 검색"
-            />
-            {queryText && (
-              <button type="button" onClick={() => setQueryText('')} title="지우기"><X size={13} /></button>
-            )}
-          </div>
-
-          <div className="gal-seg" role="group" aria-label="종류">
-            <button type="button" className={kind === 'all' ? 'is-on' : ''} onClick={() => setKind('all')}>전체</button>
-            <button type="button" className={kind === 'image' ? 'is-on' : ''} onClick={() => setKind('image')} title="사진만">
-              <ImageIcon size={13} />
+          {narrow ? (
+            <button
+              type="button"
+              className={`gal-filter-open ${activeFilters ? "is-set" : ""}`}
+              onClick={() => setFilterSheet(true)}
+            >
+              <SlidersHorizontal size={13} />
+              <span>거르기{activeFilters ? ` ${activeFilters}` : ""}</span>
             </button>
-            <button type="button" className={kind === 'video' ? 'is-on' : ''} onClick={() => setKind('video')} title="영상만">
-              <Film size={13} />
-            </button>
-          </div>
-
-          {uploaders.length > 1 && (
-            <Dropdown
-              value={uploader}
-              label="올린 사람으로 거르기"
-              options={[
-                { value: '', label: `올린 사람 전체` },
-                ...uploaders.map((person, index) => ({
-                  value: person.id,
-                  label: `${person.name}${index === 0 ? ' (나)' : ''} · ${person.count.toLocaleString()}`,
-                })),
-              ]}
-              onChange={(value) => { setUploader(value); setPlace(null); }}
-            />
-          )}
-
-          {cameras.length > 1 && (
-            <MultiPick
-              label="카메라"
-              allLabel="카메라 전체"
-              values={camera}
-              options={cameras.map((c) => ({
-                value: c.name,
-                short: c.name,
-                label: `${c.name} · ${c.count.toLocaleString()}`,
-              }))}
-              onChange={(next) => { setCamera(next); setPlace(null); }}
-            />
-          )}
-
-          <Dropdown
-            value={hasPlace}
-            label="위치로 거르기"
-            options={[
-              { value: '', label: '위치 상관없이' },
-              { value: 'yes', label: '지도에 있는 것' },
-              { value: 'no', label: '위치 없는 것' },
-            ]}
-            onChange={(value) => { setHasPlace(value); setPlace(null); }}
-          />
-
+          ) : filterControls}
           <div className="gal-seg" role="group" aria-label="보기 방식">
             <button type="button" className={mode === 'grid' ? 'is-on' : ''} onClick={() => setMode('grid')} title="사진으로 보기">
               <LayoutGrid size={13} />
@@ -626,9 +686,34 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             <button type="button" className={mode === 'map' ? 'is-on' : ''} onClick={() => setMode('map')} title="지도로 보기">
               <MapIcon size={13} />
             </button>
-          </div>
+        </div>
         </div>
       </header>
+
+      {/* Everything that narrows the library, on a screen with no room for it
+          in a row. Closing is the same as applying: the list behind it has
+          already been changing as each one was chosen. */}
+      {narrow && filterSheet && (
+        <div className="gal-sheet-back" onClick={() => setFilterSheet(false)} role="presentation">
+          <div className="gal-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="거르기">
+            <header>
+              <strong>거르기</strong>
+              <button type="button" onClick={() => setFilterSheet(false)} aria-label="닫기">
+                <X size={16} />
+              </button>
+            </header>
+            <div className="gal-sheet-body">{filterControls}</div>
+            <footer>
+              <button type="button" className="gal-sheet-clear" onClick={clearFilters} disabled={!activeFilters}>
+                모두 지우기
+              </button>
+              <button type="button" className="gal-sheet-done" onClick={() => setFilterSheet(false)}>
+                {totalCount.toLocaleString()}개 보기
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {(year || month || q || kind !== 'all' || uploader || camera.length || hasPlace) && (
         <div className="gal-filterbar">
@@ -645,8 +730,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             type="button"
             className="gal-chip-clear"
             onClick={() => {
-              setYear(null); setMonth(null); setQueryText(''); setKind('all');
-              setUploader(''); setCamera([]); setHasPlace('');
+              clearFilters();
             }}
           >
             조건 지우기

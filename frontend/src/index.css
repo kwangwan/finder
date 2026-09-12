@@ -7632,7 +7632,12 @@ input.bd-name:focus {
     padding: 0.5rem 0.75rem;
     order: -1;
   }
+  /* Laid out as a row, each year is only as wide as it needs to be — and
+     "전체" was being given less than that, so it broke across two lines. A
+     label is one word or it is not that label. */
   .gal-rail-year { flex: none; }
+  .gal-rail-year-btn { width: auto; white-space: nowrap; padding: 0.33rem 0.6rem; }
+  .gal-rail-year-btn > * { white-space: nowrap; }
   .gal-rail-months { position: absolute; display: none; }
   /* The panel beside the map has nowhere to be beside anything on a phone, so
      it comes up from the bottom over the map instead of not existing. It used
@@ -7659,6 +7664,113 @@ input.bd-name:focus {
   .gal-body.is-map .maplibregl-ctrl-bottom-right,
   .gal-body.is-map .maplibregl-ctrl-bottom-left { bottom: 45%; }
   .gal-light-nav { width: 44px; height: 44px; }
+}
+
+
+/* ── 좁은 화면의 머리와 거르기 ────────────────────────────────────────── */
+.gal-facts-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.gal-facts-open.is-on { color: var(--accent-primary); background: var(--bg-hover); }
+.gal-head-title p.is-folded { display: none; }
+
+.gal-filter-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.32rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.gal-filter-open.is-set {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.gal-sheet-back {
+  position: fixed;
+  inset: 0;
+  z-index: 9400;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+}
+.gal-sheet {
+  width: 100%;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border-radius: 16px 16px 0 0;
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: 0 -18px 44px -18px rgba(0, 0, 0, 0.7);
+}
+.gal-sheet > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem 0.6rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.gal-sheet > header strong { font-size: 0.9rem; }
+.gal-sheet > header button {
+  border: none; background: none; color: var(--text-muted); cursor: pointer; padding: 0.2rem;
+}
+.gal-sheet-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem 1.1rem;
+  overflow-y: auto;
+}
+/* Each control gets its own line here — a row is what there was no room for. */
+.gal-sheet-body > * { width: 100%; }
+.gal-sheet-body .gal-search { width: 100%; }
+.gal-sheet-body .gal-search input { width: 100%; }
+.gal-sheet-body .ui-dd, .gal-sheet-body .ui-dd-btn { width: 100%; }
+.gal-sheet-body .gal-seg { display: flex; }
+.gal-sheet-body .gal-seg button { flex: 1; }
+.gal-sheet > footer {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem calc(0.9rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border-subtle);
+}
+.gal-sheet-clear {
+  flex: 1;
+  padding: 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.gal-sheet-clear:disabled { opacity: 0.4; cursor: default; }
+.gal-sheet-done {
+  flex: 1.4;
+  padding: 0.6rem;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 /* ── 얼굴 ─────────────────────────────────────────────────────────────────
