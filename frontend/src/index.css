@@ -2937,7 +2937,9 @@ h1, h2, h3, h4, h5, h6,
   white-space: nowrap;
   cursor: pointer;
 }
-.window-menu-pop button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+@media (hover: hover) and (pointer: fine) {
+  .window-menu-pop button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+}
 .window-menu-pop button:disabled { opacity: 0.5; cursor: default; }
 .window-menu-pop button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
@@ -2970,6 +2972,7 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .window-action-btn {
+  -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
   height: 26px;
   border-radius: 7px;
@@ -2997,10 +3000,12 @@ h1, h2, h3, h4, h5, h6,
   justify-content: center;
 }
 
-.window-action-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: var(--border-subtle);
+@media (hover: hover) and (pointer: fine) {
+  .window-action-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-subtle);
+  }
 }
 .window-action-btn:disabled { opacity: 0.45; cursor: default; }
 /* Held open: the button keeps the pressed look for as long as its menu is. */
@@ -3031,6 +3036,7 @@ h1, h2, h3, h4, h5, h6,
 }
 
 .window-control-icon-btn {
+  -webkit-tap-highlight-color: transparent;
   width: 26px;
   height: 24px;
   border-radius: 5px;
@@ -3045,16 +3051,21 @@ h1, h2, h3, h4, h5, h6,
   padding: 0;
 }
 
-.window-control-icon-btn:hover {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-}
+/* A tap is not a hover. Touch keeps :hover on whatever was last touched
+   until something else is, so on a phone every button pressed stayed lit —
+   the window looked like it still had a finger on it. */
+@media (hover: hover) and (pointer: fine) {
+  .window-control-icon-btn:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+  }
 
-.window-control-icon-btn.close-btn:hover {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-}
+  .window-control-icon-btn.close-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
 
+}
 /* Window Body & Viewports */
 .os-window-body {
   flex: 1;
@@ -3151,10 +3162,13 @@ h1, h2, h3, h4, h5, h6,
   cursor: pointer;
 }
 
-.doc-toolbar-btn:hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: var(--border-subtle);
-  background: var(--bg-tertiary);
+@media (hover: hover) and (pointer: fine) {
+  .doc-toolbar-btn:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--border-subtle);
+    background: var(--bg-tertiary);
+  }
+
 }
 
 .doc-toolbar-btn.is-on {
