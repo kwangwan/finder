@@ -7,6 +7,7 @@ import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { Extension } from '@tiptap/core';
 import { Plugin } from 'prosemirror-state';
+import { Fragment, Slice } from 'prosemirror-model';
 import {
   uploadNoteImage,
   ensureMediaToken,
@@ -266,6 +267,107 @@ function createAndroidBeforeInputEnterFix() {
         })
       ];
     }
+  });
+}
+
+/**
+ * A message pasted from Slack arrives as a table, and a table is not what it
+ * is.
+ *
+ * Slack lays the parts of one message — the mention, the text, each link —
+ * into the cells of a single-row table. Pasted into a document that table is
+ * kept, and on a phone its five columns are a few dozen pixels each: every
+ * cell wraps one character to a line and the message cannot be read at all.
+ * ("@channel" came out written vertically down the first column.)
+ *
+ * A table with one row and no header row is not holding rows and columns of
+ * anything; it is holding a layout. Its cells are turned back into what they
+ * are — one paragraph each, keeping whatever they hold, links and bold
+ * included. A table with a header, or with more than one row, is left exactly
+ * as it is: that one really is a table, wherever it came from.
+ *
+ * Done on the slice ProseMirror has already parsed rather than on the
+ * clipboard's HTML: the slice is the same whatever shape the paste arrived in,
+ * and reading `event.clipboardData` is not dependable (it is empty for every
+ * paste that did not come from a real key press, which is also what makes it
+ * untestable).
+ */
+function isLayoutTable(node) {
+  if (node?.type.name !== 'table' || node.childCount !== 1) return false;
+  let hasHeader = false;
+  node.firstChild.forEach((cell) => {
+    if (cell.type.name === 'tableHeader') hasHeader = true;
+  });
+  return !hasHeader;
+}
+
+function paragraphsFromLayoutTable(table, schema) {
+  const blocks = [];
+  table.firstChild.forEach((cell) => {
+    const inline = cell.firstChild;
+    // A layout table is mostly spacing; an empty cell was never content.
+    if (!inline || inline.content.size === 0) return;
+    const paragraph = schema.nodes.paragraph.createAndFill(null, inline.content);
+    const container = paragraph && schema.nodes.blockContainer.createAndFill(null, paragraph);
+    if (container) blocks.push(container);
+  });
+  return blocks;
+}
+
+export function flattenLayoutTables(fragment, schema) {
+  let changed = false;
+  const out = [];
+  fragment.forEach((node) => {
+    if (node.type.name === 'blockGroup') {
+      const inner = flattenLayoutTables(node.content, schema);
+      if (inner) {
+        changed = true;
+        out.push(node.copy(inner));
+      } else {
+        out.push(node);
+      }
+      return;
+    }
+    if (node.type.name === 'blockContainer' && isLayoutTable(node.firstChild)) {
+      const replacements = paragraphsFromLayoutTable(node.firstChild, schema);
+      if (replacements.length) {
+        changed = true;
+        out.push(...replacements);
+        return;
+      }
+    }
+    out.push(node);
+  });
+  return changed ? Fragment.fromArray(out) : null;
+}
+
+export function createLayoutTablePasteFix() {
+  return Extension.create({
+    name: 'finderLayoutTablePasteFix',
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          props: {
+            handlePaste(view, _event, slice) {
+              if (!slice || slice.content.size === 0) return false;
+              const rewritten = flattenLayoutTables(slice.content, view.state.schema);
+              if (!rewritten) return false;
+              // The same depths the paste already had: the structure around
+              // the cells is unchanged, only what sits inside it. Flattening
+              // them to zero made ProseMirror fit the blocks *inside* the
+              // paragraph the caret was in, one level down, instead of beside
+              // it.
+              view.dispatch(
+                view.state.tr
+                  .replaceSelection(new Slice(rewritten, slice.openStart, slice.openEnd))
+                  .scrollIntoView(),
+              );
+              return true;
+            },
+          },
+        }),
+      ];
+    },
   });
 }
 
@@ -850,13 +952,15 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
 
   const androidBeforeInputEnterFixRef = useRef(null);
   if (!androidBeforeInputEnterFixRef.current) androidBeforeInputEnterFixRef.current = createAndroidBeforeInputEnterFix();
+  const layoutTablePasteFixRef = useRef(null);
+  if (!layoutTablePasteFixRef.current) layoutTablePasteFixRef.current = createLayoutTablePasteFix();
 
   const editor = useCreateBlockNote(
     collab
       ? withCollaboration({
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
-          _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current] },
+          _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current, layoutTablePasteFixRef.current] },
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
             try {
@@ -875,7 +979,11 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
             provider: { awareness: collab.provider.awareness }
           }
         })
-      : { schema: blockNoteSchema, dictionary: blockNoteKo, _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current] } },
+      : {
+          schema: blockNoteSchema,
+          dictionary: blockNoteKo,
+          _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current, layoutTablePasteFixRef.current] },
+        },
     [file?.id, syncUrl, collab]
   );
 
