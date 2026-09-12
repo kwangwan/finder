@@ -7019,19 +7019,35 @@ input.bd-name:focus {
    and everything around them should get out of the way of it. */
 
 .gal-root {
+  /* Everything in the gallery is drawn from these four, so the whole view
+     turns over with the theme instead of carrying a dark room's colours into
+     a light one. Only the photo viewer stays black in both — a photograph
+     being looked at deserves black around it whatever the app is wearing. */
+  --gal-ground: #07090e;
+  --gal-ink: rgba(255, 255, 255, 0.055);
+  --gal-ink-strong: rgba(255, 255, 255, 0.12);
+  --gal-panel: rgba(12, 16, 24, 0.86);
+  --gal-glow: rgba(255, 255, 255, 0.035);
+
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(120% 80% at 50% 0%, rgba(255, 255, 255, 0.035), transparent 60%),
-    var(--gal-ground, #07090e);
+    radial-gradient(120% 80% at 50% 0%, var(--gal-glow), transparent 60%),
+    var(--gal-ground);
   color: var(--text-primary);
   overflow: hidden;
 }
 
-:root[data-theme="light"] .gal-root,
-.light-theme .gal-root { --gal-ground: #f3f4f7; }
+[data-theme="light"] .gal-root {
+  --gal-ground: #f4f5f8;
+  --gal-cluster-ring: rgba(15, 23, 42, 0.35);
+  --gal-ink: rgba(15, 23, 42, 0.055);
+  --gal-ink-strong: rgba(15, 23, 42, 0.11);
+  --gal-panel: rgba(255, 255, 255, 0.94);
+  --gal-glow: rgba(15, 23, 42, 0.03);
+}
 
 .gal-head {
   display: flex;
@@ -7058,7 +7074,7 @@ input.bd-name:focus {
 .gal-head-count {
   font-size: 0.72rem;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--gal-ink);
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   font-variant-numeric: tabular-nums;
@@ -7087,14 +7103,14 @@ input.bd-name:focus {
   gap: 0.45rem;
   padding: 0.42rem 0.7rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--gal-ink);
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .gal-search:focus-within {
   border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--gal-ink-strong);
 }
 .gal-search input {
   border: none;
@@ -7112,7 +7128,7 @@ input.bd-name:focus {
 .gal-seg {
   display: flex;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--gal-ink);
   border: 1px solid var(--border-subtle);
   overflow: hidden;
 }
@@ -7127,10 +7143,16 @@ input.bd-name:focus {
   align-items: center;
   transition: color 0.15s ease, background 0.15s ease;
 }
-.gal-seg button:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+.gal-seg button:hover { color: var(--text-primary); background: var(--gal-ink-strong); }
 .gal-seg button.is-on {
   background: color-mix(in srgb, var(--accent-primary) 22%, transparent);
   color: var(--text-primary);
+}
+/* After .is-on, so hovering the one already chosen still answers. */
+.gal-seg button:hover,
+.gal-seg button.is-on:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 34%, var(--gal-ink-strong));
 }
 
 .gal-filterbar {
@@ -7184,7 +7206,7 @@ input.bd-name:focus {
   border-radius: 3px;
   overflow: hidden;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--gal-ink);
   flex: none;
   transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.5s ease;
 }
@@ -7227,6 +7249,7 @@ input.bd-name:focus {
   gap: 0.4rem;
   padding: 1.6rem 0.6rem 0.45rem;
   font-size: 0.68rem;
+  /* Over a photograph in either theme, so this one stays light-on-dark. */
   color: rgba(255, 255, 255, 0.92);
   background: linear-gradient(to top, rgba(0, 0, 0, 0.62), transparent);
   opacity: 0;
@@ -7264,8 +7287,11 @@ input.bd-name:focus {
   font-size: 0.74rem; color: var(--text-muted);
   border-radius: 6px;
 }
-.gal-rail-all:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.05); }
-.gal-rail-all.is-on { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+/* Stronger than the selected state, so hovering the one already chosen
+   still answers. */
+.gal-rail-all:hover,
+.gal-rail-all.is-on:hover { color: var(--text-primary); background: var(--gal-ink-strong); }
+.gal-rail-all.is-on { color: var(--text-primary); background: var(--gal-ink); }
 
 .gal-rail-year-btn {
   position: relative;
@@ -7286,18 +7312,32 @@ input.bd-name:focus {
 .gal-rail-bar {
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--gal-ink);
   border-radius: 6px;
   transition: width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.2s ease;
 }
 .gal-rail-year.is-open .gal-rail-bar {
   background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
 }
-.gal-rail-year-btn:hover .gal-rail-bar { background: rgba(255, 255, 255, 0.1); }
+.gal-rail-year-btn:hover .gal-rail-bar { background: var(--gal-ink-strong); }
 .gal-rail-year-label { position: relative; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
 .gal-rail-year-count { position: relative; font-size: 0.68rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .gal-rail-year.is-open .gal-rail-year-btn { color: var(--text-primary); font-weight: 600; }
+/* Its own full-width shade on hover. The bar behind a year is as long as
+   that year was busy, so on a quiet year there was almost nothing to light
+   up and the row read as not being a control at all. */
+.gal-rail-year-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: var(--gal-ink-strong);
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+.gal-rail-year-btn:hover::before { opacity: 1; }
 .gal-rail-year-btn:hover { color: var(--text-primary); }
+.gal-rail-year.is-open .gal-rail-year-btn::before { opacity: 0.55; }
 
 .gal-rail-months {
   display: grid;
@@ -7317,7 +7357,10 @@ input.bd-name:focus {
   overflow: hidden;
   transition: color 0.12s ease, transform 0.12s ease;
 }
-.gal-rail-month:hover { transform: translateY(-1px); }
+.gal-rail-month:hover {
+  transform: translateY(-1px);
+  background: var(--gal-ink-strong);
+}
 .gal-rail-month:hover .gal-rail-month-fill { opacity: 0.3 !important; }
 .gal-rail-month-fill {
   position: absolute; inset: 0;
@@ -7351,20 +7394,21 @@ input.bd-name:focus {
   min-width: 0;
   display: flex;
 }
-.gal-map { flex: 1; min-width: 0; height: 100%; background: #05070b; }
+.gal-map { flex: 1; min-width: 0; height: 100%; background: var(--gal-ground); }
 .gal-map .maplibregl-map { font: inherit; }
 
 /* The basemap is a vector style chosen to be quiet (dark / positron), so it
    needs no filtering — and filtering it would take the photographs on the
    markers with it. */
 .gal-map .maplibregl-ctrl-attrib {
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--gal-panel);
   font-size: 0.62rem;
 }
 .gal-map .maplibregl-ctrl-attrib a { color: var(--text-secondary); }
-.gal-map .maplibregl-ctrl-group { background: rgba(12, 16, 24, 0.9); border: 1px solid var(--border-subtle); }
+.gal-map .maplibregl-ctrl-group { background: var(--gal-panel); border: 1px solid var(--border-subtle); }
 .gal-map .maplibregl-ctrl-group button + button { border-top: 1px solid var(--border-subtle); }
 .gal-map .maplibregl-ctrl-group button span { filter: invert(1) opacity(0.75); }
+[data-theme="light"] .gal-map .maplibregl-ctrl-group button span { filter: none; opacity: 0.7; }
 
 .gal-cluster-inner {
   /* The marker element itself carries the press — everything drawn inside it
@@ -7373,15 +7417,15 @@ input.bd-name:focus {
   position: relative;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  background: rgba(10, 13, 20, 0.75);
+  border: 1px solid var(--gal-cluster-ring, rgba(255, 255, 255, 0.5));
+  background: var(--gal-panel);
   box-shadow: 0 8px 22px -8px rgba(0, 0, 0, 0.9);
   cursor: pointer;
   transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .gal-cluster { cursor: pointer; }
 .gal-cluster:hover .gal-cluster-inner { transform: scale(1.08); }
-.gal-cluster-inner.is-large { border-color: rgba(255, 255, 255, 0.9); }
+.gal-cluster-inner.is-large { border-color: var(--gal-cluster-ring, rgba(255, 255, 255, 0.9)); filter: brightness(1.05); }
 .gal-cluster-inner img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .gal-cluster-count {
   /* The dot is the button; its own label must not swallow the press. */
@@ -7623,7 +7667,7 @@ input.bd-name:focus {
   overflow: hidden;
   flex: none;
   border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.16));
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--gal-ink);
 }
 .gal-face-chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gal-face-said { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 0; }
@@ -7634,14 +7678,14 @@ input.bd-name:focus {
   align-items: center;
   gap: 0.3rem;
   border: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--gal-ink);
   color: var(--text-secondary);
   border-radius: 999px;
   padding: 0.38rem 0.8rem;
   font-size: 0.75rem;
   cursor: pointer;
 }
-.gal-face-back:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.09); }
+.gal-face-back:hover { color: var(--text-primary); background: var(--gal-ink-strong); }
 
 .gal-indexing {
   color: var(--accent-primary);
@@ -7668,7 +7712,7 @@ input.bd-name:focus {
   padding: 0.4rem 0.7rem;
   border-radius: 999px;
   border: 1px solid var(--border-subtle);
-  background: rgba(12, 16, 24, 0.86);
+  background: var(--gal-panel);
   color: var(--text-secondary);
   font-size: 0.74rem;
   cursor: pointer;
@@ -7678,12 +7722,12 @@ input.bd-name:focus {
 .gal-map-toggle.is-on {
   color: #fff;
   border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
-  background: color-mix(in srgb, var(--accent-primary) 34%, rgba(12, 16, 24, 0.86));
+  background: color-mix(in srgb, var(--accent-primary) 78%, var(--gal-panel));
 }
 .gal-map-note {
   font-size: 0.7rem;
   color: var(--text-muted);
-  background: rgba(12, 16, 24, 0.8);
+  background: var(--gal-panel);
   border-radius: 999px;
   padding: 0.3rem 0.6rem;
   backdrop-filter: blur(6px);
@@ -7718,7 +7762,7 @@ input.bd-name:focus {
   border-radius: 3px;
   overflow: hidden;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--gal-ink);
 }
 .gal-place-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .gal-place-tile { transition: transform 0.14s ease, box-shadow 0.14s ease; }
@@ -7754,3 +7798,17 @@ input.bd-name:focus {
   opacity: 0.9;
 }
 .gal-light-undated { color: rgba(255, 255, 255, 0.72); }
+
+.gal-chip-who {
+  color: var(--text-secondary);
+  background: var(--gal-ink);
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font-size: 0.72rem;
+}
+/* The gallery toolbar's dropdown sits among pill-shaped controls. */
+.gal-tools .ui-dd-btn {
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.76rem;
+}

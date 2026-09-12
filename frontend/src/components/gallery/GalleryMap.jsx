@@ -101,7 +101,15 @@ export default function GalleryMap({
     map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
     mapRef.current = map;
 
-    map.on('load', () => { setReady(true); report(); });
+    // Ready means "the style is up", which is what everything below needs
+    // before it can add a layer or ask for one. `load` is not reliable for
+    // that on its own: it waits for the first render too, and a map built
+    // into a box that has not been laid out yet can sit there loaded and
+    // never announce it — which left the basemap stuck on whichever theme it
+    // started in, because the effect that swaps it was still waiting.
+    const markReady = () => setReady(true);
+    map.on('styledata', markReady);
+    map.on('load', () => { markReady(); report(); });
     map.on('moveend', report);
     map.on('error', (e) => {
       // A basemap that will not load is worth one line in the console rather

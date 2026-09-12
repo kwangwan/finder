@@ -6,11 +6,13 @@ import {
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
   getFaceMatches, getThumbnailUrl, getFaceIndexStatus, getGalleryPath, getGalleryPlace,
+  listGalleryUploaders,
 } from '../../api';
 import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
 import GalleryMap from './GalleryMap';
 import TimelineRail from './TimelineRail';
+import { Dropdown } from '../board/controls';
 
 /**
  * 갤러리 — the whole library, by when and by where.
@@ -47,10 +49,11 @@ function readUrlState() {
       year: params.get('gyear') ? Number(params.get('gyear')) : null,
       month: params.get('gmonth') ? Number(params.get('gmonth')) : null,
       kind: ['image', 'video'].includes(params.get('gkind')) ? params.get('gkind') : 'all',
+      uploader: params.get('guploader') || '',
       q: params.get('gq') || '',
     };
   } catch (e) {
-    return { mode: 'grid', year: null, month: null, kind: 'all', q: '' };
+    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: '', q: '' };
   }
 }
 
@@ -60,6 +63,8 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [kind, setKind] = useState(initial.kind);
   const [year, setYear] = useState(initial.year);
   const [month, setMonth] = useState(initial.month);
+  const [uploader, setUploader] = useState(initial.uploader);
+  const [uploaders, setUploaders] = useState([]);
   const [queryText, setQueryText] = useState(initial.q);
   const q = useDebounced(queryText);
 
@@ -75,7 +80,12 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [clusters, setClusters] = useState([]);
   const [mapView, setMapView] = useState(null);
   const [focusPoint, setFocusPoint] = useState(null);
-  const [openIndex, setOpenIndex] = useState(-1);
+  // Which photograph is open, by id — so it survives a reload, can be sent
+  // to somebody, and can be closed by the back button.
+  const [openId, setOpenId] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('gphoto') || null; }
+    catch (e) { return null; }
+  });
   // A face search is its own thing, not a filter: it has no year, no month
   // and no map, and leaving it is going back to the library rather than
   // clearing a box. Held beside the ordinary state so that going back does
@@ -89,11 +99,19 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [place, setPlace] = useState(null);
 
   const requestId = useRef(0);
-  const filters = useMemo(() => ({ q, kind, year, month }), [q, kind, year, month]);
+  const filters = useMemo(() => ({ q, kind, year, month, uploader: uploader || null }),
+    [q, kind, year, month, uploader]);
 
   // The address bar carries the view, so a reload — or a link sent to
-  // somebody — comes back to the same year in the same mode.
+  // somebody — comes back to the same year in the same mode. Each change is
+  // pushed rather than replaced, which is what makes the back button walk
+  // back through them; the first write of a session replaces, so arriving at
+  // the gallery does not leave a duplicate entry behind.
+  const wroteUrlRef = useRef(false);
+  const applyingHistoryRef = useRef(false);
+
   useEffect(() => {
+    if (applyingHistoryRef.current) { applyingHistoryRef.current = false; return; }
     try {
       const url = new URL(window.location.href);
       const set = (key, value) => {
@@ -107,10 +125,56 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       set('gyear', year);
       set('gmonth', month);
       set('gkind', kind);
+      set('guploader', uploader);
       set('gq', q);
-      window.history.replaceState({}, '', url);
+      set('gphoto', openId);
+      const first = !wroteUrlRef.current;
+      // Marked before the early return: the first run of this effect happens
+      // on arrival and usually writes nothing, and if that run did not count
+      // as "the first", the viewer's first real choice would replace the
+      // entry they arrived on — and the back button would jump straight out
+      // of the app instead of returning to the library.
+      wroteUrlRef.current = true;
+      if (url.toString() === window.location.href) return;
+      if (first) window.history.replaceState({}, '', url);
+      else window.history.pushState({}, '', url);
     } catch (e) { /* the view still works without the address bar agreeing */ }
-  }, [mode, year, month, kind, q]);
+  }, [mode, year, month, kind, uploader, q, openId]);
+
+  /**
+   * Going back inside the gallery.
+   *
+   * The address already says which year, which mode and which photograph is
+   * open, so stepping back is a matter of reading it — and of not writing it
+   * again on the way, which would push a new entry for the place just left.
+   */
+  useEffect(() => {
+    const onPopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        applyingHistoryRef.current = true;
+        setMode(params.get('gmode') === 'map' ? 'map' : 'grid');
+        setYear(params.get('gyear') ? Number(params.get('gyear')) : null);
+        setMonth(params.get('gmonth') ? Number(params.get('gmonth')) : null);
+        setKind(['image', 'video'].includes(params.get('gkind')) ? params.get('gkind') : 'all');
+        setUploader(params.get('guploader') || '');
+        setQueryText(params.get('gq') || '');
+        setOpenId(params.get('gphoto') || null);
+        setFaceSearch(null);
+      } catch (e) { /* an address we cannot read is left alone */ }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceId) return undefined;
+    let cancelled = false;
+    listGalleryUploaders(workspaceId)
+      .then((data) => { if (!cancelled) setUploaders(data.items || []); })
+      .catch(() => { if (!cancelled) setUploaders([]); });
+    return () => { cancelled = true; };
+  }, [workspaceId]);
 
   // The shape of the library, for the rail and the header. Deliberately not
   // narrowed by year or month: the rail has to keep showing the years you are
@@ -118,11 +182,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
-    getGallerySummary(workspaceId, { q, kind })
+    getGallerySummary(workspaceId, { q, kind, uploader: uploader || null })
       .then((data) => { if (!cancelled) setSummary(data); })
       .catch(() => { if (!cancelled) setSummary(null); });
     return () => { cancelled = true; };
-  }, [workspaceId, q, kind]);
+  }, [workspaceId, q, kind, uploader]);
 
   // How far the face index has got. Asked once on arrival and then every
   // half minute only while it is still behind — a library that has been
@@ -178,7 +242,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   }, [mode, workspaceId, filters, mapView]);
 
   const searchByFace = useCallback(async (face, fromItem) => {
-    setOpenIndex(-1);
+    setOpenId(null);
     setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0, loading: true });
     try {
       const data = await getFaceMatches(workspaceId, face.id, 1, PAGE_SIZE);
@@ -238,16 +302,15 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   }, [isLoadingMore, isLoading, page, totalPages, loadPage]);
 
   const shown = faceSearch ? faceSearch.items : (place && mode === 'map' ? place.items : items);
-  const openAt = (item) => setOpenIndex(shown.findIndex((i) => i.id === item.id));
+  const openIndex = openId ? shown.findIndex((i) => i.id === openId) : -1;
+  const openAt = (item) => setOpenId(item.id);
   const step = (delta) => {
-    setOpenIndex((current) => {
-      const next = current + delta;
-      if (next < 0 || next >= shown.length) return current;
-      // Opening the last few of a page pulls the next one in, so arrowing
-      // through a year never stops at a page boundary.
-      if (next > shown.length - 6) (faceSearch ? loadMoreFaces : loadMore)();
-      return next;
-    });
+    const next = openIndex + delta;
+    if (next < 0 || next >= shown.length) return;
+    // Opening the last few of a page pulls the next one in, so arrowing
+    // through a year never stops at a page boundary.
+    if (next > shown.length - 6) (faceSearch ? loadMoreFaces : loadMore)();
+    setOpenId(shown[next].id);
   };
 
   const download = (item) => {
@@ -262,12 +325,13 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
 
   const showOnMap = (item) => {
     if (item.latitude == null) return;
-    setOpenIndex(-1);
+    setOpenId(null);
     setMode('map');
     setFocusPoint({ latitude: item.latitude, longitude: item.longitude });
   };
 
   const periodLabel = year ? `${year}년${month ? ` ${month}월` : ''}` : '전체 기간';
+  const uploaderName = uploader ? uploaders.find((p) => p.id === uploader)?.name : null;
   const placed = summary?.placed_count || 0;
 
   return (
@@ -340,6 +404,21 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             </button>
           </div>
 
+          {uploaders.length > 1 && (
+            <Dropdown
+              value={uploader}
+              label="올린 사람으로 거르기"
+              options={[
+                { value: '', label: `올린 사람 전체` },
+                ...uploaders.map((person, index) => ({
+                  value: person.id,
+                  label: `${person.name}${index === 0 ? ' (나)' : ''} · ${person.count.toLocaleString()}`,
+                })),
+              ]}
+              onChange={(value) => { setUploader(value); setPlace(null); }}
+            />
+          )}
+
           <div className="gal-seg" role="group" aria-label="보기 방식">
             <button type="button" className={mode === 'grid' ? 'is-on' : ''} onClick={() => setMode('grid')} title="사진으로 보기">
               <LayoutGrid size={13} />
@@ -351,14 +430,17 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
         </div>
       </header>
 
-      {(year || month || q || kind !== 'all') && (
+      {(year || month || q || kind !== 'all' || uploader) && (
         <div className="gal-filterbar">
           <span className="gal-chip-label">{periodLabel}</span>
+          {uploaderName && <span className="gal-chip-who">{uploaderName}</span>}
           <span className="gal-chip-count">{totalCount.toLocaleString()}개</span>
           <button
             type="button"
             className="gal-chip-clear"
-            onClick={() => { setYear(null); setMonth(null); setQueryText(''); setKind('all'); }}
+            onClick={() => {
+              setYear(null); setMonth(null); setQueryText(''); setKind('all'); setUploader('');
+            }}
           >
             조건 지우기
           </button>
@@ -394,8 +476,10 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   type="button"
                   className={`gal-map-toggle ${showPath ? 'is-on' : ''}`}
                   onClick={() => setShowPath((v) => !v)}
-                  title={'사진이 찍힌 시간 순서대로 이은 선입니다.\n'
-                    + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}
+                  title={uploaderName
+                    ? `${uploaderName}님이 올린 사진을 찍힌 시간 순서대로 이은 선입니다.`
+                    : '사진이 찍힌 시간 순서대로 이은 선입니다.\n'
+                      + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}
                 >
                   <ArrowRight size={13} />
                   <span>촬영 시간순</span>
@@ -404,7 +488,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   <span className="gal-map-note">
                     사진 {path.total_count.toLocaleString()}장
                     {path.sampled && ` 중 ${path.points.length.toLocaleString()}장`}
-                    {' '}· 찍힌 시간 순서로 이음
+                    {' '}· {uploaderName ? `${uploaderName}님의 사진, ` : ''}찍힌 시간 순서로 이음
                   </span>
                 )}
               </div>
@@ -448,7 +532,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               ) : (
                 <>
                   <div className="gal-map-side-head">
-                    <strong>{periodLabel}</strong>
+                    <strong>{periodLabel}{uploaderName ? ` · ${uploaderName}` : ''}</strong>
                     <span>위치가 남아 있는 {placed.toLocaleString()}개</span>
                   </div>
                   <TimelineRail months={summary?.months} year={year} month={month}
@@ -520,7 +604,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       {openIndex >= 0 && shown[openIndex] && (
         <GalleryLightbox
           item={shown[openIndex]}
-          onClose={() => setOpenIndex(-1)}
+          onClose={() => setOpenId(null)}
           onPrev={() => step(-1)}
           onNext={() => step(1)}
           hasPrev={openIndex > 0}

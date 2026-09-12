@@ -2191,3 +2191,11 @@ export async function getGalleryPlace(workspaceId, latitude, longitude, filters 
   if (!res.ok) throw new Error('이 장소의 사진을 불러오지 못했습니다.');
   return res.json();
 }
+
+export async function listGalleryUploaders(workspaceId) {
+  const res = await apiFetch(`${API_BASE}/gallery/uploaders?${galleryParams(workspaceId)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('올린 사람 목록을 불러오지 못했습니다.');
+  return res.json();
+}

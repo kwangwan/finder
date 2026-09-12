@@ -199,7 +199,18 @@ export default function App() {
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
   const [isCreateWorkspaceMode, setIsCreateWorkspaceMode] = useState(false);
 
-  const updateUrlParams = useCallback(({ wsId, folderId, view, sortBy, sortOrder, page, pageSize }) => {
+  /**
+   * The address bar, kept in step with what is on screen.
+   *
+   * `push` marks the changes a person would call navigation — opening a
+   * folder, switching to another view, changing workspace — so that the back
+   * button walks back through them instead of leaving the app entirely.
+   * Everything else (restoring state on load, recording a sort or a page)
+   * replaces, because those are not places to come back to.
+   */
+  const updateUrlParams = useCallback(({
+    wsId, folderId, view, sortBy, sortOrder, page, pageSize, push = false,
+  }) => {
     try {
       const url = new URL(window.location.href);
       if (wsId !== undefined) {
@@ -233,7 +244,9 @@ export default function App() {
         if (pageSize && pageSize !== DEFAULT_PAGE_SIZE) url.searchParams.set('size', String(pageSize));
         else url.searchParams.delete('size');
       }
-      window.history.replaceState(null, '', url.toString());
+      if (url.toString() === window.location.href) return;
+      if (push) window.history.pushState(null, '', url.toString());
+      else window.history.replaceState(null, '', url.toString());
     } catch (e) {}
   }, []);
 
@@ -269,6 +282,12 @@ export default function App() {
 
   const activeFolderIdRef = useRef(activeFolderId);
   const activeViewRef = useRef(activeView);
+  // Read by the back-button handler, which is registered once and would
+  // otherwise only ever see the values these had on the first render.
+  const activeWorkspaceRef = useRef(activeWorkspace);
+  const workspacesRef = useRef(workspaces);
+  useEffect(() => { activeWorkspaceRef.current = activeWorkspace; }, [activeWorkspace]);
+  useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   const isInitialFolderRestoredRef = useRef(false);
   const refreshFoldersRequestIdRef = useRef(0);
 
@@ -1186,7 +1205,7 @@ export default function App() {
     setActiveFolderId(null);
     setActiveView('all');
     setCurrentPage(1);
-    updateUrlParams({ wsId: ws?.id || null, folderId: null, view: 'all' });
+    updateUrlParams({ wsId: ws?.id || null, folderId: null, view: 'all', push: true });
   };
 
 
@@ -1573,13 +1592,50 @@ export default function App() {
   const currentFolderPath = activeFolderId ? buildFolderPath(folders, activeFolderId) : [];
   const currentSubfolders = currentFolder ? (currentFolder.children || []) : (activeView === 'all' || activeView === 'folder' ? folders : []);
 
+  /**
+   * The back button, answered.
+   *
+   * Every place this app can be in is already written into the address bar,
+   * so going back is a matter of reading it again rather than of keeping a
+   * second history of our own. Nothing here writes to the address bar — that
+   * would push a new entry for the one just left and the button would appear
+   * not to work.
+   *
+   * The gallery reads its own part of the same address separately (see
+   * GalleryExplorer); the two do not overlap.
+   */
+  useEffect(() => {
+    const onPopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const urlWorkspace = params.get('ws');
+        const urlFolder = params.get('folder');
+        const urlView = params.get('view');
+
+        if (urlWorkspace && urlWorkspace !== activeWorkspaceRef.current?.id) {
+          const found = (workspacesRef.current || []).find((w) => w.id === urlWorkspace);
+          if (found) {
+            setActiveWorkspace(found);
+            localStorage.setItem('kb_active_ws_id', found.id);
+            localStorage.setItem('kb_active_ws_data', JSON.stringify(found));
+          }
+        }
+        setActiveFolderId(urlFolder || null);
+        setActiveView(urlFolder ? 'folder' : (urlView || 'all'));
+        setCurrentPage(Number(params.get('page')) > 1 ? Number(params.get('page')) : 1);
+      } catch (e) { /* an address we cannot read is left alone */ }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   // Folder navigation
   const handleSelectFolder = (folderId) => {
     setActiveFolderId(folderId);
     const newView = folderId ? 'folder' : 'all';
     setActiveView(newView);
     setCurrentPage(1);
-    updateUrlParams({ folderId, view: newView });
+    updateUrlParams({ folderId, view: newView, push: true });
     if (window.innerWidth <= 768) {
       setIsSidebarCollapsed(true);
     }
@@ -1589,7 +1645,7 @@ export default function App() {
     setActiveView(viewName);
     setActiveFolderId(null);
     setCurrentPage(1);
-    updateUrlParams({ folderId: null, view: viewName });
+    updateUrlParams({ folderId: null, view: viewName, push: true });
     if (window.innerWidth <= 768) {
       setIsSidebarCollapsed(true);
     }

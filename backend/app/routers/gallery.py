@@ -83,8 +83,11 @@ def _apply_filters(
     date_to: Optional[str],
     bbox: Optional[str],
     placed_only: bool,
+    uploader: Optional[uuid.UUID] = None,
 ):
     """Everything the caller narrowed the library down by."""
+    if uploader:
+        conditions.append(FileItem.created_by == uploader)
     if q and q.strip():
         needle = f"%{q.strip()}%"
         conditions.append(
@@ -151,6 +154,49 @@ async def _require_member(db: AsyncSession, user: User, workspace_id: uuid.UUID)
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
 
+@router.get("/uploaders")
+async def gallery_uploaders(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Who put photographs in this workspace, and how many each.
+
+    The person asking comes first whether or not they have any — "my photos"
+    is the answer wanted often enough that it should not be hunted for in an
+    alphabetical list. Names and pictures only; the member directory, which
+    carries email addresses, stays administrator-only.
+
+    This exists mostly for one thing: a workspace is filled by several people
+    at once, so a line joining photographs in time order is only one person's
+    day once it is one person's photographs.
+    """
+    await _require_member(db, current_user, workspace_id)
+
+    rows = (await db.execute(
+        select(User, func.count(FileItem.id).label("count"))
+        .join(FileItem, FileItem.created_by == User.id)
+        .where(and_(*_media_conditions(workspace_id, "all")))
+        .group_by(User.id)
+        .order_by(func.count(FileItem.id).desc())
+    )).all()
+
+    def described(user: User, count: int) -> dict:
+        return {
+            "id": str(user.id),
+            "name": (user.username or user.name or user.email),
+            "avatar": user.avatar_url,
+            "count": count,
+        }
+
+    mine = next((r for r in rows if r[0].id == current_user.id), None)
+    others = [described(u, c) for u, c in rows if u.id != current_user.id]
+    return {
+        "items": ([described(mine[0], mine[1])] if mine else [described(current_user, 0)]) + others,
+    }
+
+
 @router.get("/items")
 async def list_gallery_items(
     workspace_id: uuid.UUID,
@@ -162,6 +208,7 @@ async def list_gallery_items(
     date_to: Optional[str] = None,
     bbox: Optional[str] = Query(None, description="south,west,north,east"),
     placed_only: bool = False,
+    uploader: Optional[uuid.UUID] = None,
     sort: str = Query("newest", pattern="^(newest|oldest)$"),
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
@@ -185,6 +232,7 @@ async def list_gallery_items(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
         date_from=date_from, date_to=date_to, bbox=bbox, placed_only=placed_only,
+        uploader=uploader,
     )
 
     total = (await db.execute(
@@ -216,6 +264,7 @@ async def gallery_summary(
     workspace_id: uuid.UUID,
     q: Optional[str] = None,
     kind: str = Query("all", pattern="^(all|image|video)$"),
+    uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
@@ -234,7 +283,7 @@ async def gallery_summary(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=None, month=None,
-        date_from=None, date_to=None, bbox=None, placed_only=False,
+        date_from=None, date_to=None, bbox=None, placed_only=False, uploader=uploader,
     )
 
     local_taken = func.timezone(str(zone), func.coalesce(FileItem.taken_at, FileItem.created_at))
@@ -315,6 +364,7 @@ async def gallery_map(
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
     bbox: Optional[str] = None,
+    uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
@@ -335,7 +385,7 @@ async def gallery_map(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=bbox, placed_only=True,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader,
     )
 
     grid = _grid_size(zoom)
@@ -380,6 +430,7 @@ async def gallery_path(
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
     bbox: Optional[str] = None,
+    uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
     limit: int = Query(1500, ge=2, le=4000),
     db: AsyncSession = Depends(get_db),
@@ -403,7 +454,7 @@ async def gallery_path(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=bbox, placed_only=True,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader,
     )
     taken = func.coalesce(FileItem.taken_at, FileItem.created_at)
 
@@ -446,6 +497,7 @@ async def gallery_place(
     kind: str = Query("all", pattern="^(all|image|video)$"),
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
+    uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
@@ -471,7 +523,7 @@ async def gallery_place(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=None, placed_only=True,
+        date_from=None, date_to=None, bbox=None, placed_only=True, uploader=uploader,
     )
     conditions += [
         FileItem.gps_latitude.between(latitude - lat_span, latitude + lat_span),
