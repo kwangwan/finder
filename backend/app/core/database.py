@@ -1,3 +1,4 @@
+import re
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
@@ -53,6 +54,14 @@ async def init_db():
     """Create all tables in PostgreSQL asynchronously and ensure schema migrations."""
     init_pgvector_and_schema_sync()
     async with engine.begin() as conn:
+        # A schema change that cannot get its lock must give up quickly rather
+        # than queue. Postgres grants locks in order, so an ALTER TABLE waiting
+        # behind one long-running reader puts every query that arrives after it
+        # in the same queue — the table goes quiet, and from outside the app
+        # looks down. Four seconds, then it is logged and skipped; the next
+        # start will try again.
+        await conn.execute(text("SET LOCAL lock_timeout = '4s'"))
+
         from app.models import Folder, FileItem, DocumentChunk, User, Workspace, WorkspaceMember, Invitation
         await conn.run_sync(Base.metadata.create_all)
         
@@ -260,16 +269,55 @@ async def init_db():
                 END $$;
             """)
 
-        # Each statement in a savepoint of its own. They all shared one
-        # transaction before, so the first failure aborted it and every
-        # migration after it — and the CREATE TABLE for any new model — was
-        # silently rolled back.
-        for sql in migrations:
+        # Only the columns that are actually missing.
+        #
+        # ADD COLUMN IF NOT EXISTS reads as free and is not: Postgres takes the
+        # table's exclusive lock to find out there is nothing to do. On a
+        # settled schema that is fifty-odd exclusive locks taken on every single
+        # restart for no change at all — normally instant, and once, during a
+        # deploy that landed mid-sweep, the thing that stopped the app. Asking
+        # the catalogue first costs one query and means an ordinary restart
+        # touches no table at all.
+        existing = {
+            (row[0], row[1])
+            for row in (await conn.execute(text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema()"
+            ))).all()
+        }
+        add_column = re.compile(
+            r"^\s*ALTER TABLE\s+(\w+)\s+ADD COLUMN IF NOT EXISTS\s+(\w+)\b", re.IGNORECASE)
+        drop_column = re.compile(
+            r"^\s*ALTER TABLE\s+(\w+)\s+DROP COLUMN IF EXISTS\s+(\w+)\b", re.IGNORECASE)
+
+        def is_settled(sql: str) -> bool:
+            """Would this statement do nothing but take the table's lock?"""
+            add = add_column.match(sql)
+            if add:
+                return (add.group(1), add.group(2)) in existing
+            drop = drop_column.match(sql)
+            if drop:
+                return (drop.group(1), drop.group(2)) not in existing
+            return False
+
+        async def apply(sql: str, name: str = None):
+            """
+            One statement, in a savepoint of its own.
+
+            Savepoints because these all shared one transaction before, so the
+            first failure aborted it and every migration after it — and the
+            CREATE TABLE for any new model — was silently rolled back.
+            """
+            if is_settled(sql):
+                return
             try:
                 async with conn.begin_nested():
                     await conn.execute(text(sql))
             except Exception as e:
-                print(f"[DB Migration Warning] {e}")
+                print(f"[DB Migration Warning] {name or ''} {e}".strip())
+
+        for sql in migrations:
+            await apply(sql)
 
         # What each document has attached, read out of the document itself.
         # Runs every start: it only ever adds what the content already says,
@@ -332,11 +380,7 @@ async def init_db():
              "WHERE file_type IN ('image','video') AND is_trashed = FALSE "
              "AND faces_scanned_at IS NULL"),
         ):
-            try:
-                async with conn.begin_nested():
-                    await conn.execute(text(ddl))
-            except Exception as e:
-                print(f"[DB Init Warning] Could not apply {name}: {e}")
+            await apply(ddl, f"Could not apply {name}:")
 
         # The gallery reads the same table as everything else but asks it a
         # different question — "this workspace's photos, newest first" and
@@ -359,11 +403,7 @@ async def init_db():
              "WHERE file_type IN ('image','video') AND is_trashed = FALSE "
              "AND gps_latitude IS NOT NULL"),
         ):
-            try:
-                async with conn.begin_nested():
-                    await conn.execute(text(ddl))
-            except Exception as e:
-                print(f"[DB Init Index Warning] Could not create {name}: {e}")
+            await apply(ddl, f"Could not create {name}:")
 
         # Create HNSW index on embeddings if not exists
         try:

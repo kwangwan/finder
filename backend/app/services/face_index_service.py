@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -79,7 +79,14 @@ async def find_faces(file_item: FileItem) -> list:
 
 
 async def record_faces(db: AsyncSession, file_item: FileItem, found: list) -> int:
-    """Write down what was found, replacing anything found before."""
+    """
+    Write down what was found, replacing anything found before.
+
+    The file is marked with a statement rather than by setting the attribute,
+    because the file it is handed has deliberately been detached from the
+    session that read it (see sweep) and an attribute set on a detached row
+    would quietly never be saved.
+    """
     await db.execute(delete(FaceSignature).where(FaceSignature.file_id == file_item.id))
     for face in found:
         db.add(FaceSignature(
@@ -91,7 +98,11 @@ async def record_faces(db: AsyncSession, file_item: FileItem, found: list) -> in
             det_score=face["score"],
             frame_time=face.get("frame_time"),
         ))
-    file_item.faces_scanned_at = datetime.now(timezone.utc)
+    await db.execute(
+        update(FileItem)
+        .where(FileItem.id == file_item.id)
+        .values(faces_scanned_at=datetime.now(timezone.utc))
+    )
     return len(found)
 
 
@@ -118,6 +129,17 @@ async def sweep(batch_size: int = 8, limit: Optional[int] = None, workspace_id=N
 
     Its own sessions, one per batch, so a long sweep never holds a connection
     open for an hour and a failure costs one batch rather than the run.
+
+    Three sessions rather than one, and that division is the point. Choosing a
+    batch is a read; fetching and decoding it takes minutes; writing it down is
+    a write. Done in one session the read's transaction stays open across the
+    whole minute, which means a lock held on the files table for a minute —
+    harmless on its own, but an ALTER TABLE arriving behind it waits, and every
+    query arriving behind *that* waits too, because the lock queue is in order.
+    A deploy during a sweep was enough to take the whole app down that way.
+
+    So the read ends before the slow part begins, and the rows are carried
+    across detached.
     """
     scanned = faces = 0
     started = datetime.now(timezone.utc)
@@ -137,15 +159,21 @@ async def sweep(batch_size: int = 8, limit: Optional[int] = None, workspace_id=N
             batch = (await db.execute(
                 select(FileItem).where(*conditions).order_by(FileItem.file_type, FileItem.id).limit(take)
             )).scalars().all()
-            if not batch:
-                break
+            # Detach first, then end the transaction: expunged rows keep the
+            # values already loaded, which is all the slow part needs.
+            db.expunge_all()
+            await db.rollback()
+        if not batch:
+            break
 
-            # Nearly all of the time here is spent waiting for storage: a
-            # photograph is a few megabytes and finding the faces in it takes
-            # about fifty milliseconds. Fetched several at a time, the sweep
-            # stops being a queue of downloads and becomes what it should be,
-            # which is the decoder working flat out.
-            results = await asyncio.gather(*(find_faces(f) for f in batch))
+        # No session is held here, and that is deliberate — this is the minute.
+        # Nearly all of it is spent waiting for storage: a photograph is a few
+        # megabytes and finding the faces in it takes about fifty milliseconds.
+        # Fetched several at a time, the sweep stops being a queue of downloads
+        # and becomes what it should be, which is the decoder working flat out.
+        results = await asyncio.gather(*(find_faces(f) for f in batch))
+
+        async with AsyncSessionLocal() as db:
             for file_item, found in zip(batch, results):
                 faces += await record_faces(db, file_item, found)
                 scanned += 1
