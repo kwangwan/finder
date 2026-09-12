@@ -53,6 +53,41 @@ const LANGUAGE_FIELD = {
  * rest of the map already uses, to the last one's orange. The same two ends as
  * the start and finish dots, so the line and the dots are saying one thing.
  */
+// No leg shorter than this on screen. An arrowhead is about eighteen pixels
+// wide, so a leg of four cannot carry one — the map drops the arrow rather
+// than draw a blot, and what is left looks like a line with its arrows
+// missing. Merging those legs at the zoom they are being looked at means every
+// leg that *is* drawn has room to say its direction, and zooming in gives the
+// detail back rather than inventing it.
+const MIN_LEG_PX = 30;
+
+/**
+ * The stops, thinned to what this zoom can actually show.
+ *
+ * Only consecutive ones are merged, and the first of a run is the one kept, so
+ * the sequence is never reordered and a return to somewhere already visited
+ * stays its own stop. The last stop is always kept: it is where the journey
+ * ends, and dropping it would shorten the story by one place.
+ */
+function legibleStops(map, stops) {
+  if (stops.length < 3) return stops;
+  const kept = [];
+  let anchor = null;
+  stops.forEach((stop, index) => {
+    const here = map.project([stop.longitude, stop.latitude]);
+    const last = index === stops.length - 1;
+    if (anchor && !last && Math.hypot(here.x - anchor.x, here.y - anchor.y) < MIN_LEG_PX) {
+      const into = kept[kept.length - 1];
+      into.count += stop.count || 1;
+      into.until = stop.until || into.until;
+      return;
+    }
+    anchor = here;
+    kept.push({ ...stop, count: stop.count || 1 });
+  });
+  return kept;
+}
+
 const PATH_RAMP = ['#7ee787', '#8ab4ff', '#ffa657'];
 const ARROW_STEPS = 7;
 
@@ -186,6 +221,7 @@ export default function GalleryMap({
   const styleRef = useRef(theme === 'light' ? 'light' : 'dark');
   const [ready, setReady] = useState(false);
   const [styleEpoch, setStyleEpoch] = useState(0);
+  const [zoomEpoch, setZoomEpoch] = useState(0);
 
   const report = useCallback(() => {
     const map = mapRef.current;
@@ -220,6 +256,9 @@ export default function GalleryMap({
     map.on('styledata', markReady);
     map.on('load', () => { markReady(); report(); });
     map.on('moveend', report);
+    // What a zoom changes for the trail is only how much of it can be read,
+    // which is a redraw and not a request.
+    map.on('zoomend', () => setZoomEpoch((n) => n + 1));
     map.on('error', (e) => {
       // A basemap that will not load is worth one line in the console rather
       // than a silent black rectangle — the photographs still have their
@@ -320,7 +359,7 @@ export default function GalleryMap({
     if (!map || !ready) return;
     ensureArrowImages(map);
 
-    const points = (path || []).filter((p) => p.latitude != null);
+    const points = legibleStops(map, (path || []).filter((p) => p.latitude != null));
     const legs = [];
     for (let i = 0; i < points.length - 1; i += 1) {
       const coordinates = bowedLeg(
@@ -341,7 +380,13 @@ export default function GalleryMap({
       features: points.map((p, index) => ({
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [p.longitude, p.latitude] },
-        properties: { id: p.id, order: index, first: index === 0, last: index === points.length - 1 },
+        properties: {
+          id: p.id,
+          order: index,
+          count: p.count || 1,
+          first: index === 0,
+          last: index === points.length - 1,
+        },
       })),
     };
 
@@ -397,7 +442,12 @@ export default function GalleryMap({
         type: 'circle',
         source: 'gal-stops',
         paint: {
-          'circle-radius': ['case', ['any', ['get', 'first'], ['get', 'last']], 5.5, 3.2],
+          // How long the stop was, as far as the photographs can tell: one
+          // picture and it is a dot, an afternoon's worth and it is a little
+          // wider. Kept to a narrow range — this is a hint, not a chart.
+          'circle-radius': ['case',
+            ['any', ['get', 'first'], ['get', 'last']], 6,
+            ['interpolate', ['linear'], ['get', 'count'], 1, 3.2, 8, 4.2, 40, 5.4]],
           'circle-color': ['case', ['get', 'first'], '#7ee787', ['get', 'last'], '#ffa657', '#8ab4ff'],
           'circle-stroke-width': 1,
           'circle-stroke-color': 'rgba(0,0,0,0.55)',
@@ -411,7 +461,7 @@ export default function GalleryMap({
       map.on('mouseenter', 'gal-stops-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'gal-stops-dot', () => { map.getCanvas().style.cursor = ''; });
     }
-  }, [path, ready, styleEpoch, onPickPathPoint]);
+  }, [path, ready, styleEpoch, zoomEpoch, onPickPathPoint]);
 
   // Asked to show one particular place.
   useEffect(() => {

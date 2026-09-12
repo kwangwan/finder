@@ -14,6 +14,7 @@ thousand markers are neither drawable nor meaningful. The timeline is one
 grouped count over the whole library, which is small enough to hold as a year
 by year picture and is what makes the scrubber possible.
 """
+import math
 import uuid
 from datetime import datetime, timezone as dt_timezone
 from typing import Optional
@@ -440,6 +441,63 @@ async def gallery_map(
     }
 
 
+# Two photographs taken within this of each other, one after the other, are the
+# same stop rather than a move. Roughly a long block: close enough that a
+# courtyard, a restaurant and the street outside it stay one place, far enough
+# that walking to the next street shows up as walking.
+STOP_RADIUS_M = 120.0
+
+# A guard rather than a policy. Nothing in this app is near it; it exists so a
+# library that grew past every expectation degrades into a long answer rather
+# than an unanswerable one.
+MAX_PATH_PHOTOS = 150_000
+
+_METRES_PER_DEGREE = 111_320.0
+
+
+def _stops_along(rows) -> list:
+    """
+    A run of photographs in one spot, gathered into the stop it was.
+
+    The comparison is against where the stop *began*, not against its running
+    average — an average creeps, and a slow walk down a promenade would feed it
+    one photograph at a time and never once exceed the radius, arriving at a
+    single "stop" a kilometre wide. Measured from the anchor, that walk becomes
+    the sequence of stops it actually was.
+    """
+    stops: list[dict] = []
+    anchor = None
+    for row in rows:
+        lat, lon = row.gps_latitude, row.gps_longitude
+        if stops and anchor is not None:
+            dy = (lat - anchor[0]) * _METRES_PER_DEGREE
+            dx = (lon - anchor[1]) * _METRES_PER_DEGREE * math.cos(math.radians(lat))
+            if math.hypot(dx, dy) <= STOP_RADIUS_M:
+                stop = stops[-1]
+                stop["count"] += 1
+                stop["_lat"] += lat
+                stop["_lon"] += lon
+                stop["latitude"] = stop["_lat"] / stop["count"]
+                stop["longitude"] = stop["_lon"] / stop["count"]
+                if row.taken:
+                    stop["until"] = row.taken.isoformat()
+                continue
+        anchor = (lat, lon)
+        stops.append({
+            "id": str(row.id),
+            "latitude": lat,
+            "longitude": lon,
+            "count": 1,
+            "taken_at": row.taken.isoformat() if row.taken else None,
+            "until": row.taken.isoformat() if row.taken else None,
+            "_lat": lat,
+            "_lon": lon,
+        })
+    for stop in stops:
+        stop.pop("_lat", None)
+        stop.pop("_lon", None)
+    return stops
+
 @router.get("/path")
 async def gallery_path(
     workspace_id: uuid.UUID,
@@ -450,7 +508,6 @@ async def gallery_path(
     bbox: Optional[str] = None,
     uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
-    limit: int = Query(1500, ge=2, le=4000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -462,10 +519,20 @@ async def gallery_path(
     which is the only thing they can honestly say about how a trip moved.
     Drawn as a line, that is still enough to see a day going up a coast.
 
-    Returned oldest first, and capped: a year with ten thousand placed photos
-    is a scribble rather than a journey, so beyond the cap the period is
-    sampled evenly rather than truncated — the shape of the whole is kept,
-    which is what this is for.
+    Every photograph counts, and none is skipped. This used to keep fifteen
+    hundred and sample the rest evenly, which quietly broke the one promise the
+    line makes: a leg drawn from the first photograph to the ninth says the
+    trip went straight there, when it had in fact stopped seven times on the
+    way. A drawn sequence that omits places is worse than a dense one.
+
+    What it does instead is collapse rather than sample. Four hundred
+    photographs of one temple over one afternoon are not four hundred moves;
+    they are one stop, and saying so removes the repetition without removing a
+    single place. So consecutive photographs within STOP_RADIUS_M of where the
+    stop began are gathered into that stop, and a photograph beyond it starts
+    the next one — which is also why a return to somewhere already visited is a
+    new stop and not a merge, since what is being collapsed is time spent still,
+    never two visits.
     """
     await _require_member(db, current_user, workspace_id)
     zone = _zone(tz)
@@ -484,24 +551,14 @@ async def gallery_path(
         select(FileItem.id, FileItem.gps_latitude, FileItem.gps_longitude, taken.label("taken"))
         .where(and_(*conditions))
         .order_by(taken.asc(), FileItem.id.asc())
+        .limit(MAX_PATH_PHOTOS)
     )).all()
 
-    if total > limit:
-        step = total / limit
-        rows = [rows[int(i * step)] for i in range(limit)]
-
     return {
-        "points": [
-            {
-                "id": str(r.id),
-                "latitude": r.gps_latitude,
-                "longitude": r.gps_longitude,
-                "taken_at": r.taken.isoformat() if r.taken else None,
-            }
-            for r in rows
-        ],
+        "points": _stops_along(rows),
         "total_count": total,
-        "sampled": total > limit,
+        "counted": len(rows),
+        "stop_radius_m": STOP_RADIUS_M,
     }
 
 

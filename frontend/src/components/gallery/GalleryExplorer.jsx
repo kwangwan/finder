@@ -565,6 +565,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                     ? `${uploaderName}님이 올린 사진을 찍힌 시간 순서대로 이은 선입니다.`
                     : '사진이 찍힌 시간 순서대로 이은 선입니다.\n'
                       + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}\n`
+                    + '한자리에서 이어 찍은 사진은 한 지점으로 묶습니다. 빠지는 사진은 없습니다.\n'
                     + '화살표는 다음 사진으로 향하고, 색은 처음의 초록에서 마지막의 주황으로 옮겨갑니다.\n'
                     + '같은 길을 오갔다면 갈 때와 올 때의 선이 겹치지 않도록 서로 반대로 휘어 그려집니다.'}
                 >
@@ -573,10 +574,10 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 </button>
                 {showPath && path && (
                   <span className="gal-map-note">
-                    사진 {path.total_count.toLocaleString()}장
-                    {path.sampled && ` 중 ${path.points.length.toLocaleString()}장`}
-                    {' '}· {uploaderName ? `${uploaderName}님의 사진, ` : ''}찍힌 시간 순서로 이음
-                    {' '}· 화살표가 다음 사진 방향
+                    {uploaderName ? `${uploaderName}님의 사진 ` : '사진 '}
+                    {path.total_count.toLocaleString()}장
+                    {' '}· 머문 자리 {path.points.length.toLocaleString()}곳
+                    {' '}· 찍힌 시간 순서, 화살표가 다음 방향
                   </span>
                 )}
               </div>
