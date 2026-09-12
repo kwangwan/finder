@@ -65,9 +65,9 @@ async def test_workspace_and_permission_isolation(db_session):
     7. Remove Bob from Workspace A -> Verify Bob's access is immediately revoked!
     """
     uid = str(uuid.uuid4())[:8]
-    alice = User(email=f"alice_{uid}@project.run", name="Alice (오너)", is_admin=False, is_approved=True)
-    bob = User(email=f"bob_{uid}@project.run", name="Bob (엔지니어)", is_admin=False, is_approved=True)
-    charlie = User(email=f"charlie_{uid}@project.run", name="Charlie (디자이너)", is_admin=False, is_approved=True)
+    alice = User(email=f"alice_{uid}@project.run", name="Alice (오너)", is_superadmin=False, is_approved=True)
+    bob = User(email=f"bob_{uid}@project.run", name="Bob (엔지니어)", is_superadmin=False, is_approved=True)
+    charlie = User(email=f"charlie_{uid}@project.run", name="Charlie (디자이너)", is_superadmin=False, is_approved=True)
     db_session.add_all([alice, bob, charlie])
     await db_session.commit()
     for u in [alice, bob, charlie]:

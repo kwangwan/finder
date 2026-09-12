@@ -25,7 +25,17 @@ class Invitation(Base):
 
     @property
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc) > self.expires_at
+        expires_at = self.expires_at
+        if expires_at is None:
+            # An invitation with no end is not something this app makes; if one
+            # exists, it is not honoured.
+            return True
+        if expires_at.tzinfo is None:
+            # The column is timestamptz, so this only happens for a value that
+            # has not been through the database yet. UTC is what everything
+            # here means by a bare timestamp.
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at
 
     def to_dict(self):
         return {

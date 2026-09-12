@@ -1,20 +1,20 @@
 import pytest
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.models.user import User
 from app.models.invitation import Invitation
 from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 
 @pytest.mark.asyncio
 async def test_jwt_token_generation_and_decoding():
-    payload = {"sub": "1234-5678", "email": "test@example.com", "is_admin": False, "is_approved": False}
+    payload = {"sub": "1234-5678", "email": "test@example.com", "is_superadmin": False, "is_approved": False}
     token = create_access_token(payload)
     assert token is not None
 
     decoded = decode_access_token(token)
     assert decoded["sub"] == "1234-5678"
     assert decoded["email"] == "test@example.com"
-    assert decoded["is_admin"] is False
+    assert decoded["is_superadmin"] is False
     assert decoded["is_approved"] is False
 
 @pytest.mark.asyncio
@@ -32,7 +32,7 @@ async def test_user_creation_and_admin_status(db_session):
         email=f"test_user_{uid}@project.run",
         name="테스트 유저",
         hashed_password=hash_password("pw1234"),
-        is_admin=False,
+        is_superadmin=False,
         is_approved=False,
         is_active=True
     )
@@ -40,7 +40,7 @@ async def test_user_creation_and_admin_status(db_session):
     await db_session.commit()
     await db_session.refresh(user)
 
-    assert user.is_admin is False
+    assert user.is_superadmin is False
     assert user.is_approved is False
     assert verify_password("pw1234", user.hashed_password) is True
 
@@ -51,10 +51,10 @@ async def test_user_creation_and_admin_status(db_session):
     assert user.is_approved is True
 
     # 3. Simulate granting admin
-    user.is_admin = True
+    user.is_superadmin = True
     await db_session.commit()
     await db_session.refresh(user)
-    assert user.is_admin is True
+    assert user.is_superadmin is True
 
     # Clean up
     await db_session.delete(user)
@@ -63,7 +63,7 @@ async def test_user_creation_and_admin_status(db_session):
 @pytest.mark.asyncio
 async def test_invitation_creation_and_7day_expiration(db_session):
     uid = str(uuid.uuid4())[:8]
-    admin = User(email=f"admin_{uid}@project.run", name="최고관리자", is_admin=True, is_approved=True)
+    admin = User(email=f"admin_{uid}@project.run", name="최고관리자", is_superadmin=True, is_approved=True)
     db_session.add(admin)
     await db_session.commit()
     await db_session.refresh(admin)
@@ -74,7 +74,7 @@ async def test_invitation_creation_and_7day_expiration(db_session):
         token=f"token_{uid}_valid",
         invited_by=admin.id,
         is_admin_invite=True,
-        expires_at=datetime.utcnow() + timedelta(days=7),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
         status="pending"
     )
     # 2. Create expired invitation
@@ -83,7 +83,7 @@ async def test_invitation_creation_and_7day_expiration(db_session):
         token=f"token_{uid}_expired",
         invited_by=admin.id,
         is_admin_invite=True,
-        expires_at=datetime.utcnow() - timedelta(minutes=5),
+        expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
         status="pending"
     )
     db_session.add_all([valid_inv, expired_inv])

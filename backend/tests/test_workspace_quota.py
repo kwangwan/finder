@@ -21,7 +21,7 @@ async def test_workspace_quota_owner_aggregation_and_isolation(db_session):
     user_a = User(
         email=f"owner_a_{uid}@test.com",
         name="Owner A",
-        is_admin=False,
+        is_superadmin=False,
         is_approved=True,
         storage_quota_bytes=1000,  # 1000 bytes limit
         storage_used_bytes=0
@@ -29,7 +29,7 @@ async def test_workspace_quota_owner_aggregation_and_isolation(db_session):
     user_b = User(
         email=f"member_b_{uid}@test.com",
         name="Member B",
-        is_admin=False,
+        is_superadmin=False,
         is_approved=True,
         storage_quota_bytes=10000, # 10000 bytes limit
         storage_used_bytes=0

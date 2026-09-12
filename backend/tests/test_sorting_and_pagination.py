@@ -9,7 +9,7 @@ from app.schemas.folder import PagedFolderResponse
 @pytest.mark.asyncio
 async def test_files_sorting_and_pagination(db_session):
     uid = str(uuid.uuid4())[:8]
-    user = User(email=f"sort_user_{uid}@test.com", name="Sorter", is_admin=False, is_approved=True)
+    user = User(email=f"sort_user_{uid}@test.com", name="Sorter", is_superadmin=False, is_approved=True)
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
@@ -112,7 +112,7 @@ async def test_files_sorting_and_pagination(db_session):
 @pytest.mark.asyncio
 async def test_folders_sorting_and_pagination(db_session):
     uid = str(uuid.uuid4())[:8]
-    user = User(email=f"fold_user_{uid}@test.com", name="FolderSorter", is_admin=False, is_approved=True)
+    user = User(email=f"fold_user_{uid}@test.com", name="FolderSorter", is_superadmin=False, is_approved=True)
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
@@ -132,15 +132,15 @@ async def test_folders_sorting_and_pagination(db_session):
     await db_session.commit()
 
     # Sort name asc
-    res_asc = await list_folders(workspace_id=ws.id, sort_by="name", sort_order="asc", db=db_session, current_user=user)
+    res_asc = await list_folders(workspace_id=ws.id, parent_id=None, search=None, root_only=False, sort_by="name", sort_order="asc", page=None, page_size=None, paged=None, db=db_session, current_user=user)
     assert [f.name for f in res_asc] == ["AlphaFolder", "BetaFolder", "ZetaFolder"]
 
     # Sort name desc
-    res_desc = await list_folders(workspace_id=ws.id, sort_by="name", sort_order="desc", db=db_session, current_user=user)
+    res_desc = await list_folders(workspace_id=ws.id, parent_id=None, search=None, root_only=False, sort_by="name", sort_order="desc", page=None, page_size=None, paged=None, db=db_session, current_user=user)
     assert [f.name for f in res_desc] == ["ZetaFolder", "BetaFolder", "AlphaFolder"]
 
     # Pagination
-    paged = await list_folders(workspace_id=ws.id, sort_by="name", sort_order="asc", page=1, page_size=2, db=db_session, current_user=user)
+    paged = await list_folders(workspace_id=ws.id, parent_id=None, search=None, root_only=False, sort_by="name", sort_order="asc", page=1, page_size=2, paged=None, db=db_session, current_user=user)
     assert isinstance(paged, PagedFolderResponse)
     assert paged.total_count == 3
     assert paged.total_pages == 2

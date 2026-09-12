@@ -16,9 +16,9 @@ from fastapi import HTTPException
 async def test_system_stats_security_isolation(db_session):
     """Test get_system_stats enforces strict workspace isolation."""
     uid = str(uuid.uuid4())[:8]
-    user_a = User(email=f"user_a_{uid}@test.com", name="User A", is_admin=False, is_approved=True)
-    user_b = User(email=f"user_b_{uid}@test.com", name="User B", is_admin=False, is_approved=True)
-    admin = User(email=f"admin_{uid}@test.com", name="Admin", is_admin=True, is_approved=True)
+    user_a = User(email=f"user_a_{uid}@test.com", name="User A", is_superadmin=False, is_approved=True)
+    user_b = User(email=f"user_b_{uid}@test.com", name="User B", is_superadmin=False, is_approved=True)
+    admin = User(email=f"admin_{uid}@test.com", name="Admin", is_superadmin=True, is_approved=True)
     db_session.add_all([user_a, user_b, admin])
     await db_session.commit()
     for u in [user_a, user_b, admin]:
@@ -69,8 +69,8 @@ async def test_system_stats_security_isolation(db_session):
 async def test_reindex_admin_only_protection(db_session):
     """Test reindex_all_files is strictly restricted to admins."""
     uid = str(uuid.uuid4())[:8]
-    normal_user = User(email=f"normal_{uid}@test.com", name="Normal", is_admin=False, is_approved=True)
-    admin_user = User(email=f"admin_{uid}@test.com", name="Admin", is_admin=True, is_approved=True)
+    normal_user = User(email=f"normal_{uid}@test.com", name="Normal", is_superadmin=False, is_approved=True)
+    admin_user = User(email=f"admin_{uid}@test.com", name="Admin", is_superadmin=True, is_approved=True)
     db_session.add_all([normal_user, admin_user])
     await db_session.commit()
 
@@ -88,8 +88,8 @@ async def test_reindex_admin_only_protection(db_session):
 async def test_cross_workspace_folder_and_file_operation_prevention(db_session):
     """Test preventing cross-workspace file injection, moving, and folder reparenting."""
     uid = str(uuid.uuid4())[:8]
-    user_a = User(email=f"ua_{uid}@test.com", name="UA", is_admin=False, is_approved=True)
-    user_b = User(email=f"ub_{uid}@test.com", name="UB", is_admin=False, is_approved=True)
+    user_a = User(email=f"ua_{uid}@test.com", name="UA", is_superadmin=False, is_approved=True)
+    user_b = User(email=f"ub_{uid}@test.com", name="UB", is_superadmin=False, is_approved=True)
     db_session.add_all([user_a, user_b])
     await db_session.commit()
     for u in [user_a, user_b]:
@@ -155,8 +155,8 @@ async def test_cross_workspace_folder_and_file_operation_prevention(db_session):
 async def test_search_tenant_isolation(db_session):
     """Test search service never returns documents from unauthorized workspaces."""
     uid = str(uuid.uuid4())[:8]
-    user_a = User(email=f"sa_a_{uid}@test.com", name="Alice", is_admin=False, is_approved=True)
-    user_b = User(email=f"sa_b_{uid}@test.com", name="Bob", is_admin=False, is_approved=True)
+    user_a = User(email=f"sa_a_{uid}@test.com", name="Alice", is_superadmin=False, is_approved=True)
+    user_b = User(email=f"sa_b_{uid}@test.com", name="Bob", is_superadmin=False, is_approved=True)
     db_session.add_all([user_a, user_b])
     await db_session.commit()
     for u in [user_a, user_b]:
