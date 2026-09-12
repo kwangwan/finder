@@ -163,7 +163,7 @@ export default function GalleryLightbox({
 
   return (
     <div
-      className={`gal-light ${isChromeVisible ? 'chrome-on' : 'chrome-off'}`}
+      className={`gal-light ${isVideo ? 'is-video' : ''} ${isChromeVisible ? 'chrome-on' : 'chrome-off'}`}
       onMouseMove={wake}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}

@@ -7733,6 +7733,24 @@ input.bd-name:focus {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.82), transparent);
   transition: opacity 0.35s ease;
 }
+/* A film brings its own controls along its bottom edge, and the caption was
+   laid over exactly that strip: two things using one band, the name sitting on
+   the scrubber and neither readable. For a film the caption stops overlaying
+   and takes a band of its own below the picture — there is nothing underneath
+   it to see, so nothing is lost by giving it the room. It also stops fading
+   out with the rest of the chrome, because it is no longer in the way of
+   anything. */
+.gal-light.is-video .gal-light-stage { padding-bottom: 0; }
+.gal-light.is-video .gal-light-video { padding: 1.1rem 1.1rem 0.4rem; }
+.gal-light.is-video .gal-light-foot {
+  position: static;
+  flex: none;
+  padding: 0.7rem 1.25rem calc(0.85rem + env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.55);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.gal-light.is-video.chrome-off .gal-light-foot { opacity: 1; pointer-events: auto; }
+
 .gal-light-meta { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
 .gal-light-name {
   font-size: 0.88rem;
