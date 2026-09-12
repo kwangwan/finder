@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     SYNC_DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/postgres"
 
     # OpenWebUI / LLM & Embeddings
+    # Where the embedding service answers. In production this runs on the host
+    # while the backend runs in a container, so "localhost" means the container
+    # itself and nothing is ever reached — search indexing then fails silently
+    # for every file. Set OPENWEBUI_URL to http://host.docker.internal:3000
+    # (Docker Desktop) or the host's address. This default is for running the
+    # backend directly on a development machine.
     OPENWEBUI_URL: str = "http://localhost:3000"
     OPENWEBUI_API_KEY: str = ""
     OPENWEBUI_MODEL: str = "gemma4:latest"
