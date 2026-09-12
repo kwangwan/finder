@@ -384,20 +384,27 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 }}
               />
               <div className="gal-map-tools">
+                {/* Not "이동 순서". That would claim these photographs were
+                    taken by one person moving between the places, and a
+                    workspace is filled by several people at once — two
+                    consecutive photographs can be two people in two cities.
+                    What the line actually joins is the order they were taken
+                    in, which is all it says now. */}
                 <button
                   type="button"
                   className={`gal-map-toggle ${showPath ? 'is-on' : ''}`}
                   onClick={() => setShowPath((v) => !v)}
-                  title="사진이 찍힌 순서대로 이어 봅니다. 실제 이동 경로가 아니라, 사진이 남은 자리들입니다."
+                  title={'사진이 찍힌 시간 순서대로 이은 선입니다.\n'
+                    + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}
                 >
                   <ArrowRight size={13} />
-                  <span>이동 순서</span>
+                  <span>촬영 시간순</span>
                 </button>
                 {showPath && path && (
                   <span className="gal-map-note">
-                    {path.total_count.toLocaleString()}곳
-                    {path.sampled && ` 중 ${path.points.length.toLocaleString()}곳`}
-                    {' '}· 찍힌 순서
+                    사진 {path.total_count.toLocaleString()}장
+                    {path.sampled && ` 중 ${path.points.length.toLocaleString()}장`}
+                    {' '}· 찍힌 시간 순서로 이음
                   </span>
                 )}
               </div>

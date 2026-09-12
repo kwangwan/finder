@@ -1,7 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 // Named imports: this build of maplibre-gl has no default export.
-import { Map as MapLibreMap, Marker, NavigationControl } from 'maplibre-gl';
+import { Map as MapLibreMap, Marker, NavigationControl, setWorkerUrl } from 'maplibre-gl';
+// The worker, as an asset this build emits and can name.
+//
+// Left alone, maplibre finds its worker by looking for a file of a fixed name
+// *beside its own module* — which after bundling means /assets/, where no such
+// file was ever emitted. It 404s, no worker starts, not one tile is ever
+// requested, and the map is a black rectangle that reports no error at all.
+// Handing it the bundled URL is the whole fix, and it is why the map worked
+// in development (served straight from node_modules, worker included) and not
+// once deployed.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
+
+setWorkerUrl(maplibreWorkerUrl);
 import { getThumbnailUrl } from '../../api';
 
 /**
@@ -169,13 +181,17 @@ export default function GalleryMap({
   }, [clusters, onOpenCluster]);
 
   /**
-   * The trail: the photographs of this period, in the order they were taken.
+   * The photographs of this period, joined in the order they were taken.
    *
-   * Nothing here is a route. It joins the places where somebody actually
-   * stopped and took a picture, in time order — which is the only thing the
-   * photographs can honestly say about how a trip moved. The line is drawn
-   * faintly and the stops are drawn on top of it, so what reads first is
-   * still where the pictures are.
+   * Not a route, and not one person's movement — a workspace is filled by
+   * several people, so two consecutive photographs can be two of them in two
+   * countries. All this line claims is the sequence, which is a fact about
+   * the photographs rather than a guess about anybody. On a trip taken
+   * together it still shows the shape of the days; where it wanders, that is
+   * the library honestly saying two people were out at once.
+   *
+   * Drawn faintly, with the stops on top, so what reads first is still where
+   * the pictures are.
    */
   useEffect(() => {
     const map = mapRef.current;

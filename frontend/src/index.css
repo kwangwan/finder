@@ -7127,7 +7127,7 @@ input.bd-name:focus {
   align-items: center;
   transition: color 0.15s ease, background 0.15s ease;
 }
-.gal-seg button:hover { color: var(--text-primary); }
+.gal-seg button:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
 .gal-seg button.is-on {
   background: color-mix(in srgb, var(--accent-primary) 22%, transparent);
   color: var(--text-primary);
@@ -7197,7 +7197,7 @@ input.bd-name:focus {
   transition: opacity 0.55s ease, transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .gal-tile.is-loaded img { opacity: 1; }
-.gal-tile:hover { transform: translateY(-2px); z-index: 1; }
+.gal-tile:hover { transform: translateY(-2px); z-index: 1; box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.95); }
 .gal-tile:hover img { transform: scale(1.035); }
 .gal-tile:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
 
@@ -7264,6 +7264,7 @@ input.bd-name:focus {
   font-size: 0.74rem; color: var(--text-muted);
   border-radius: 6px;
 }
+.gal-rail-all:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.05); }
 .gal-rail-all.is-on { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
 
 .gal-rail-year-btn {
@@ -7314,7 +7315,10 @@ input.bd-name:focus {
   font-size: 0.66rem;
   color: var(--text-secondary);
   overflow: hidden;
+  transition: color 0.12s ease, transform 0.12s ease;
 }
+.gal-rail-month:hover { transform: translateY(-1px); }
+.gal-rail-month:hover .gal-rail-month-fill { opacity: 0.3 !important; }
 .gal-rail-month-fill {
   position: absolute; inset: 0;
   background: currentColor;
@@ -7394,10 +7398,13 @@ input.bd-name:focus {
 }
 
 .gal-map-side {
-  width: 210px;
+  width: 214px;
   flex: none;
   border-left: 1px solid var(--border-subtle);
-  background: rgba(0, 0, 0, 0.25);
+  /* The same ground as the rest of the gallery. It used to be a darker wash,
+     which beside a dark map read as a panel that had failed to paint rather
+     than as part of the page. */
+  background: var(--gal-ground, #07090e);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -7714,7 +7721,12 @@ input.bd-name:focus {
   background: rgba(255, 255, 255, 0.05);
 }
 .gal-place-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.gal-place-tile:hover img { opacity: 0.85; }
+.gal-place-tile { transition: transform 0.14s ease, box-shadow 0.14s ease; }
+.gal-place-tile:hover {
+  transform: scale(1.04);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 6px 16px -8px rgba(0, 0, 0, 0.9);
+  z-index: 1;
+}
 .gal-place-play {
   position: absolute;
   left: 5px;
