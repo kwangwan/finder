@@ -148,7 +148,7 @@ def extract_image_metadata(head_bytes: bytes) -> Dict[str, Any]:
     if gps:
         lat = _dms_to_degrees(gps.get(2), _clean(gps.get(1), 4))
         lon = _dms_to_degrees(gps.get(4), _clean(gps.get(3), 4))
-        if lat is not None and lon is not None:
+        if not _is_nowhere(lat, lon):
             out["gps_latitude"], out["gps_longitude"] = lat, lon
     return out
 
@@ -187,6 +187,25 @@ def _parse_mvhd(buf: bytes) -> Optional[datetime]:
     return stamp
 
 
+def _is_nowhere(lat, lon) -> bool:
+    """
+    Whether a pair of coordinates means "no idea", written as zero.
+
+    Null Island — 0°N 0°E — is a spot in the Gulf of Guinea where nobody has
+    ever taken a family photograph. A camera that could not get a fix writes
+    it anyway: Samsung phones put the literal string "+00.0000+000.0000/" into
+    the video's location atom, and plenty of cameras do the same in EXIF. Read
+    as a location it drops a pin in the sea and puts the holiday in the wrong
+    hemisphere, so it is read as what it is — nothing.
+
+    Only when *both* are zero. The equator and the Greenwich meridian are real
+    places, and a photograph taken on one of them still knows where it was.
+    """
+    if lat is None or lon is None:
+        return True
+    return abs(lat) < 1e-4 and abs(lon) < 1e-4
+
+
 def _parse_iso6709(text: str):
     """QuickTime stores location as ISO-6709, e.g. '+37.5665+126.9780/'."""
     import re
@@ -198,6 +217,8 @@ def _parse_iso6709(text: str):
     except ValueError:
         return None, None
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None, None
+    if _is_nowhere(lat, lon):
         return None, None
     return round(lat, 6), round(lon, 6)
 
