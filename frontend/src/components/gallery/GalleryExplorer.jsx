@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Search, X, LayoutGrid, Map as MapIcon, Image as ImageIcon, Film, Loader2, MapPin, Users,
-  ArrowRight, ChevronLeft,
+  Search, X, LayoutGrid, Map as MapIcon, Image as ImageIcon, Film, Loader2, Users,
+  ArrowRight,
 } from '../../utils/icons';
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
@@ -548,11 +548,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
         <>
           <span>사진 {summary.image_count.toLocaleString()}</span>
           <span>영상 {summary.video_count.toLocaleString()}</span>
-          {placed > 0 && (
-            <span title="위치가 기록된 사진과 영상">
-              <MapPin size={11} /> {placed.toLocaleString()}
-            </span>
-          )}
           {faceStatus && faceStatus.pending > 0 && (
             <span
               className="gal-indexing"
@@ -567,15 +562,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               title="촬영 정보가 없어 올린 날짜를 기준으로 놓인 항목입니다"
             >
               촬영일 없음 {summary.undated_count.toLocaleString()}
-            </span>
-          )}
-          {/* Only once the trail has been drawn — it is a fact about the line,
-              not about the library. */}
-          {showPath && path && (
-            <span title="한자리에서 이어 찍은 사진을 한 지점으로 묶은 수입니다. 빠지는 사진은 없습니다.">
-              <MapPin size={11} /> 머문 자리 {path.points.length.toLocaleString()}곳
-              {path.undated > 0
-                && ` · 촬영 시각이 없는 ${path.undated.toLocaleString()}장은 순서를 몰라 선에서 뺍니다`}
             </span>
           )}
           {summary.first_taken_at && (
