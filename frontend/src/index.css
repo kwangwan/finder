@@ -7293,6 +7293,11 @@ input.bd-name:focus {
   text-align: left; padding: 0.3rem 0.5rem;
   font-size: 0.74rem; color: var(--text-muted);
   border-radius: 6px;
+  /* Laid out as a row on a narrow screen, this is squeezed to whatever is
+     left over and "전체" comes apart into 전 and 체. A label is one word or
+     it is not that label. */
+  white-space: nowrap;
+  flex: none;
 }
 /* Stronger than the selected state, so hovering the one already chosen
    still answers. */
@@ -7650,6 +7655,7 @@ input.bd-name:focus {
      "전체" was being given less than that, so it broke across two lines. A
      label is one word or it is not that label. */
   .gal-rail-year { flex: none; }
+  .gal-rail-all,
   .gal-rail-year-btn { width: auto; white-space: nowrap; padding: 0.33rem 0.6rem; }
   .gal-rail-year-btn > * { white-space: nowrap; }
   .gal-rail-months { position: absolute; display: none; }
