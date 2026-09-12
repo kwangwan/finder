@@ -63,7 +63,23 @@ class S3Service:
             print(f"[S3 Init Warning] Could not connect to S3 client: {e}")
             self.client = None
 
-    def new_client(self):
+        # A signature covers the host it was made for. Everything this server
+        # does itself goes to `endpoint_url` — the storage machine on the
+        # local network, when one is configured — but a presigned URL is
+        # opened by somebody's browser, which can only reach the public
+        # address. Signing those with a client of the public address is the
+        # whole of it; rewriting the host afterwards would invalidate the very
+        # signature it carries.
+        try:
+            self.signing_client = (
+                self.client if self.endpoint_url == self.public_url
+                else self.new_client(endpoint_url=self.public_url)
+            )
+        except Exception as e:
+            print(f"[S3 Init Warning] Could not build the public signing client: {e}")
+            self.signing_client = self.client
+
+    def new_client(self, endpoint_url: Optional[str] = None):
         """
         A client of its own, with its own pool of connections.
 
@@ -75,7 +91,7 @@ class S3Service:
         """
         return boto3.client(
             "s3",
-            endpoint_url=self.endpoint_url,
+            endpoint_url=endpoint_url or self.endpoint_url,
             aws_access_key_id=settings.MINIO_PUBLIC_ROOT_USER,
             aws_secret_access_key=settings.MINIO_PUBLIC_ROOT_PASSWORD,
             region_name=self.region_name,
@@ -120,7 +136,7 @@ class S3Service:
     def generate_presigned_put_url(self, s3_key: str, content_type: str = "application/octet-stream", expires_in: int = 3600) -> str:
         """Generate presigned PUT URL for single file upload."""
         try:
-            url = self.client.generate_presigned_url(
+            url = self.signing_client.generate_presigned_url(
                 ClientMethod="put_object",
                 Params={
                     "Bucket": self.bucket_name,
@@ -130,8 +146,7 @@ class S3Service:
                 ExpiresIn=expires_in,
                 HttpMethod="PUT"
             )
-            # If endpoint differs from public URL, rewrite host
-            return self._format_public_url(url)
+            return url
         except Exception as e:
             print(f"[S3 Error] generate_presigned_put_url: {e}")
             raise
@@ -147,13 +162,13 @@ class S3Service:
                 safe_name = urllib.parse.quote(filename)
                 params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{safe_name}"
 
-            url = self.client.generate_presigned_url(
+            url = self.signing_client.generate_presigned_url(
                 ClientMethod="get_object",
                 Params=params,
                 ExpiresIn=expires_in,
                 HttpMethod="GET"
             )
-            return self._format_public_url(url)
+            return url
         except Exception as e:
             print(f"[S3 Error] generate_presigned_get_url: {e}")
             raise
@@ -195,7 +210,7 @@ class S3Service:
         """Generate presigned PUT URLs for each part in a multipart upload."""
         parts = []
         for part_num in part_numbers:
-            url = self.client.generate_presigned_url(
+            url = self.signing_client.generate_presigned_url(
                 ClientMethod="upload_part",
                 Params={
                     "Bucket": self.bucket_name,
@@ -208,7 +223,7 @@ class S3Service:
             )
             parts.append({
                 "part_number": part_num,
-                "upload_url": self._format_public_url(url)
+                "upload_url": url
             })
         return parts
 
@@ -474,19 +489,5 @@ class S3Service:
                     local_path.unlink()
             except Exception as e:
                 print(f"[Local Storage Warning] Could not delete local file: {e}")
-
-    def _format_public_url(self, presigned_url: str) -> str:
-        """Ensure the presigned URL points to the public URL domain."""
-        if not self.public_url or self.endpoint_url == self.public_url:
-            return presigned_url
-        
-        parsed_endpoint = urllib.parse.urlparse(self.endpoint_url)
-        parsed_public = urllib.parse.urlparse(self.public_url)
-        
-        return presigned_url.replace(
-            f"{parsed_endpoint.scheme}://{parsed_endpoint.netloc}",
-            f"{parsed_public.scheme}://{parsed_public.netloc}",
-            1
-        )
 
 s3_service = S3Service()
