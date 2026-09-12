@@ -7051,7 +7051,10 @@ input.bd-name:focus {
 
 .gal-head {
   display: flex;
-  align-items: flex-end;
+  /* The title is one line now that the counts moved behind (i), so it lines up
+     with the buttons beside it rather than sitting on a plinth of leftover
+     space where the second line used to be. */
+  align-items: center;
   justify-content: space-between;
   gap: 1.5rem;
   padding: 1.4rem 1.75rem 1rem;
@@ -7062,7 +7065,6 @@ input.bd-name:focus {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.35rem;
 }
 .gal-head-title h1 {
   font-size: 1.25rem;
@@ -7080,18 +7082,6 @@ input.bd-name:focus {
   font-variant-numeric: tabular-nums;
 }
 
-.gal-head-title p {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
-  flex-wrap: wrap;
-  font-size: 0.76rem;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-
-.gal-head-title p span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .gal-ws { color: var(--text-secondary); font-weight: 600; }
 .gal-span { opacity: 0.7; font-variant-numeric: tabular-nums; }
 
@@ -7836,6 +7826,7 @@ input.bd-name:focus {
 .gal-sheet-body .ui-dd, .gal-sheet-body .ui-dd-btn { width: 100%; }
 .gal-sheet-body .gal-seg { display: flex; }
 .gal-sheet-body .gal-seg button { flex: 1; }
+.gal-kind button { display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem; }
 .gal-sheet > footer {
   display: flex;
   gap: 0.6rem;

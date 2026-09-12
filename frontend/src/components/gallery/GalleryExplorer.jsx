@@ -602,13 +602,17 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               )}
             </div>
 
-            <div className="gal-seg" role="group" aria-label="종류">
-              <button type="button" className={kind === 'all' ? 'is-on' : ''} onClick={() => setKind('all')}>전체</button>
-              <button type="button" className={kind === 'image' ? 'is-on' : ''} onClick={() => setKind('image')} title="사진만">
-                <ImageIcon size={13} />
+            {/* Icons alone were a row in a toolbar, where a tooltip could explain
+                them. In a dialog with room on every line they say what they are. */}
+            <div className="gal-seg gal-kind" role="group" aria-label="종류">
+              <button type="button" className={kind === 'all' ? 'is-on' : ''} onClick={() => setKind('all')}>
+                전체
               </button>
-              <button type="button" className={kind === 'video' ? 'is-on' : ''} onClick={() => setKind('video')} title="영상만">
-                <Film size={13} />
+              <button type="button" className={kind === 'image' ? 'is-on' : ''} onClick={() => setKind('image')}>
+                <ImageIcon size={13} /> 사진
+              </button>
+              <button type="button" className={kind === 'video' ? 'is-on' : ''} onClick={() => setKind('video')}>
+                <Film size={13} /> 영상
               </button>
             </div>
 
