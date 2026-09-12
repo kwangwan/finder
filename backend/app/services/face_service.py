@@ -23,12 +23,10 @@ The embedding is 128 numbers, compared by cosine distance in Postgres, where
 pgvector already lives for document search. Same infrastructure, same index
 type, one more table.
 """
-import hashlib
 import logging
 import math
 import os
 import tempfile
-import urllib.request
 from pathlib import Path
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -42,53 +40,55 @@ logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(os.getenv("FACE_MODEL_DIR", "/app/model_cache"))
 
-# Fetched from OpenCV's own model zoo, through the media host because the
-# files are stored with git-lfs and the ordinary raw URL returns a pointer
-# file rather than a model. Verified by hash, so a truncated download or a
-# changed file is noticed rather than loaded.
-MODELS = {
-    "yunet": {
-        "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/"
-               "models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
-        "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
-        "filename": "face_detection_yunet_2023mar.onnx",
-    },
-    "sface": {
-        "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/"
-               "models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
-        "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
-        "filename": "face_recognition_sface_2021dec.onnx",
-    },
-}
+# insightface's buffalo_l: SCRFD for finding faces, ArcFace (w600k_r50) for
+# telling them apart. Fetched and cached by the library itself, into the same
+# mounted directory the old models used so a restart does not fetch 280MB again.
+#
+# Why this rather than OpenCV's YuNet and SFace, which needed no extra
+# dependency: SFace is built to be small, and it shows exactly where this
+# library needed it not to. Measured on these photographs, the similarity of
+# the same person seen in profile and seen face-on lands in the same range as
+# two different people — so no threshold could separate them, and the search
+# found only the frontal, obviously-alike faces. ArcFace is trained against
+# precisely that (its benchmark is frontal-versus-profile), and SCRFD finds
+# faces YuNet does not: turned away, small, at the edge of a group.
+# Where the models live. Passed to the library explicitly rather than through
+# INSIGHTFACE_HOME, which it does not read — left to itself it puts 280MB in
+# the container's home directory, which is gone on the next restart.
+FACE_HOME = str(MODEL_DIR / "insightface")
+
+FACE_PACK = os.getenv("FACE_PACK", "buffalo_l")
+
+# What the detector sees. This is the size the comparison against the old
+# models was run at, and at this size SCRFD already found 42% more faces than
+# YuNet did at twice the resolution — so there is nothing to buy by going
+# larger, and the cost is squared.
+DETECT_SIZE = int(os.getenv("FACE_DETECT_SIZE", "1024"))
+
+# Each model gets two threads of its own. Without this every session helps
+# itself to every core, and four of them on ten cores spend their time handing
+# the cores back and forth.
+os.environ.setdefault("OMP_NUM_THREADS", "2")
 
 # A detection below this is not a face worth remembering, and a face smaller
-# than this many pixels across carries too little to tell one person from
+# than this fraction of the picture carries too little to tell one person from
 # another — a crowd in the distance would otherwise fill the index with
 # vectors that match everybody equally.
 #
-# This was 0.75, and 0.75 is roughly "facing the camera". The detector is less
-# sure of a head in profile than of the same head turned forward, so a profile
-# scores in the sixties and was thrown away — which is why the same person was
-# found in every photograph looking at the lens and in none of the others.
-# Of the faces this admits that 0.75 refused, measured over ninety
-# photographs, about three in four are real and nearly all of those are
-# profiles; the rest are the back of a head or a flower, and a face nobody
-# resembles costs little beyond a box drawn where it should not be.
-MIN_DETECTION_SCORE = 0.60
-MIN_FACE_PIXELS = 44
-
-# Detection runs on a reduced copy — a 6000-pixel photograph costs seconds at
-# full size. This was 1024, which on a modern phone photograph is a quarter of
-# the width: a face 176 pixels across in the original arrived at 44 and was
-# thrown away by the rule above, so the people standing a few steps back were
-# not in the library at all and no search could reach them. Measured over 120
-# photographs, 2048 finds 88% more faces and turns up a face in 27% more
-# pictures.
-DETECT_LONG_EDGE = 2048
+# Kept as a fraction rather than a pixel count because the detector now reports
+# boxes in the original picture's coordinates, and "44 pixels" means something
+# different on a phone photograph than on a thumbnail.
+MIN_DETECTION_SCORE = float(os.getenv("FACE_MIN_SCORE", "0.50"))
+MIN_FACE_FRACTION = 44 / 2048
 
 # How many moments are taken from one clip, and how close together they may be
 # before it is worth spreading them out instead of taking them all.
-VIDEO_MOMENTS = 300
+# Forty moments of a clip rather than every keyframe it has. Looking at a
+# frame costs fifteen times what it did under the old model, and a five-minute
+# clip has hundreds of keyframes showing the same two people — forty spread
+# across the whole of it says who was in it just as well, and the difference
+# is a day of machine time against an hour.
+VIDEO_MOMENTS = int(os.getenv("FACE_VIDEO_MOMENTS", "40"))
 SECONDS_PER_MOMENT = 4
 VIDEO_OPEN_TIMEOUT = 30
 MAX_FACES_PER_VIDEO = 900
@@ -96,41 +96,21 @@ VIDEO_MAX_BYTES = 1024 * 1024 * 1024
 
 
 
-def _download(spec: dict, target: Path) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("[Faces] fetching %s", target.name)
-    with urllib.request.urlopen(spec["url"], timeout=180) as response:
-        data = response.read()
-    digest = hashlib.sha256(data).hexdigest()
-    if digest != spec["sha256"]:
-        raise RuntimeError(
-            f"{target.name} is not the model this expects "
-            f"(sha256 {digest[:16]}… rather than {spec['sha256'][:16]}…)"
-        )
-    tmp = target.with_suffix(target.suffix + ".part")
-    tmp.write_bytes(data)
-    tmp.replace(target)
-
-
-def _model_path(key: str) -> Path:
-    """
-    The model on disk, fetched once.
-
-    Checked by hash on the way in, because this is a file downloaded from the
-    internet and then executed as a neural network. A file that does not match
-    is not written at all: better to have no face search than to quietly run
-    something else.
-    """
-    spec = MODELS[key]
-    path = MODEL_DIR / spec["filename"]
-    if not path.exists() or path.stat().st_size < 10_000:
-        _download(spec, path)
-    return path
-
-
 def models_ready() -> bool:
-    """Whether both models are already on disk — asked before a long sweep."""
-    return all((MODEL_DIR / spec["filename"]).exists() for spec in MODELS.values())
+    """
+    Whether the models are already on disk — asked before a long sweep.
+
+    They are fetched by the library on first use, into the mounted cache; this
+    only says whether that has already happened, so a sweep does not start by
+    pulling 280MB down a connection that may not be there.
+    """
+    pack = Path(FACE_HOME) / "models" / FACE_PACK
+    return pack.is_dir() and any(pack.glob("*.onnx"))
+
+
+def ensure_models() -> None:
+    """Fetch them if they are not here yet. Slow, once."""
+    _analyser()
 
 
 # The models are shared objects with state — the detector is told the size of
@@ -148,51 +128,44 @@ def models_ready() -> bool:
 # server happened to use. A copy is about 37MB, nearly all of it the
 # recogniser.
 _models = threading.local()
+_build_lock = threading.Lock()
 
-FACE_WORKERS = int(os.getenv("FACE_WORKERS", "0") or 0) or max(2, min(6, (os.cpu_count() or 4)))
+# ArcFace's weights are about 170MB per copy, so this stays small — but not as
+# small as two. Under the old model the sweep spent nine tenths of its time
+# waiting for storage and the looking was free; now the looking is the work,
+# and four at a time is what turns a five-hour pass into an hour and a bit.
+FACE_WORKERS = int(os.getenv("FACE_WORKERS", "0") or 0) or 4
 
 # Everything that touches a model runs here, and only here.
 cv_pool = ThreadPoolExecutor(max_workers=FACE_WORKERS, thread_name_prefix="face")
 
 
-def _get_detector(width: int, height: int):
+def _analyser():
     """
-    YuNet, sized for this picture. This thread's own.
+    This thread's own detector and recogniser.
 
-    The detector is told the exact size of what it is about to look at, so it
-    is kept and re-sized rather than rebuilt per photograph.
+    Loaded once per thread rather than shared, because these carry state
+    through a call and two threads sharing one is a network run against a
+    buffer shaped for somebody else's picture — which fails, and marks the file
+    as looked at on the way out.
     """
-    detector = getattr(_models, "detector", None)
-    if detector is None:
-        detector = cv2.FaceDetectorYN.create(
-            str(_model_path("yunet")), "", (width, height),
-            score_threshold=MIN_DETECTION_SCORE, nms_threshold=0.3, top_k=200,
-        )
-        _models.detector = detector
-        _models.detector_size = (width, height)
-    elif getattr(_models, "detector_size", None) != (width, height):
-        detector.setInputSize((width, height))
-        _models.detector_size = (width, height)
-    return detector
-
-
-def _get_recogniser():
-    recogniser = getattr(_models, "recogniser", None)
-    if recogniser is None:
-        recogniser = cv2.FaceRecognizerSF.create(str(_model_path("sface")), "")
-        _models.recogniser = recogniser
-    return recogniser
-
-
-def _prepare(image: np.ndarray):
-    """The picture, small enough to look at quickly, and how much it shrank."""
-    height, width = image.shape[:2]
-    longest = max(height, width)
-    if longest <= DETECT_LONG_EDGE:
-        return image, 1.0
-    scale = DETECT_LONG_EDGE / longest
-    resized = cv2.resize(image, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
-    return resized, scale
+    found = getattr(_models, "app", None)
+    if found is None:
+        import insightface
+        # One at a time. Building these makes directories and, the first time,
+        # fetches them; two threads doing that together race on the same mkdir
+        # and one of them dies of FileExistsError. Only the building is
+        # serialised — the looking afterwards is not.
+        with _build_lock:
+            found = insightface.app.FaceAnalysis(
+                name=FACE_PACK,
+                root=FACE_HOME,
+                allowed_modules=["detection", "recognition"],   # no age, no gender, no landmarks
+                providers=["CPUExecutionProvider"],
+            )
+            found.prepare(ctx_id=-1, det_size=(DETECT_SIZE, DETECT_SIZE))
+        _models.app = found
+    return found
 
 
 def faces_in_image(image: np.ndarray, frame_time: Optional[float] = None) -> List[dict]:
@@ -200,8 +173,8 @@ def faces_in_image(image: np.ndarray, frame_time: Optional[float] = None) -> Lis
     Every face in one picture, each with the numbers that identify it.
 
     The box is returned as a fraction of the picture rather than in pixels, so
-    it can be drawn over a thumbnail, a preview or the original without
-    knowing which of them is on screen.
+    it can be drawn over a thumbnail, a preview or the original without knowing
+    which of them is on screen.
     """
     if image is None or image.size == 0:
         return []
@@ -210,29 +183,22 @@ def faces_in_image(image: np.ndarray, frame_time: Optional[float] = None) -> Lis
     elif image.shape[2] == 4:
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
 
-    work, _ = _prepare(image)
-    height, width = work.shape[:2]
-    detector = _get_detector(width, height)
-    _, detections = detector.detect(work)
-    if detections is None:
-        return []
-    return _describe(work, detections, _get_recogniser(), width, height, frame_time)
+    height, width = image.shape[:2]
+    smallest = MIN_FACE_FRACTION * max(height, width)
 
-
-def _describe(work, detections, recogniser, width, height, frame_time):
-    """The numbers that identify each detected face."""
     faces = []
-    for row in detections:
-        x, y, w, h = row[:4]
-        score = float(row[-1])
-        if score < MIN_DETECTION_SCORE or min(w, h) < MIN_FACE_PIXELS:
+    for face in _analyser().get(image):
+        score = float(getattr(face, "det_score", 0.0))
+        if score < MIN_DETECTION_SCORE:
             continue
-        try:
-            aligned = recogniser.alignCrop(work, row)
-            vector = recogniser.feature(aligned).flatten().astype(np.float32)
-        except cv2.error as e:
-            logger.debug("[Faces] could not embed a face: %s", e)
+        x1, y1, x2, y2 = (float(v) for v in face.bbox)
+        w, h = x2 - x1, y2 - y1
+        if min(w, h) < smallest:
             continue
+        vector = getattr(face, "normed_embedding", None)
+        if vector is None:
+            continue
+        vector = np.asarray(vector, dtype=np.float32)
         norm = float(np.linalg.norm(vector))
         if not math.isfinite(norm) or norm == 0:
             continue
@@ -240,10 +206,10 @@ def _describe(work, detections, recogniser, width, height, frame_time):
             "embedding": (vector / norm).tolist(),   # unit length: cosine is then a dot product
             "score": score,
             "box": [
-                max(0.0, float(x) / width),
-                max(0.0, float(y) / height),
-                min(1.0, float(w) / width),
-                min(1.0, float(h) / height),
+                max(0.0, x1 / width),
+                max(0.0, y1 / height),
+                min(1.0, w / width),
+                min(1.0, h / height),
             ],
             "frame_time": frame_time,
         })
@@ -365,7 +331,7 @@ def faces_in_video_file(path: str, max_frames: int = None) -> List[dict]:
     return faces_in_video(path)
 
 
-def dedupe_faces(faces: List[dict], threshold: float = 0.62) -> List[dict]:
+def dedupe_faces(faces: List[dict], threshold: float = float(os.getenv("FACE_SAME_FILE", "0.45"))) -> List[dict]:
     """
     One entry per person per file, keeping the clearest sighting of them.
 

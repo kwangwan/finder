@@ -8,6 +8,7 @@ export default function WindowManager({
   workspaces = [],
   onToggleFavorite,
   onDeleteFile,
+  onShowOnMap,
   activeWorkspaceId,
   currentUser,
   onFileContextMenu,
@@ -83,6 +84,7 @@ export default function WindowManager({
           onUpdateWindowFile={updateWindowFile}
           externalRefreshToken={externalRefreshToken}
           onFileRenamed={onFileRenamed}
+          onShowOnMap={onShowOnMap}
           onToggleFavorite={onToggleFavorite}
           onDeleteFile={onDeleteFile}
           onOpenFile={openWindow}

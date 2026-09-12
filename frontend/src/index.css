@@ -2912,6 +2912,21 @@ h1, h2, h3, h4, h5, h6,
   font-size: 0.78rem;
 }
 .window-about dt { color: var(--text-muted); white-space: nowrap; }
+.window-about-map {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-primary);
+  font: inherit;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .window-about-map:hover { text-decoration: underline; text-underline-offset: 2px; }
+}
+
 .window-about dd {
   margin: 0;
   color: var(--text-primary);

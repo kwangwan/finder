@@ -1656,6 +1656,20 @@ export default function App() {
     windowManager.openWindow(file);
   };
 
+  // Where a photograph was taken, shown on the map — asked for from a window's
+  // 상세 정보 rather than from the gallery's own viewer. Stamped with the
+  // moment so that asking twice for the same place still moves the map.
+  const [galleryFocus, setGalleryFocus] = useState(null);
+  const showFileOnMap = (file) => {
+    if (file?.gps_latitude == null || file?.gps_longitude == null) return;
+    setGalleryFocus({
+      latitude: file.gps_latitude,
+      longitude: file.gps_longitude,
+      at: Date.now(),
+    });
+    setActiveView('gallery');
+  };
+
   // Where a new thing goes when the screen is not a folder.
   //
   // The 문서 탭, 일정 탭 and 즐겨찾기 are queries across folders, not places —
@@ -2391,6 +2405,7 @@ export default function App() {
             // reads, not in whichever one each country happens to use.
             language={currentUser?.language}
             userId={currentUser?.id}
+            focusRequest={galleryFocus}
             // A photograph can also be opened the way every other file is —
             // in a window, alongside the rest of what is open.
             onOpenInWindow={handleOpenFile}
@@ -2605,6 +2620,7 @@ export default function App() {
         workspaces={workspaces}
         onToggleFavorite={handleToggleFavorite}
         onDeleteFile={handleDeleteFile}
+        onShowOnMap={showFileOnMap}
         activeWorkspaceId={activeWorkspace?.id}
         currentUser={currentUser}
         onFileContextMenu={handleFileContextMenu}

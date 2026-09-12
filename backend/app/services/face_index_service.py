@@ -210,17 +210,20 @@ async def sweep(batch_size: int = 8, limit: Optional[int] = None, workspace_id=N
 
 
 # How alike two faces have to be before this app will say they are the same
-# person. SFace's own guidance is 0.363 cosine *distance*; as a similarity on
-# unit vectors that is about 0.64. Held a little above it here, because a
-# stranger turning up in a search is worse than a photograph missing from one:
-# the missing one is still findable by date, and the stranger is just wrong.
-SAME_PERSON_SIMILARITY = 0.66
+# person.
+#
+# Measured on this library rather than taken from a paper. Two faces in one
+# photograph are almost never the same person, which gives a few thousand pairs
+# that are certainly strangers with no labelling needed; 0.42 is where ArcFace
+# accepts one stranger in two hundred. The old number, 0.66, was the same point
+# for SFace — the two are not comparable as numbers, only as strictness.
+SAME_PERSON_SIMILARITY = float(os.getenv("FACE_SAME_PERSON", "0.42"))
 
 # Reaching from one face to the next. Higher than the threshold above, because
 # a step taken from a face that was itself only a guess is where a search
 # starts drifting into other people — each link has to be surer than the first
 # one was.
-LINK_SIMILARITY = 0.70
+LINK_SIMILARITY = float(os.getenv("FACE_LINK", "0.48"))
 
 # How many of the surest matches are stepped from, and how far each one reaches.
 EXPAND_FROM = 24

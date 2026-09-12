@@ -64,8 +64,7 @@ async def _face_index_worker():
                 # Fetched once, on the first file that needs them. If that
                 # fails — no network, say — there is no point hammering it.
                 try:
-                    await run_in_threadpool(face_service._model_path, "yunet")
-                    await run_in_threadpool(face_service._model_path, "sface")
+                    await run_in_threadpool(face_service.ensure_models)
                 except Exception as e:
                     print(f"[{settings.APP_NAME}] Face models unavailable: {e}")
                     await asyncio.sleep(3600)

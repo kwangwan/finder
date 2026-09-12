@@ -366,6 +366,32 @@ async def init_db():
         except Exception as e:
             print(f"[DB Migration Warning] Could not backfill username history: {e}")
 
+        # The face vectors changed shape when the model did — 128 numbers from
+        # SFace, 512 from ArcFace. There is no converting between them: they
+        # are different descriptions of a face, and a column of one cannot hold
+        # the other. So when the shape on disk is not the shape the code now
+        # writes, the old vectors go and every file is marked to be looked at
+        # again. Face search is empty until that sweep catches up, which is the
+        # honest cost of changing what a face means.
+        await apply("""
+            DO $$
+            DECLARE current_dims int;
+            BEGIN
+                SELECT a.atttypmod INTO current_dims
+                FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+                WHERE c.relname = 'kb_face_signatures' AND a.attname = 'embedding';
+
+                IF current_dims IS NOT NULL AND current_dims <> 512 THEN
+                    DROP INDEX IF EXISTS idx_faces_embedding_hnsw;
+                    TRUNCATE kb_face_signatures;
+                    ALTER TABLE kb_face_signatures
+                        ALTER COLUMN embedding TYPE vector(512);
+                    UPDATE kb_files SET faces_scanned_at = NULL
+                    WHERE file_type IN ('image', 'video');
+                END IF;
+            END $$;
+        """, "Could not move the face vectors to 512 numbers:")
+
         # Faces. The column marks a file as looked at (and stays set even when
         # nothing was found, so an empty photograph is not examined forever);
         # the index is the same kind the document search already uses.

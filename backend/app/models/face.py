@@ -10,7 +10,9 @@ from app.core.database import Base
 # SFace writes a face as 128 numbers (see services/face_service.py). Stored as
 # a unit vector, so comparing two of them is a dot product and pgvector's
 # cosine index is exact about what "alike" means.
-FACE_EMBEDDING_DIM = 128
+# ArcFace (w600k_r50) describes a face in 512 numbers. It was 128, which was
+# SFace's — see face_service for why that changed.
+FACE_EMBEDDING_DIM = 512
 
 
 class FacePerson(Base):

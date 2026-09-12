@@ -13,6 +13,7 @@ import {
   MoreVertical,
   Edit3,
   Info,
+  MapPin,
   Maximize2,
   Minimize2,
   Download,
@@ -64,6 +65,7 @@ export default function PreviewWindow({
   currentUser,
   externalRefreshToken = { n: 0, keys: null },
   onFileRenamed = null,
+  onShowOnMap = null,
 }) {
   const { id, file, isMinimized, isMaximized, position, size, zIndex } = windowState;
 
@@ -565,7 +567,21 @@ export default function PreviewWindow({
     }
     add('카메라', [resolvedFile.camera_make, resolvedFile.camera_model].filter(Boolean).join(' '));
     if (resolvedFile.gps_latitude != null && resolvedFile.gps_longitude != null) {
-      add('위치', `${resolvedFile.gps_latitude.toFixed(5)}, ${resolvedFile.gps_longitude.toFixed(5)}`);
+      const where = `${resolvedFile.gps_latitude.toFixed(5)}, ${resolvedFile.gps_longitude.toFixed(5)}`;
+      // A coordinate is a place, and this app has a map. Pressing it goes
+      // there — the same thing pressing a coordinate does in the gallery's own
+      // viewer, because it should not matter which of the two you opened the
+      // picture from.
+      add('위치', onShowOnMap ? (
+        <button
+          type="button"
+          className="window-about-map"
+          onClick={() => { setShowAbout(false); onShowOnMap(resolvedFile); }}
+          title="지도에서 보기"
+        >
+          <MapPin size={12} /> {where}
+        </button>
+      ) : where);
     }
   }
 

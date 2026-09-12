@@ -189,7 +189,7 @@ function readUrlState() {
 }
 
 export default function GalleryExplorer({
-  workspaceId, workspaceName, theme, language, userId, onOpenInWindow,
+  workspaceId, workspaceName, theme, language, userId, onOpenInWindow, focusRequest,
 }) {
   const initial = useMemo(readUrlState, []);
   const [mode, setMode] = useState(initial.mode);
@@ -294,6 +294,15 @@ export default function GalleryExplorer({
     setFaceSearch(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
+
+  // Somewhere else asked for a place to be shown — a window's 상세 정보, say.
+  useEffect(() => {
+    if (!focusRequest) return;
+    setMode('map');
+    setPlace(null);
+    setOpenId(null);
+    setFocusPoint({ latitude: focusRequest.latitude, longitude: focusRequest.longitude });
+  }, [focusRequest]);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({
