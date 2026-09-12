@@ -48,6 +48,111 @@ const LANGUAGE_FIELD = {
   ko: 'name:ko', en: 'name:en', ja: 'name:ja', zh: 'name:zh',
 };
 
+/**
+ * The colours of a journey: the first photograph's green, through the blue the
+ * rest of the map already uses, to the last one's orange. The same two ends as
+ * the start and finish dots, so the line and the dots are saying one thing.
+ */
+const PATH_RAMP = ['#7ee787', '#8ab4ff', '#ffa657'];
+const ARROW_STEPS = 7;
+
+function mixHex(from, to, ratio) {
+  const parse = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [ar, ag, ab] = parse(from);
+  const [br, bg, bb] = parse(to);
+  const channel = (a, b) => Math.round(a + (b - a) * ratio).toString(16).padStart(2, '0');
+  return `#${channel(ar, br)}${channel(ag, bg)}${channel(ab, bb)}`;
+}
+
+function rampColor(t) {
+  const at = Math.min(1, Math.max(0, t));
+  return at <= 0.5
+    ? mixHex(PATH_RAMP[0], PATH_RAMP[1], at * 2)
+    : mixHex(PATH_RAMP[1], PATH_RAMP[2], (at - 0.5) * 2);
+}
+
+/**
+ * One arrowhead, drawn pointing right — which is the direction a symbol placed
+ * on a line is turned to face. Dark edge first, colour over it, so the same
+ * arrow holds up on a pale basemap and a dark one.
+ */
+function arrowImage(color) {
+  const size = 26;
+  const scale = 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = size * scale;
+  canvas.height = size * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const chevron = (width, stroke) => {
+    ctx.beginPath();
+    ctx.moveTo(9, 7.5);
+    ctx.lineTo(17, 13);
+    ctx.lineTo(9, 18.5);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+  };
+  chevron(6, 'rgba(0,0,0,0.5)');
+  chevron(2.8, color);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function ensureArrowImages(map) {
+  for (let i = 0; i < ARROW_STEPS; i += 1) {
+    const id = `gal-arrow-${i}`;
+    // A change of theme throws the style away and the images with it, so this
+    // asks every time and adds only what is missing.
+    if (!map.hasImage(id)) {
+      map.addImage(id, arrowImage(rampColor(i / (ARROW_STEPS - 1))), { pixelRatio: 2 });
+    }
+  }
+}
+
+// How far a step bows away from the straight line between its two
+// photographs, as a fraction of that distance, and how finely the bow is
+// drawn.
+const ARC_BOW = 0.075;
+const ARC_STEPS = 16;
+
+/**
+ * The line for one step, bowed to the left of the way it is going.
+ *
+ * Straight lines cannot say a round trip. Go from a hotel to a temple and come
+ * back, and on a map zoomed out far enough the two steps lie exactly on top of
+ * one another — one arrow over another arrow pointing the opposite way, which
+ * reads as neither. Bowing every step consistently to its left separates them
+ * on its own: the way out and the way back bow apart, and what was an
+ * unreadable overlap becomes a narrow loop with an arrow on each side.
+ *
+ * The bow is a fraction of the step's own length, so a walk between two
+ * streets stays as straight as it looks, and only a real distance curves.
+ */
+function bowedLeg(from, to) {
+  // Longitude is worth less than latitude away from the equator; without this
+  // the bow leans and a north-south step curves more than an east-west one.
+  const cos = Math.max(0.2, Math.cos(((from[1] + to[1]) / 2) * (Math.PI / 180)));
+  const dx = (to[0] - from[0]) * cos;
+  const dy = to[1] - from[1];
+  const length = Math.hypot(dx, dy);
+  if (!length) return null;   // two photographs in one spot: a step with no direction
+  const reach = 2 * ARC_BOW * length;   // the apex lands at half the control point
+  const cx = (from[0] + to[0]) / 2 + ((-dy / length) * reach) / cos;
+  const cy = (from[1] + to[1]) / 2 + (dx / length) * reach;
+  const coordinates = [];
+  for (let i = 0; i <= ARC_STEPS; i += 1) {
+    const t = i / ARC_STEPS;
+    const inv = 1 - t;
+    coordinates.push([
+      inv * inv * from[0] + 2 * inv * t * cx + t * t * to[0],
+      inv * inv * from[1] + 2 * inv * t * cy + t * t * to[1],
+    ]);
+  }
+  return coordinates;
+}
+
 function clusterElement(cluster, isLarge, onClick) {
   const count = cluster.count;
   const size = count > 500 ? 74 : count > 100 ? 62 : count > 20 ? 54 : 44;
@@ -197,10 +302,15 @@ export default function GalleryMap({
    *
    * Not a route, and not one person's movement — a workspace is filled by
    * several people, so two consecutive photographs can be two of them in two
-   * countries. All this line claims is the sequence, which is a fact about
-   * the photographs rather than a guess about anybody. On a trip taken
-   * together it still shows the shape of the days; where it wanders, that is
-   * the library honestly saying two people were out at once.
+   * countries. All this line claims is the sequence, which is a fact about the
+   * photographs rather than a guess about anybody.
+   *
+   * That sequence now has a direction you can see. A bare line between dots
+   * only says "these two belong together"; an arrowhead on each step says
+   * which one came first, which is the thing the line was drawn for. The
+   * colour carries the same reading at a glance for anyone not counting
+   * arrowheads: the journey begins in the green of the first dot and ends in
+   * the orange of the last.
    *
    * Drawn faintly, with the stops on top, so what reads first is still where
    * the pictures are.
@@ -208,15 +318,24 @@ export default function GalleryMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    ensureArrowImages(map);
 
     const points = (path || []).filter((p) => p.latitude != null);
-    const line = {
-      type: 'FeatureCollection',
-      features: points.length > 1 ? [{
+    const legs = [];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const coordinates = bowedLeg(
+        [points[i].longitude, points[i].latitude],
+        [points[i + 1].longitude, points[i + 1].latitude],
+      );
+      if (!coordinates) continue;
+      const t = points.length > 2 ? i / (points.length - 2) : 0;
+      legs.push({
         type: 'Feature',
-        geometry: { type: 'LineString', coordinates: points.map((p) => [p.longitude, p.latitude]) },
-      }] : [],
-    };
+        geometry: { type: 'LineString', coordinates },
+        properties: { color: rampColor(t), arrow: `gal-arrow-${Math.round(t * (ARROW_STEPS - 1))}` },
+      });
+    }
+    const line = { type: 'FeatureCollection', features: legs };
     const stops = {
       type: 'FeatureCollection',
       features: points.map((p, index) => ({
@@ -241,10 +360,35 @@ export default function GalleryMap({
         source: 'gal-path',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'line-color': '#8ab4ff',
+          'line-color': ['to-color', ['get', 'color']],
           'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.1, 10, 2.2, 16, 3],
-          'line-opacity': 0.55,
+          'line-opacity': 0.5,
         },
+      });
+    }
+    if (!map.getLayer('gal-path-arrow')) {
+      map.addLayer({
+        id: 'gal-path-arrow',
+        type: 'symbol',
+        source: 'gal-path',
+        layout: {
+          // One arrow per step, at the top of its bow. Spacing along the line
+          // would put none at all on a short step and a row of them on a long
+          // one; this way every step says its direction exactly once.
+          'symbol-placement': 'line-center',
+          'icon-image': ['get', 'arrow'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 10, 0.68, 16, 0.85],
+          'icon-rotation-alignment': 'map',
+          // An arrow turned over to stay upright is an arrow pointing the
+          // wrong way. It must be free to face west.
+          'icon-keep-upright': false,
+          // Where a year's worth of steps crowds into one town, the map drops
+          // the arrows that would land on each other rather than drawing a
+          // blot; zooming in gives them back.
+          'icon-allow-overlap': false,
+          'icon-padding': 2,
+        },
+        paint: { 'icon-opacity': 0.95 },
       });
     }
     if (!map.getLayer('gal-stops-dot')) {

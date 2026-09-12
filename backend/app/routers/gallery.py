@@ -352,13 +352,22 @@ def _grid_size(zoom: int) -> float:
         return 0.015
     if zoom <= 15:
         return 0.004
-    return 0.0008
+    if zoom <= 16:
+        return 0.0008
+    # Zoomed in this far the screen is a street, then a courtyard. A cell that
+    # is wider than the view would gather everything on it into one dot sitting
+    # off to a side, so the grid keeps getting finer until it is a few metres.
+    if zoom <= 18:
+        return 0.0002
+    return 0.00005
 
 
 @router.get("/map")
 async def gallery_map(
     workspace_id: uuid.UUID,
-    zoom: int = Query(3, ge=0, le=20),
+    # The map itself goes to 22. Refusing a zoom it can reach would mean a 422
+    # and, on the other end, a map that quietly loses every dot at full zoom.
+    zoom: int = Query(3, ge=0, le=24),
     q: Optional[str] = None,
     kind: str = Query("all", pattern="^(all|image|video)$"),
     year: Optional[int] = Query(None, ge=1900, le=2200),

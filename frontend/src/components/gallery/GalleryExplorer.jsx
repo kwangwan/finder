@@ -272,7 +272,10 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
     let cancelled = false;
     getGalleryMap(workspaceId, { ...filters, zoom: mapView.zoom, bbox: mapView.bbox })
       .then((data) => { if (!cancelled) setClusters(data.clusters); })
-      .catch(() => { if (!cancelled) setClusters([]); });
+      // A failed request is not the same as an empty map. Emptying it on any
+      // error is how a single refused zoom level made every dot disappear;
+      // keeping what was drawn leaves the view a moment stale at worst.
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [mode, workspaceId, filters, mapView]);
 
@@ -558,10 +561,12 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   type="button"
                   className={`gal-map-toggle ${showPath ? 'is-on' : ''}`}
                   onClick={() => setShowPath((v) => !v)}
-                  title={uploaderName
+                  title={`${uploaderName
                     ? `${uploaderName}님이 올린 사진을 찍힌 시간 순서대로 이은 선입니다.`
                     : '사진이 찍힌 시간 순서대로 이은 선입니다.\n'
-                      + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}
+                      + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}\n`
+                    + '화살표는 다음 사진으로 향하고, 색은 처음의 초록에서 마지막의 주황으로 옮겨갑니다.\n'
+                    + '같은 길을 오갔다면 갈 때와 올 때의 선이 겹치지 않도록 서로 반대로 휘어 그려집니다.'}
                 >
                   <ArrowRight size={13} />
                   <span>촬영 시간순</span>
@@ -571,6 +576,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                     사진 {path.total_count.toLocaleString()}장
                     {path.sampled && ` 중 ${path.points.length.toLocaleString()}장`}
                     {' '}· {uploaderName ? `${uploaderName}님의 사진, ` : ''}찍힌 시간 순서로 이음
+                    {' '}· 화살표가 다음 사진 방향
                   </span>
                 )}
               </div>
