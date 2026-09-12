@@ -41,6 +41,40 @@ function useDebounced(value, delay = 320) {
   return settled;
 }
 
+/**
+ * One press of a dot goes one step closer, not all the way in.
+ *
+ * It used to fly straight to street level from wherever you were: a dot over
+ * the Pacific became a junction with nothing around it, and the sense of
+ * where that was in the world was gone. Stepping in keeps the ground you came
+ * from on screen — a country becomes a province, a province becomes a city —
+ * and pressing the same dot again goes another step. The steps are larger
+ * when far out, where two zoom levels change little, and smaller when close,
+ * where they change everything.
+ */
+function stepIn(currentZoom) {
+  const from = Number.isFinite(currentZoom) ? currentZoom : 5;
+  const step = from < 5 ? 3 : from < 9 ? 2.5 : from < 13 ? 2 : 1.5;
+  return Math.min(from + step, 16.5);
+}
+
+/**
+ * How much ground "this place" covers at a given zoom.
+ *
+ * Matched to what the map will be showing once it has moved, so the panel
+ * beside it lists the photographs somebody can actually see rather than
+ * everything within an arbitrary two kilometres.
+ */
+function placeRadiusKm(zoom) {
+  if (zoom < 6) return 220;
+  if (zoom < 8) return 80;
+  if (zoom < 10) return 30;
+  if (zoom < 12) return 10;
+  if (zoom < 14) return 4;
+  if (zoom < 16) return 1.5;
+  return 0.6;
+}
+
 function readUrlState() {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -279,9 +313,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
     return () => { cancelled = true; };
   }, [mode, showPath, workspaceId, filters]);
 
-  const openPlace = useCallback(async (latitude, longitude, radiusKm) => {
+  const openPlace = useCallback(async (latitude, longitude, atZoom) => {
+    const zoom = atZoom ?? 14;
+    const radiusKm = placeRadiusKm(zoom);
     setPlace({ latitude, longitude, loading: true, items: [], total: 0 });
-    setFocusPoint({ latitude, longitude, zoom: radiusKm <= 0.5 ? 16 : 13 });
+    setFocusPoint({ latitude, longitude, zoom });
     try {
       const data = await getGalleryPlace(workspaceId, latitude, longitude, {
         ...filters, radius_km: radiusKm, page_size: 40,
@@ -458,11 +494,14 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 path={showPath ? path?.points : null}
                 focus={focusPoint}
                 onBoundsChange={setMapView}
-                onOpenCluster={(cluster) => openPlace(cluster.latitude, cluster.longitude,
-                  Math.max(0.4, (mapView?.zoom || 6) >= 12 ? 0.5 : 12))}
+                onOpenCluster={(cluster) => openPlace(
+                  cluster.latitude, cluster.longitude, stepIn(mapView?.zoom),
+                )}
                 onPickPathPoint={(id) => {
+                  // A single photograph's dot is already one photograph, so
+                  // there is nothing to break apart: this one does go close.
                   const point = path?.points?.find((p) => p.id === id);
-                  if (point) openPlace(point.latitude, point.longitude, 0.3);
+                  if (point) openPlace(point.latitude, point.longitude, Math.max(15, mapView?.zoom || 15));
                 }}
               />
               <div className="gal-map-tools">

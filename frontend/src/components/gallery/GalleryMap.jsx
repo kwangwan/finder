@@ -272,10 +272,14 @@ export default function GalleryMap({
   // Asked to show one particular place.
   useEffect(() => {
     if (!focus || !mapRef.current) return;
+    // The caller has already decided how far in this press should go (see
+    // stepIn in GalleryExplorer); this only refuses to zoom *out*, so that
+    // pressing a dot never takes ground away.
     mapRef.current.flyTo({
       center: [focus.longitude, focus.latitude],
       zoom: Math.max(mapRef.current.getZoom(), focus.zoom || 13),
-      duration: 900,
+      duration: 1100,
+      essential: true,
     });
   }, [focus]);
 
