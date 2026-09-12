@@ -7950,36 +7950,6 @@ input.bd-name:focus {
 
 /* ── the map's own controls, and the place panel ───────────────────────── */
 
-.gal-map-tools {
-  position: absolute;
-  top: 0.85rem;
-  left: 0.85rem;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.gal-map-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: var(--gal-panel);
-  color: var(--text-secondary);
-  font-size: 0.74rem;
-  cursor: pointer;
-  backdrop-filter: blur(6px);
-}
-.gal-map-toggle:hover { color: var(--text-primary); }
-.gal-map-toggle.is-on {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
-  background: color-mix(in srgb, var(--accent-primary) 78%, var(--gal-panel));
-}
-
 .gal-place-back {
   align-self: flex-start;
   display: inline-flex;

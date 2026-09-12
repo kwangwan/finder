@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, X, LayoutGrid, Map as MapIcon, Image as ImageIcon, Film, Loader2, Users,
-  ArrowRight,
 } from '../../utils/icons';
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
@@ -210,7 +209,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [faceStatus, setFaceStatus] = useState(null);
   // The map's two extras: the trail of a chosen period, and whichever place
   // is currently being looked into.
-  const [showPath, setShowPath] = useState(false);
+
   const [path, setPath] = useState(null);
   const [place, setPlace] = useState(null);
 
@@ -407,13 +406,16 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   }, [workspaceId, faceSearch]);
 
   useEffect(() => {
-    if (mode !== 'map' || !showPath || !workspaceId) { setPath(null); return undefined; }
+    // Always, on the map. The line is how the map says "in this order" — a
+    // switch for it made the order an extra somebody had to know to ask for,
+    // and the map without it is just dots that happen to be near each other.
+    if (mode !== 'map' || !workspaceId) { setPath(null); return undefined; }
     let cancelled = false;
     getGalleryPath(workspaceId, filters)
       .then((data) => { if (!cancelled) setPath(data); })
       .catch(() => { if (!cancelled) setPath(null); });
     return () => { cancelled = true; };
-  }, [mode, showPath, workspaceId, filters]);
+  }, [mode, workspaceId, filters]);
 
   const PLACE_PAGE = 60;
 
@@ -801,7 +803,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 clusters={clusters}
                 theme={theme}
                 language={language}
-                path={showPath ? path?.points : null}
+                path={path?.points}
                 focus={focusPoint}
                 onBoundsChange={setMapView}
                 selectedId={place?.sampleId || null}
@@ -825,29 +827,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   stay: stop.stay, move: true,
                 })}
               />
-              <div className="gal-map-tools">
-                {/* Not "이동 순서". That would claim these photographs were
-                    taken by one person moving between the places, and a
-                    workspace is filled by several people at once — two
-                    consecutive photographs can be two people in two cities.
-                    What the line actually joins is the order they were taken
-                    in, which is all it says now. */}
-                <button
-                  type="button"
-                  className={`gal-map-toggle ${showPath ? 'is-on' : ''}`}
-                  onClick={() => setShowPath((v) => !v)}
-                  title={`${uploaderName
-                    ? `${uploaderName}님이 올린 사진을 찍힌 시간 순서대로 이은 선입니다.`
-                    : '사진이 찍힌 시간 순서대로 이은 선입니다.\n'
-                      + '여러 사람이 올린 사진이라면 한 사람의 이동 경로가 아닙니다.'}\n`
-                    + '한자리에서 이어 찍은 사진은 한 지점으로 묶습니다. 빠지는 사진은 없습니다.\n'
-                    + '화살표는 다음 사진으로 향하고, 색은 처음의 초록에서 마지막의 주황으로 옮겨갑니다.\n'
-                    + '같은 길을 오갔다면 갈 때와 올 때의 선이 겹치지 않도록 서로 반대로 휘어 그려집니다.'}
-                >
-                  <ArrowRight size={13} />
-                  <span>촬영 시간순</span>
-                </button>
-              </div>
             </div>
 
             <aside className={`gal-map-side ${narrow && sheetTall ? 'is-tall' : ''}`}>
