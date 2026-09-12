@@ -7162,14 +7162,21 @@ input.bd-name:focus {
   background: color-mix(in srgb, var(--accent-primary) 34%, var(--gal-ink-strong));
 }
 
+/* What is currently being shown, named. With several filters on and a narrow
+   screen this was one unbreakable row squeezed into the width available, so
+   each name was cut in half and wrapped inside itself. It wraps between names
+   instead, never through one, and a long device name gives way with an
+   ellipsis rather than pushing the rest off the screen. */
 .gal-filterbar {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.7rem;
   padding: 0 1.75rem 0.7rem;
   font-size: 0.78rem;
   color: var(--text-secondary);
 }
+.gal-filterbar > * { white-space: nowrap; flex: none; }
 .gal-chip-label { font-weight: 600; letter-spacing: 0.02em; }
 .gal-chip-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .gal-chip-clear {
@@ -7634,6 +7641,7 @@ input.bd-name:focus {
   .gal-tools .gal-seg[aria-label="보기 방식"] { margin-left: 0; }
   .gal-tools .gal-seg[aria-label="보기 방식"] button { padding: 0.32rem 0.6rem; }
   .gal-scroll { padding: 0 0.75rem 4rem 1rem; }
+  .gal-filterbar { padding: 0 0.85rem 0.55rem; gap: 0.2rem 0.5rem; font-size: 0.73rem; }
   .gal-sheet-back { align-items: flex-end; padding: 0; }
   .gal-sheet {
     width: 100%;
@@ -8038,6 +8046,11 @@ input.bd-name:focus {
 .gal-light-undated { color: rgba(255, 255, 255, 0.72); }
 
 .gal-chip-who {
+  display: inline-block;
+  max-width: min(42vw, 220px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
   color: var(--text-secondary);
   background: var(--gal-ink);
   border-radius: 999px;
