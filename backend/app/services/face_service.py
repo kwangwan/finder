@@ -63,7 +63,16 @@ MODELS = {
 # than this many pixels across carries too little to tell one person from
 # another — a crowd in the distance would otherwise fill the index with
 # vectors that match everybody equally.
-MIN_DETECTION_SCORE = 0.75
+#
+# This was 0.75, and 0.75 is roughly "facing the camera". The detector is less
+# sure of a head in profile than of the same head turned forward, so a profile
+# scores in the sixties and was thrown away — which is why the same person was
+# found in every photograph looking at the lens and in none of the others.
+# Of the faces this admits that 0.75 refused, measured over ninety
+# photographs, about three in four are real and nearly all of those are
+# profiles; the rest are the back of a head or a flower, and a face nobody
+# resembles costs little beyond a box drawn where it should not be.
+MIN_DETECTION_SCORE = 0.60
 MIN_FACE_PIXELS = 44
 
 # Detection runs on a reduced copy — a 6000-pixel photograph costs seconds at
