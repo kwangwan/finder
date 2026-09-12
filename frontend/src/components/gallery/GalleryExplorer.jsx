@@ -90,6 +90,25 @@ function MultiPick({ label, allLabel, options, values, onChange }) {
   );
 }
 
+/**
+ * A filter with only one possible answer.
+ *
+ * Hidden, these made the panel a different shape in every workspace — one
+ * library offered "올린 사람", the next offered "카메라", and neither said why.
+ * Shown but not pressable, the panel is always the same panel, and the one
+ * value says something worth knowing on its own: that everything here came
+ * from one person, or off one camera.
+ */
+function LonePick({ label, hint }) {
+  return (
+    <span className="ui-dd">
+      <button type="button" className="ui-dd-btn" disabled title={hint}>
+        <span className="ui-dd-label">{label}</span>
+      </button>
+    </span>
+  );
+}
+
 const PAGE_SIZE = 80;
 
 /** Whether this is a screen with no room to lay things side by side. */
@@ -674,6 +693,12 @@ export default function GalleryExplorer({
               </button>
             </div>
 
+            {uploaders.length === 1 && (
+              <LonePick
+                label={`${uploaders[0].name} · ${uploaders[0].count.toLocaleString()}`}
+                hint="이 워크스페이스에 사진을 올린 사람은 한 명입니다"
+              />
+            )}
             {uploaders.length > 1 && (
               <Dropdown
                 value={uploader}
@@ -689,6 +714,16 @@ export default function GalleryExplorer({
               />
             )}
 
+            {cameras.length <= 1 && (
+              <LonePick
+                label={cameras.length
+                  ? `${cameras[0].name} · ${cameras[0].count.toLocaleString()}`
+                  : '카메라 정보 없음'}
+                hint={cameras.length
+                  ? '이 워크스페이스의 사진은 모두 한 기기로 찍혔습니다'
+                  : '이 워크스페이스의 사진에는 어떤 기기로 찍었는지가 남아 있지 않습니다'}
+              />
+            )}
             {cameras.length > 1 && (
               <MultiPick
                 label="카메라"
