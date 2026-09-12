@@ -61,6 +61,17 @@ const LANGUAGE_FIELD = {
 // detail back rather than inventing it.
 const MIN_LEG_PX = 30;
 
+/** A stop, read back off the feature the map was clicked on. */
+function asStop({ id, lat, lon, bounds }) {
+  const box = String(bounds || '').split(',').map(Number);
+  return {
+    id,
+    latitude: lat,
+    longitude: lon,
+    bounds: box.length === 4 && box.every(Number.isFinite) ? box : null,
+  };
+}
+
 /**
  * The stops, thinned to what this zoom can actually show.
  *
@@ -80,6 +91,15 @@ function legibleStops(map, stops) {
       const into = kept[kept.length - 1];
       into.count += stop.count || 1;
       into.until = stop.until || into.until;
+      // It now stands for the merged stop's photographs as well, so it has to
+      // stand for their ground as well — otherwise opening it would show only
+      // the part it started as.
+      if (stop.bounds && into.bounds) {
+        into.bounds = [
+          Math.min(into.bounds[0], stop.bounds[0]), Math.min(into.bounds[1], stop.bounds[1]),
+          Math.max(into.bounds[2], stop.bounds[2]), Math.max(into.bounds[3], stop.bounds[3]),
+        ];
+      }
       return;
     }
     anchor = here;
@@ -188,7 +208,7 @@ function bowedLeg(from, to) {
   return coordinates;
 }
 
-function clusterElement(cluster, isLarge, onClick) {
+function clusterElement(cluster, isLarge, isSelected, onClick) {
   const count = cluster.count;
   const size = count > 500 ? 74 : count > 100 ? 62 : count > 20 ? 54 : 44;
   const label = count > 999 ? `${Math.round(count / 1000)}k` : count;
@@ -197,7 +217,7 @@ function clusterElement(cluster, isLarge, onClick) {
   element.style.width = `${size}px`;
   element.style.height = `${size}px`;
   element.innerHTML = `
-    <div class="gal-cluster-inner ${isLarge ? 'is-large' : ''}" style="width:${size}px;height:${size}px">
+    <div class="gal-cluster-inner ${isLarge ? 'is-large' : ''} ${isSelected ? 'is-selected' : ''}" style="width:${size}px;height:${size}px">
       ${cluster.sample_id ? `<img src="${getThumbnailUrl(cluster.sample_id)}" alt="" loading="lazy" />` : ''}
       <span class="gal-cluster-count">${label}</span>
     </div>`;
@@ -214,6 +234,8 @@ export default function GalleryMap({
   onBoundsChange,
   onOpenCluster,
   onPickPathPoint,
+  onFollowLeg,
+  selectedId,
 }) {
   const holderRef = useRef(null);
   const mapRef = useRef(null);
@@ -222,6 +244,13 @@ export default function GalleryMap({
   const [ready, setReady] = useState(false);
   const [styleEpoch, setStyleEpoch] = useState(0);
   const [zoomEpoch, setZoomEpoch] = useState(0);
+
+  // The map's own click handlers are attached once, with the layer they belong
+  // to, and would otherwise hold whichever version of these functions happened
+  // to exist at that moment — closed over the state of a map that had not
+  // finished loading. Read through a ref, they are always the current ones.
+  const handlers = useRef({});
+  handlers.current = { onPickPathPoint, onFollowLeg };
 
   const report = useCallback(() => {
     const map = mapRef.current;
@@ -327,6 +356,10 @@ export default function GalleryMap({
       const element = clusterElement(
         cluster,
         cluster.count >= biggest * 0.6 && biggest > 4,
+        // Reading a dot leaves the map where it was, so the one being read has
+        // to say so itself — otherwise working along a row of them is done
+        // blind.
+        !!selectedId && cluster.sample_id === selectedId,
         (c) => onOpenCluster?.(c),
       );
       const marker = new Marker({ element, anchor: 'center' })
@@ -334,7 +367,7 @@ export default function GalleryMap({
         .addTo(map);
       markersRef.current.push(marker);
     });
-  }, [clusters, onOpenCluster]);
+  }, [clusters, selectedId, onOpenCluster]);
 
   /**
    * The photographs of this period, joined in the order they were taken.
@@ -368,10 +401,21 @@ export default function GalleryMap({
       );
       if (!coordinates) continue;
       const t = points.length > 2 ? i / (points.length - 2) : 0;
+      const to = points[i + 1];
       legs.push({
         type: 'Feature',
         geometry: { type: 'LineString', coordinates },
-        properties: { color: rampColor(t), arrow: `gal-arrow-${Math.round(t * (ARROW_STEPS - 1))}` },
+        properties: {
+          color: rampColor(t),
+          arrow: `gal-arrow-${Math.round(t * (ARROW_STEPS - 1))}`,
+          // Where the arrow is pointing — so following the line is a matter of
+          // clicking it. Flattened to a string because a feature property has
+          // to be a plain value by the time it reaches a click handler.
+          toId: to.id,
+          toLat: to.latitude,
+          toLon: to.longitude,
+          toBounds: (to.bounds || []).join(','),
+        },
       });
     }
     const line = { type: 'FeatureCollection', features: legs };
@@ -384,6 +428,9 @@ export default function GalleryMap({
           id: p.id,
           order: index,
           count: p.count || 1,
+          lat: p.latitude,
+          lon: p.longitude,
+          bounds: (p.bounds || []).join(','),
           first: index === 0,
           last: index === points.length - 1,
         },
@@ -410,6 +457,32 @@ export default function GalleryMap({
           'line-opacity': 0.5,
         },
       });
+    }
+    if (!map.getLayer('gal-path-hit')) {
+      // A line drawn two pixels wide is a line nobody can hit. This one is
+      // invisible and wide, and carries the pointing.
+      map.addLayer({
+        id: 'gal-path-hit',
+        type: 'line',
+        source: 'gal-path',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#000', 'line-width': 16, 'line-opacity': 0 },
+      });
+      map.on('click', 'gal-path-hit', (e) => {
+        // A stop sitting on the line is its own thing to click, and it is on
+        // top; the leg does not answer for it.
+        if (map.queryRenderedFeatures(e.point, { layers: ['gal-stops-dot'] }).length) return;
+        const properties = e.features?.[0]?.properties;
+        if (!properties?.toId) return;
+        handlers.current.onFollowLeg?.(asStop({
+          id: properties.toId,
+          lat: properties.toLat,
+          lon: properties.toLon,
+          bounds: properties.toBounds,
+        }));
+      });
+      map.on('mouseenter', 'gal-path-hit', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'gal-path-hit', () => { map.getCanvas().style.cursor = ''; });
     }
     if (!map.getLayer('gal-path-arrow')) {
       map.addLayer({
@@ -455,13 +528,17 @@ export default function GalleryMap({
         },
       });
       map.on('click', 'gal-stops-dot', (e) => {
-        const feature = e.features?.[0];
-        if (feature) onPickPathPoint?.(feature.properties.id);
+        const properties = e.features?.[0]?.properties;
+        // Carried on the feature rather than looked up by id afterwards: a
+        // stop the map merged for legibility stands for more ground than the
+        // one the server sent under that id, and it is the merged one being
+        // clicked.
+        if (properties) handlers.current.onPickPathPoint?.(asStop(properties));
       });
       map.on('mouseenter', 'gal-stops-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'gal-stops-dot', () => { map.getCanvas().style.cursor = ''; });
     }
-  }, [path, ready, styleEpoch, zoomEpoch, onPickPathPoint]);
+  }, [path, ready, styleEpoch, zoomEpoch]);
 
   // Asked to show one particular place.
   useEffect(() => {

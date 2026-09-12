@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { ChevronLeft, Loader2 } from '../../utils/icons';
+import { ChevronLeft, Loader2, Maximize2 } from '../../utils/icons';
 import { getThumbnailUrl } from '../../api';
 
 /**
@@ -32,7 +32,7 @@ function dayLabel(item) {
   return `${year}${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAYS[date.getDay()]})`;
 }
 
-export default function GalleryPlacePanel({ place, onBack, onOpen, onLoadMore }) {
+export default function GalleryPlacePanel({ place, onBack, onOpen, onLoadMore, onZoomIn, canZoomIn }) {
   const sentinelRef = useRef(null);
   const hasMore = place.page < place.totalPages;
 
@@ -78,6 +78,14 @@ export default function GalleryPlacePanel({ place, onBack, onOpen, onLoadMore })
           {place.loading && !place.items.length ? '찾는 중…' : `${place.total.toLocaleString()}개`}
           {span && !place.loading && ` · ${span}`}
         </span>
+        {/* Pressing a dot no longer moves the map, so that it stays possible to
+            read the dot next door. Breaking this one apart into smaller dots is
+            the other wish, and it is asked for here. */}
+        {canZoomIn && (
+          <button type="button" className="gal-place-zoom" onClick={onZoomIn} title="이 지점을 한 단계 확대합니다. 묶여 있던 사진이 더 작은 단위로 나뉩니다.">
+            <Maximize2 size={12} /> 가까이서 보기
+          </button>
+        )}
       </div>
 
       <div className="gal-place-scroll">

@@ -479,6 +479,9 @@ def _stops_along(rows) -> list:
                 stop["_lon"] += lon
                 stop["latitude"] = stop["_lat"] / stop["count"]
                 stop["longitude"] = stop["_lon"] / stop["count"]
+                bounds = stop["bounds"]
+                stop["bounds"] = [min(bounds[0], lat), min(bounds[1], lon),
+                                  max(bounds[2], lat), max(bounds[3], lon)]
                 if row.taken:
                     stop["until"] = row.taken.isoformat()
                 continue
@@ -488,6 +491,11 @@ def _stops_along(rows) -> list:
             "latitude": lat,
             "longitude": lon,
             "count": 1,
+            # The ground this stop actually covers, so asking for its
+            # photographs is asking for exactly the ones it is made of —
+            # the same reason a dot on the map carries its own extent
+            # rather than being looked up by a radius.
+            "bounds": [lat, lon, lat, lon],
             "taken_at": row.taken.isoformat() if row.taken else None,
             "until": row.taken.isoformat() if row.taken else None,
             "_lat": lat,
@@ -533,6 +541,18 @@ async def gallery_path(
     the next one — which is also why a return to somewhere already visited is a
     new stop and not a merge, since what is being collapsed is time spent still,
     never two visits.
+
+    Nothing here is stored. The trail is worked out from the photographs every
+    time it is asked for, so photographs of the middle of a trip uploaded a year
+    later simply appear in the middle where they belong, the next time it is
+    opened — there is no saved route to go stale.
+
+    What would go wrong is a photograph with a place but no capture time. Every
+    other view falls back to the upload date for those, which is honest there
+    because it is shown as an upload date; here it would be a lie with a line
+    drawn through it — a leg from the middle of a trip to wherever today's
+    upload happened to be. So they are left out and counted, and the map says
+    how many.
     """
     await _require_member(db, current_user, workspace_id)
     zone = _zone(tz)
@@ -541,16 +561,16 @@ async def gallery_path(
         q=q, zone=zone, year=year, month=month,
         date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader,
     )
-    taken = func.coalesce(FileItem.taken_at, FileItem.created_at)
-
     total = (await db.execute(
         select(func.count(FileItem.id)).where(and_(*conditions))
     )).scalar_one()
 
+    dated = conditions + [FileItem.taken_at.isnot(None)]
     rows = (await db.execute(
-        select(FileItem.id, FileItem.gps_latitude, FileItem.gps_longitude, taken.label("taken"))
-        .where(and_(*conditions))
-        .order_by(taken.asc(), FileItem.id.asc())
+        select(FileItem.id, FileItem.gps_latitude, FileItem.gps_longitude,
+               FileItem.taken_at.label("taken"))
+        .where(and_(*dated))
+        .order_by(FileItem.taken_at.asc(), FileItem.id.asc())
         .limit(MAX_PATH_PHOTOS)
     )).all()
 
@@ -558,6 +578,7 @@ async def gallery_path(
         "points": _stops_along(rows),
         "total_count": total,
         "counted": len(rows),
+        "undated": max(total - len(rows), 0),
         "stop_radius_m": STOP_RADIUS_M,
     }
 

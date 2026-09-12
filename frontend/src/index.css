@@ -7426,6 +7426,13 @@ input.bd-name:focus {
 .gal-cluster { cursor: pointer; }
 .gal-cluster:hover .gal-cluster-inner { transform: scale(1.08); }
 .gal-cluster-inner.is-large { border-color: var(--gal-cluster-ring, rgba(255, 255, 255, 0.9)); filter: brightness(1.05); }
+/* The one currently open in the panel. A ring rather than a size change: the
+   dots around it must stay exactly where they were, which is the whole reason
+   reading one no longer moves the map. */
+.gal-cluster-inner.is-selected {
+  border-color: #8ab4ff;
+  box-shadow: 0 0 0 3px rgba(138, 180, 255, 0.35), 0 8px 22px -8px rgba(0, 0, 0, 0.9);
+}
 .gal-cluster-inner img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .gal-cluster-count {
   /* The dot is the button; its own label must not swallow the press. */
@@ -7746,6 +7753,27 @@ input.bd-name:focus {
   padding: 0 0 0.25rem;
 }
 .gal-place-back:hover { color: var(--text-primary); }
+
+.gal-place-zoom {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+  padding: 0.22rem 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.gal-place-zoom:hover {
+  color: var(--text-primary);
+  border-color: #8ab4ff;
+  background: rgba(138, 180, 255, 0.12);
+}
 
 .gal-place-grid {
   display: grid;

@@ -328,13 +328,27 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
    * "everything within a few kilometres" — a dot holding a single photograph
    * used to answer with a hundred from the dots beside it.
    */
-  const openPlace = useCallback(async (latitude, longitude, atZoom, bounds) => {
+  /**
+   * Open what is at one point, in the panel beside the map.
+   *
+   * It does not move the map unless it is asked to, and that is the point.
+   * Pressing a dot used to zoom a step in, which changed how every *other* dot
+   * on the screen was grouped — so wanting to look at the one next door meant
+   * finding it again in a regrouping that had just happened underneath the
+   * cursor. Reading a dot and rearranging the map are two different wishes;
+   * only the second one is worth moving the ground for, and it now has its own
+   * button. Following an arrow still moves, because going somewhere is what it
+   * was asked to do, and even then it keeps the height it was given.
+   */
+  const openPlace = useCallback(async (latitude, longitude, {
+    zoom: atZoom, bounds, move = false, sampleId = null,
+  } = {}) => {
     const zoom = atZoom ?? 14;
     const radiusKm = placeRadiusKm(zoom);
     const area = bounds ? { bbox: bounds.join(',') } : { radius_km: radiusKm };
-    const base = { latitude, longitude, radiusKm, bounds: bounds || null };
+    const base = { latitude, longitude, radiusKm, bounds: bounds || null, sampleId };
     setPlace({ ...base, loading: true, items: [], total: 0, page: 0, totalPages: 0 });
-    setFocusPoint({ latitude, longitude, zoom });
+    if (move) setFocusPoint({ latitude, longitude, zoom });
     try {
       const data = await getGalleryPlace(workspaceId, latitude, longitude, {
         ...filters, ...area, page: 1, page_size: PLACE_PAGE,
@@ -540,15 +554,18 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 path={showPath ? path?.points : null}
                 focus={focusPoint}
                 onBoundsChange={setMapView}
-                onOpenCluster={(cluster) => openPlace(
-                  cluster.latitude, cluster.longitude, stepIn(mapView?.zoom), cluster.bounds,
-                )}
-                onPickPathPoint={(id) => {
-                  // A single photograph's dot is already one photograph, so
-                  // there is nothing to break apart: this one does go close.
-                  const point = path?.points?.find((p) => p.id === id);
-                  if (point) openPlace(point.latitude, point.longitude, Math.max(15, mapView?.zoom || 15));
-                }}
+                selectedId={place?.sampleId || null}
+                onOpenCluster={(cluster) => openPlace(cluster.latitude, cluster.longitude, {
+                  zoom: mapView?.zoom, bounds: cluster.bounds, sampleId: cluster.sample_id,
+                })}
+                onPickPathPoint={(stop) => openPlace(stop.latitude, stop.longitude, {
+                  zoom: mapView?.zoom, bounds: stop.bounds, sampleId: stop.id,
+                })}
+                // Following an arrow is going where it points, at the height
+                // you are already looking from — not diving into it.
+                onFollowLeg={(stop) => openPlace(stop.latitude, stop.longitude, {
+                  zoom: mapView?.zoom || 13, bounds: stop.bounds, sampleId: stop.id, move: true,
+                })}
               />
               <div className="gal-map-tools">
                 {/* Not "이동 순서". That would claim these photographs were
@@ -578,6 +595,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                     {path.total_count.toLocaleString()}장
                     {' '}· 머문 자리 {path.points.length.toLocaleString()}곳
                     {' '}· 찍힌 시간 순서, 화살표가 다음 방향
+                    {path.undated > 0 && (
+                      <span title="촬영 시각이 없으면 순서를 알 수 없어 선에서 뺍니다. 올린 날짜를 쓰면 실제로 가지 않은 구간이 그려집니다.">
+                        {' '}· 촬영 시각이 없는 {path.undated.toLocaleString()}장 제외
+                      </span>
+                    )}
                   </span>
                 )}
               </div>
@@ -590,6 +612,14 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   onBack={() => setPlace(null)}
                   onOpen={openAt}
                   onLoadMore={loadMorePlace}
+                  // Rearranging the map, now that it is a thing you ask for
+                  // rather than a thing that happens to you.
+                  onZoomIn={() => setFocusPoint({
+                    latitude: place.latitude,
+                    longitude: place.longitude,
+                    zoom: stepIn(mapView?.zoom),
+                  })}
+                  canZoomIn={(mapView?.zoom || 0) < 16}
                 />
               ) : (
                 <>
