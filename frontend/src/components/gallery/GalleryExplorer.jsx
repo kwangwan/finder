@@ -730,29 +730,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
         </div>
       )}
 
-      {(year || month || q || kind !== 'all' || uploader || camera.length || hasPlace) && (
-        <div className="gal-filterbar">
-          <span className="gal-chip-label">{periodLabel}</span>
-          {uploaderName && <span className="gal-chip-who">{uploaderName}</span>}
-          {camera.length > 0 && (
-            <span className="gal-chip-who">
-              {camera.length === 1 ? camera[0] : `카메라 ${camera.length}대`}
-            </span>
-          )}
-          {hasPlace && <span className="gal-chip-who">{hasPlace === 'yes' ? '지도에 있는 것' : '위치 없는 것'}</span>}
-          <span className="gal-chip-count">{totalCount.toLocaleString()}개</span>
-          <button
-            type="button"
-            className="gal-chip-clear"
-            onClick={() => {
-              clearFilters();
-            }}
-          >
-            조건 지우기
-          </button>
-        </div>
-      )}
-
       {/* A face search answers a question that has no year, no map and no
           period, so it takes the screen whichever view asked it. It used to be
           tested after the map, which meant pressing "이 사람 찾기" on a
