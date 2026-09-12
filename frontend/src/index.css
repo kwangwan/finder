@@ -7042,12 +7042,26 @@ input.bd-name:focus {
   flex-wrap: wrap;
 }
 
+.gal-head-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
 .gal-head-title h1 {
-  font-size: 1.45rem;
-  font-weight: 300;
-  letter-spacing: 0.06em;
-  margin: 0 0 0.35rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  margin: 0;
   color: var(--text-primary);
+}
+.gal-head-count {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .gal-head-title p {
@@ -7319,28 +7333,39 @@ input.bd-name:focus {
 /* ── the map ──────────────────────────────────────────────────────────── */
 
 .gal-body.is-map { position: relative; }
-.gal-map { flex: 1; min-width: 0; height: 100%; background: #05070b; }
-.gal-map .leaflet-container { background: #05070b; font-family: inherit; }
 
-/* The map, made quiet. Inverting the standard OSM tiles and turning the hue
-   back around gives a dark basemap from tiles that need no key; the low
-   saturation and contrast then push the map behind the photographs, which is
-   where a basemap belongs in a photo library. Only the tiles are filtered —
-   the markers sit in their own pane and keep their real colours. */
-.gal-map[data-tint="dark"] .leaflet-tile-pane {
-  filter: invert(1) hue-rotate(180deg) grayscale(0.52) brightness(0.86) contrast(0.86) saturate(0.7);
+/* A map library stacks its own canvas, markers and controls at whatever
+   heights it likes, and those numbers are only meaningful inside the map.
+   Without a stacking context of its own the map's markers were painting over
+   the account menu at the top of the window. This keeps all of it under a
+   single layer that sits below everything the app draws over the page. */
+.gal-map-wrap {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  flex: 1;
+  min-width: 0;
+  display: flex;
 }
-.gal-map[data-tint="light"] .leaflet-tile-pane {
-  filter: saturate(0.6) brightness(1.03);
-}
-.gal-map .leaflet-control-attribution {
+.gal-map { flex: 1; min-width: 0; height: 100%; background: #05070b; }
+.gal-map .maplibregl-map { font: inherit; }
+
+/* The basemap is a vector style chosen to be quiet (dark / positron), so it
+   needs no filtering — and filtering it would take the photographs on the
+   markers with it. */
+.gal-map .maplibregl-ctrl-attrib {
   background: rgba(0, 0, 0, 0.45);
-  color: var(--text-muted);
   font-size: 0.62rem;
 }
-.gal-map .leaflet-control-attribution a { color: var(--text-secondary); }
+.gal-map .maplibregl-ctrl-attrib a { color: var(--text-secondary); }
+.gal-map .maplibregl-ctrl-group { background: rgba(12, 16, 24, 0.9); border: 1px solid var(--border-subtle); }
+.gal-map .maplibregl-ctrl-group button + button { border-top: 1px solid var(--border-subtle); }
+.gal-map .maplibregl-ctrl-group button span { filter: invert(1) opacity(0.75); }
 
 .gal-cluster-inner {
+  /* The marker element itself carries the press — everything drawn inside it
+     is just the face it wears. */
+  pointer-events: none;
   position: relative;
   border-radius: 50%;
   overflow: hidden;
@@ -7350,10 +7375,13 @@ input.bd-name:focus {
   cursor: pointer;
   transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.gal-cluster-inner:hover { transform: scale(1.08); }
+.gal-cluster { cursor: pointer; }
+.gal-cluster:hover .gal-cluster-inner { transform: scale(1.08); }
 .gal-cluster-inner.is-large { border-color: rgba(255, 255, 255, 0.9); }
-.gal-cluster-inner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gal-cluster-inner img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .gal-cluster-count {
+  /* The dot is the button; its own label must not swallow the press. */
+  pointer-events: none;
   position: absolute;
   inset: auto 0 0 0;
   padding: 0.5rem 0 0.16rem;
@@ -7389,7 +7417,11 @@ input.bd-name:focus {
 .gal-light {
   position: fixed;
   inset: 0;
-  z-index: 4000;
+  /* Above the taskbar (9000) and the upload banners (9200), which would
+     otherwise sit on top of a photograph filling the screen, and below the
+     window switcher (9999) and toasts (10000), which are meant to interrupt
+     anything. */
+  z-index: 9500;
   background: #000;
   display: flex;
   flex-direction: column;
@@ -7401,6 +7433,11 @@ input.bd-name:focus {
   flex: 1;
   min-height: 0;
   position: relative;
+  /* Its own stacking context: a video player raises its controls and overlays
+     inside this box, and without this those numbers competed with the
+     lightbox's own chrome — which is how a film ended up painted over the
+     caption naming it. */
+  z-index: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -7445,8 +7482,8 @@ input.bd-name:focus {
   backdrop-filter: blur(6px);
   transition: background 0.18s ease, opacity 0.35s ease;
 }
-.gal-light-close { top: 1rem; right: 1.1rem; width: 40px; height: 40px; }
-.gal-light-nav { top: 50%; transform: translateY(-50%); width: 52px; height: 52px; }
+.gal-light-close { top: 1rem; right: 1.1rem; width: 40px; height: 40px; z-index: 5; }
+.gal-light-nav { top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; }
 .gal-light-nav.prev { left: 1.1rem; }
 .gal-light-nav.next { right: 1.1rem; }
 .gal-light-close:hover, .gal-light-nav:hover { background: rgba(255, 255, 255, 0.16); }
@@ -7458,6 +7495,7 @@ input.bd-name:focus {
 .gal-light-foot {
   position: absolute;
   inset: auto 0 0 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -7603,3 +7641,104 @@ input.bd-name:focus {
   opacity: 0.85;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── the map's own controls, and the place panel ───────────────────────── */
+
+.gal-map-tools {
+  position: absolute;
+  top: 0.85rem;
+  left: 0.85rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gal-map-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(12, 16, 24, 0.86);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.gal-map-toggle:hover { color: var(--text-primary); }
+.gal-map-toggle.is-on {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 34%, rgba(12, 16, 24, 0.86));
+}
+.gal-map-note {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: rgba(12, 16, 24, 0.8);
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  backdrop-filter: blur(6px);
+}
+
+.gal-place-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0 0 0.25rem;
+}
+.gal-place-back:hover { color: var(--text-primary); }
+
+.gal-place-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  padding: 0.35rem 0.7rem 2rem;
+  overflow-y: auto;
+}
+.gal-place-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border: none;
+  padding: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+}
+.gal-place-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gal-place-tile:hover img { opacity: 0.85; }
+.gal-place-play {
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid rgba(255, 255, 255, 0.9);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+}
+.gal-place-empty { grid-column: 1 / -1; color: var(--text-muted); font-size: 0.76rem; padding: 1rem 0; }
+
+/* A date that is not the photograph's own says so, quietly. */
+.gal-tile-note {
+  font-style: normal;
+  margin-left: 0.3rem;
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 0.62rem;
+}
+.gal-undated {
+  color: var(--accent-amber, #f59e0b);
+  opacity: 0.9;
+}
+.gal-light-undated { color: rgba(255, 255, 255, 0.72); }

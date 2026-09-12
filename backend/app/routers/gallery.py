@@ -254,6 +254,11 @@ async def gallery_summary(
             func.sum(func.coalesce(FileItem.size_bytes, 0)),
             func.min(local_taken),
             func.max(local_taken),
+            # How many are standing in the timeline on the day they were
+            # uploaded rather than the day they were taken. Counted so the
+            # gallery can say so instead of quietly presenting one as the
+            # other.
+            func.count(FileItem.id).filter(FileItem.taken_at.is_(None)),
         ).where(and_(*conditions))
     )).first()
 
@@ -269,6 +274,7 @@ async def gallery_summary(
         "total_bytes": int(totals[2] or 0),
         "first_taken_at": totals[3].isoformat() if totals[3] else None,
         "last_taken_at": totals[4].isoformat() if totals[4] else None,
+        "undated_count": totals[5] or 0,
         "image_count": by_kind.get("image", 0),
         "video_count": by_kind.get("video", 0),
         "months": [
@@ -363,6 +369,136 @@ async def gallery_map(
         ],
         "zoom": zoom,
         "grid": grid,
+    }
+
+
+@router.get("/path")
+async def gallery_path(
+    workspace_id: uuid.UUID,
+    q: Optional[str] = None,
+    kind: str = Query("all", pattern="^(all|image|video)$"),
+    year: Optional[int] = Query(None, ge=1900, le=2200),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    bbox: Optional[str] = None,
+    tz: Optional[str] = None,
+    limit: int = Query(1500, ge=2, le=4000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    The places of this period, in the order they were photographed.
+
+    Not a route. Nothing here guesses how anybody travelled between two
+    photographs — it is the photographs themselves, laid end to end in time,
+    which is the only thing they can honestly say about how a trip moved.
+    Drawn as a line, that is still enough to see a day going up a coast.
+
+    Returned oldest first, and capped: a year with ten thousand placed photos
+    is a scribble rather than a journey, so beyond the cap the period is
+    sampled evenly rather than truncated — the shape of the whole is kept,
+    which is what this is for.
+    """
+    await _require_member(db, current_user, workspace_id)
+    zone = _zone(tz)
+    conditions = _apply_filters(
+        _media_conditions(workspace_id, kind),
+        q=q, zone=zone, year=year, month=month,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True,
+    )
+    taken = func.coalesce(FileItem.taken_at, FileItem.created_at)
+
+    total = (await db.execute(
+        select(func.count(FileItem.id)).where(and_(*conditions))
+    )).scalar_one()
+
+    rows = (await db.execute(
+        select(FileItem.id, FileItem.gps_latitude, FileItem.gps_longitude, taken.label("taken"))
+        .where(and_(*conditions))
+        .order_by(taken.asc(), FileItem.id.asc())
+    )).all()
+
+    if total > limit:
+        step = total / limit
+        rows = [rows[int(i * step)] for i in range(limit)]
+
+    return {
+        "points": [
+            {
+                "id": str(r.id),
+                "latitude": r.gps_latitude,
+                "longitude": r.gps_longitude,
+                "taken_at": r.taken.isoformat() if r.taken else None,
+            }
+            for r in rows
+        ],
+        "total_count": total,
+        "sampled": total > limit,
+    }
+
+
+@router.get("/place")
+async def gallery_place(
+    workspace_id: uuid.UUID,
+    latitude: float,
+    longitude: float,
+    radius_km: float = Query(2.0, gt=0, le=500),
+    q: Optional[str] = None,
+    kind: str = Query("all", pattern="^(all|image|video)$"),
+    year: Optional[int] = Query(None, ge=1900, le=2200),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    tz: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    What was photographed around one point on the map.
+
+    A dot on a map answers "how many"; this answers "which", because being
+    told there are 212 photographs of somewhere and not being shown one of
+    them is the least interesting thing a map can do. Newest first, paged like
+    everything else, and counted separately so the panel can say how many
+    there are before it has them all.
+    """
+    await _require_member(db, current_user, workspace_id)
+    zone = _zone(tz)
+
+    import math as _math
+    lat_span = radius_km / 111.0
+    lon_span = radius_km / max(1.0, 111.0 * _math.cos(_math.radians(latitude)))
+
+    conditions = _apply_filters(
+        _media_conditions(workspace_id, kind),
+        q=q, zone=zone, year=year, month=month,
+        date_from=None, date_to=None, bbox=None, placed_only=True,
+    )
+    conditions += [
+        FileItem.gps_latitude.between(latitude - lat_span, latitude + lat_span),
+        FileItem.gps_longitude.between(longitude - lon_span, longitude + lon_span),
+    ]
+
+    total = (await db.execute(
+        select(func.count(FileItem.id)).where(and_(*conditions))
+    )).scalar_one()
+    taken = func.coalesce(FileItem.taken_at, FileItem.created_at)
+    span = (await db.execute(
+        select(func.min(taken), func.max(taken)).where(and_(*conditions))
+    )).first()
+    rows = (await db.execute(
+        select(FileItem).where(and_(*conditions))
+        .order_by(taken.desc(), FileItem.id.desc())
+        .offset((page - 1) * page_size).limit(page_size)
+    )).scalars().all()
+
+    return {
+        "items": [_item(f) for f in rows],
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size if total else 0,
+        "first_taken_at": span[0].isoformat() if span and span[0] else None,
+        "last_taken_at": span[1].isoformat() if span and span[1] else None,
     }
 
 

@@ -2176,3 +2176,18 @@ export async function getFaceIndexStatus(workspaceId) {
   if (!res.ok) throw new Error('얼굴 색인 상태를 불러오지 못했습니다.');
   return res.json();
 }
+
+export async function getGalleryPath(workspaceId, filters = {}) {
+  const res = await apiFetch(`${API_BASE}/gallery/path?${galleryParams(workspaceId, filters)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('이동 순서를 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getGalleryPlace(workspaceId, latitude, longitude, filters = {}) {
+  const params = galleryParams(workspaceId, { latitude, longitude, ...filters });
+  const res = await apiFetch(`${API_BASE}/gallery/place?${params}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('이 장소의 사진을 불러오지 못했습니다.');
+  return res.json();
+}

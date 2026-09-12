@@ -1,122 +1,255 @@
-import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+// Named imports: this build of maplibre-gl has no default export.
+import { Map as MapLibreMap, Marker, NavigationControl } from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { getThumbnailUrl } from '../../api';
 
 /**
- * Where the photographs were taken.
+ * Where the photographs were taken, and — when a period is chosen — the order
+ * they were taken in.
  *
  * The server sends squares of the world with a count and one photo from each,
- * never the photos themselves — eleven thousand pins are not a map, they are
- * a smear — and it re-sends them whenever the view changes, because how
- * coarse a square should be depends entirely on how far away you are
- * standing. A dot therefore means "this many, around here", and it wears one
- * of its own photographs so that a place on the map is recognisable before it
- * is read.
+ * never the photos themselves: eleven thousand pins are not a map, they are a
+ * smear. A dot therefore means "this many, around here", and it wears one of
+ * its own photographs so a place is recognisable before it is read.
  *
- * The tiles are deliberately quiet ones. A full-colour road map competes with
- * the photographs for attention and wins, which is the wrong way round.
+ * The base map is vector rather than raster for one reason that matters here:
+ * the labels are data, so they can be drawn in the reader's own language.
+ * Raster tiles arrive with the names already painted on in whatever the local
+ * language happens to be, which on a map of six years of travelling means a
+ * different alphabet every few hundred kilometres.
  */
 
-// OpenStreetMap's own tiles: no key, no account, no watermark. (CARTO's dark
-// basemap wanted an API key and stamped "API KEY REQUIRED" across every tile.)
-// They are bright and colourful as drawn, which would shout over the
-// photographs — so the dark theme inverts and cools them in CSS instead of
-// fetching a second set of tiles. See .gal-map[data-tint="dark"] in index.css.
-const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const TILE_ATTRIBUTION = '© OpenStreetMap';
+// OpenFreeMap: OpenStreetMap data, served as vector tiles, no key and no
+// account. The two styles are chosen to sit behind photographs rather than
+// compete with them.
+const STYLE_URL = {
+  dark: 'https://tiles.openfreemap.org/styles/dark',
+  light: 'https://tiles.openfreemap.org/styles/positron',
+};
 
-function clusterIcon(cluster, isLarge) {
+const LANGUAGE_FIELD = {
+  ko: 'name:ko', en: 'name:en', ja: 'name:ja', zh: 'name:zh',
+};
+
+function clusterElement(cluster, isLarge, onClick) {
   const count = cluster.count;
-  const size = count > 500 ? 78 : count > 100 ? 66 : count > 20 ? 56 : 46;
+  const size = count > 500 ? 74 : count > 100 ? 62 : count > 20 ? 54 : 44;
   const label = count > 999 ? `${Math.round(count / 1000)}k` : count;
-  const thumb = cluster.sample_id ? getThumbnailUrl(cluster.sample_id) : null;
-  return L.divIcon({
-    className: 'gal-cluster',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    html: `
-      <div class="gal-cluster-inner ${isLarge ? 'is-large' : ''}" style="width:${size}px;height:${size}px">
-        ${thumb ? `<img src="${thumb}" alt="" loading="lazy" />` : ''}
-        <span class="gal-cluster-count">${label}</span>
-      </div>`,
-  });
+  const element = document.createElement('div');
+  element.className = 'gal-cluster';
+  element.style.width = `${size}px`;
+  element.style.height = `${size}px`;
+  element.innerHTML = `
+    <div class="gal-cluster-inner ${isLarge ? 'is-large' : ''}" style="width:${size}px;height:${size}px">
+      ${cluster.sample_id ? `<img src="${getThumbnailUrl(cluster.sample_id)}" alt="" loading="lazy" />` : ''}
+      <span class="gal-cluster-count">${label}</span>
+    </div>`;
+  element.addEventListener('click', (e) => { e.stopPropagation(); onClick(cluster); });
+  return element;
 }
 
-export default function GalleryMap({ clusters, theme, onBoundsChange, onOpenCluster, focus }) {
+export default function GalleryMap({
+  clusters,
+  theme,
+  language,
+  path,
+  focus,
+  onBoundsChange,
+  onOpenCluster,
+  onPickPathPoint,
+}) {
   const holderRef = useRef(null);
   const mapRef = useRef(null);
-  const layerRef = useRef(null);
-  const tileRef = useRef(null);
+  const markersRef = useRef([]);
+  const styleRef = useRef(theme === 'light' ? 'light' : 'dark');
   const [ready, setReady] = useState(false);
+  const [styleEpoch, setStyleEpoch] = useState(0);
+
+  const report = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !onBoundsChange) return;
+    const b = map.getBounds();
+    onBoundsChange({
+      zoom: Math.round(map.getZoom()),
+      bbox: [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]
+        .map((v) => v.toFixed(5)).join(','),
+    });
+  }, [onBoundsChange]);
 
   useEffect(() => {
     if (mapRef.current || !holderRef.current) return undefined;
-    const map = L.map(holderRef.current, {
-      zoomControl: false,
-      attributionControl: true,
-      worldCopyJump: true,
-      minZoom: 2,
-    }).setView([36.5, 127.9], 6);
-
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-    layerRef.current = L.layerGroup().addTo(map);
+    const map = new MapLibreMap({
+      container: holderRef.current,
+      style: STYLE_URL[theme === 'light' ? 'light' : 'dark'],
+      center: [127.9, 36.5],
+      zoom: 5,
+      attributionControl: { compact: true },
+    });
+    map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
     mapRef.current = map;
-    setReady(true);
 
-    const report = () => {
-      const b = map.getBounds();
-      onBoundsChange?.({
-        zoom: map.getZoom(),
-        bbox: [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]
-          .map((v) => v.toFixed(5)).join(','),
-      });
-    };
-    map.on('moveend zoomend', report);
-    report();
+    map.on('load', () => { setReady(true); report(); });
+    map.on('moveend', report);
+    map.on('error', (e) => {
+      // A basemap that will not load is worth one line in the console rather
+      // than a silent black rectangle — the photographs still have their
+      // coordinates, and the markers still draw.
+      console.warn('[Gallery map]', e?.error?.message || e);
+    });
+
+    // The panel beside the map and the app's own sidebar both change this
+    // container's width without the window ever resizing, and a map that is
+    // not told simply leaves the new space blank.
+    const observer = new ResizeObserver(() => map.resize());
+    observer.observe(holderRef.current);
 
     return () => {
-      map.off('moveend zoomend', report);
+      observer.disconnect();
       map.remove();
       mapRef.current = null;
+      setReady(false);
     };
-    // Set up once: the map keeps its own position, and re-creating it would
-    // throw the viewer back to Korea every time a filter changed.
+    // Built once. Re-creating it on a filter change would throw the viewer
+    // back to Korea mid-journey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Place names in the reader's own language. The tiles carry every language
+  // OpenStreetMap has for a place, so this is a matter of asking for the right
+  // field and falling back when a village has no name in it.
   useEffect(() => {
-    if (!mapRef.current) return;
-    if (tileRef.current) return;
-    tileRef.current = L.tileLayer(TILE_URL, {
-      attribution: TILE_ATTRIBUTION,
-      maxZoom: 19,
-    }).addTo(mapRef.current);
-    tileRef.current.bringToBack();
-  }, [ready]);
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const field = LANGUAGE_FIELD[language] || LANGUAGE_FIELD.en;
+    const expression = ['coalesce', ['get', field], ['get', 'name:latin'], ['get', 'name']];
+    map.getStyle().layers.forEach((layer) => {
+      if (layer.layout && 'text-field' in layer.layout) {
+        try {
+          map.setLayoutProperty(layer.id, 'text-field', expression);
+        } catch (e) { /* a layer that will not take it keeps what it had */ }
+      }
+    });
+  }, [language, ready, styleEpoch]);
 
+  // A change of theme means a different basemap. Only a *change*: calling
+  // setStyle during the first load throws away the style the constructor is
+  // still fetching, and the map ends up with no sources at all — no tiles are
+  // ever requested and the canvas stays black.
   useEffect(() => {
-    const layer = layerRef.current;
-    if (!layer) return;
-    layer.clearLayers();
+    const map = mapRef.current;
+    const wanted = theme === 'light' ? 'light' : 'dark';
+    if (!map || !ready || styleRef.current === wanted) return;
+    styleRef.current = wanted;
+    map.setStyle(STYLE_URL[wanted]);
+    // Everything this component added — the trail, the stops — belongs to the
+    // old style and is gone with it, so the effects that own them are asked
+    // to run again.
+    map.once('styledata', () => setStyleEpoch((n) => n + 1));
+  }, [theme, ready]);
+
+  // The clusters.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
     const biggest = clusters.reduce((max, c) => Math.max(max, c.count), 0);
     clusters.forEach((cluster) => {
-      const marker = L.marker([cluster.latitude, cluster.longitude], {
-        icon: clusterIcon(cluster, cluster.count >= biggest * 0.6 && biggest > 4),
-        riseOnHover: true,
-      });
-      marker.on('click', () => onOpenCluster?.(cluster));
-      marker.addTo(layer);
+      const element = clusterElement(
+        cluster,
+        cluster.count >= biggest * 0.6 && biggest > 4,
+        (c) => onOpenCluster?.(c),
+      );
+      const marker = new Marker({ element, anchor: 'center' })
+        .setLngLat([cluster.longitude, cluster.latitude])
+        .addTo(map);
+      markersRef.current.push(marker);
     });
   }, [clusters, onOpenCluster]);
 
-  // Asked to show one particular place — from a photo's own coordinates.
+  /**
+   * The trail: the photographs of this period, in the order they were taken.
+   *
+   * Nothing here is a route. It joins the places where somebody actually
+   * stopped and took a picture, in time order — which is the only thing the
+   * photographs can honestly say about how a trip moved. The line is drawn
+   * faintly and the stops are drawn on top of it, so what reads first is
+   * still where the pictures are.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    const points = (path || []).filter((p) => p.latitude != null);
+    const line = {
+      type: 'FeatureCollection',
+      features: points.length > 1 ? [{
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: points.map((p) => [p.longitude, p.latitude]) },
+      }] : [],
+    };
+    const stops = {
+      type: 'FeatureCollection',
+      features: points.map((p, index) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [p.longitude, p.latitude] },
+        properties: { id: p.id, order: index, first: index === 0, last: index === points.length - 1 },
+      })),
+    };
+
+    const setData = (id, data) => {
+      const source = map.getSource(id);
+      if (source) source.setData(data);
+      else map.addSource(id, { type: 'geojson', data });
+    };
+    setData('gal-path', line);
+    setData('gal-stops', stops);
+
+    if (!map.getLayer('gal-path-line')) {
+      map.addLayer({
+        id: 'gal-path-line',
+        type: 'line',
+        source: 'gal-path',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#8ab4ff',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.1, 10, 2.2, 16, 3],
+          'line-opacity': 0.55,
+        },
+      });
+    }
+    if (!map.getLayer('gal-stops-dot')) {
+      map.addLayer({
+        id: 'gal-stops-dot',
+        type: 'circle',
+        source: 'gal-stops',
+        paint: {
+          'circle-radius': ['case', ['any', ['get', 'first'], ['get', 'last']], 5.5, 3.2],
+          'circle-color': ['case', ['get', 'first'], '#7ee787', ['get', 'last'], '#ffa657', '#8ab4ff'],
+          'circle-stroke-width': 1,
+          'circle-stroke-color': 'rgba(0,0,0,0.55)',
+          'circle-opacity': 0.95,
+        },
+      });
+      map.on('click', 'gal-stops-dot', (e) => {
+        const feature = e.features?.[0];
+        if (feature) onPickPathPoint?.(feature.properties.id);
+      });
+      map.on('mouseenter', 'gal-stops-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'gal-stops-dot', () => { map.getCanvas().style.cursor = ''; });
+    }
+  }, [path, ready, styleEpoch, onPickPathPoint]);
+
+  // Asked to show one particular place.
   useEffect(() => {
     if (!focus || !mapRef.current) return;
-    mapRef.current.flyTo([focus.latitude, focus.longitude], Math.max(mapRef.current.getZoom(), 13), {
-      duration: 0.8,
+    mapRef.current.flyTo({
+      center: [focus.longitude, focus.latitude],
+      zoom: Math.max(mapRef.current.getZoom(), focus.zoom || 13),
+      duration: 900,
     });
   }, [focus]);
 
-  return <div className="gal-map" data-tint={theme === 'light' ? 'light' : 'dark'} ref={holderRef} />;
+  return <div className="gal-map" ref={holderRef} />;
 }

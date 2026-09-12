@@ -86,9 +86,28 @@ function dayLabel(iso) {
   return `${date.getMonth() + 1}월 ${date.getDate()}일 (${weekday})`;
 }
 
+/**
+ * Which date is being shown, and whether it is the photograph's own.
+ *
+ * A file that carries no capture time is placed in the timeline by the day it
+ * was uploaded, because a photograph with no date at all is worse than one
+ * dated approximately. But the two are not the same fact, and showing an
+ * upload date in the place of a capture date without saying so tells the
+ * viewer something untrue about their own library.
+ */
+function dateOf(item) {
+  const taken = !!item.taken_at;
+  return {
+    iso: item.taken_at || item.created_at,
+    taken,
+    note: taken ? null : '올린 날짜',
+  };
+}
+
 function Tile({ item, width, height, onOpen }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const when = dateOf(item);
 
   return (
     <button
@@ -96,7 +115,7 @@ function Tile({ item, width, height, onOpen }) {
       className={`gal-tile ${loaded ? 'is-loaded' : ''}`}
       style={{ width, height }}
       onClick={() => onOpen(item)}
-      title={item.name}
+      title={when.taken ? item.name : `${item.name}\n촬영 정보가 없어 올린 날짜로 정렬됩니다`}
     >
       {item.has_thumbnail && !failed ? (
         <img
@@ -119,7 +138,10 @@ function Tile({ item, width, height, onOpen }) {
       {/* Shown on hover only, and only what the photograph does not say for
           itself: when, and whether it knows where it was. */}
       <span className="gal-tile-caption">
-        <span>{dayLabel(item.taken_at || item.created_at)}</span>
+        <span>
+          {dayLabel(when.iso)}
+          {when.note && <em className="gal-tile-note">{when.note}</em>}
+        </span>
         {item.latitude != null && <MapPin size={11} aria-label="위치 있음" />}
       </span>
     </button>

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, X, LayoutGrid, Map as MapIcon, Image as ImageIcon, Film, Loader2, MapPin, Users,
+  ArrowRight, ChevronLeft,
 } from '../../utils/icons';
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
-  getFaceMatches, getThumbnailUrl, getFaceIndexStatus,
+  getFaceMatches, getThumbnailUrl, getFaceIndexStatus, getGalleryPath, getGalleryPlace,
 } from '../../api';
 import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
@@ -53,7 +54,7 @@ function readUrlState() {
   }
 }
 
-export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
+export default function GalleryExplorer({ workspaceId, workspaceName, theme, language }) {
   const initial = useMemo(readUrlState, []);
   const [mode, setMode] = useState(initial.mode);
   const [kind, setKind] = useState(initial.kind);
@@ -81,6 +82,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
   // not have to reload what was already there.
   const [faceSearch, setFaceSearch] = useState(null);
   const [faceStatus, setFaceStatus] = useState(null);
+  // The map's two extras: the trail of a chosen period, and whichever place
+  // is currently being looked into.
+  const [showPath, setShowPath] = useState(false);
+  const [path, setPath] = useState(null);
+  const [place, setPlace] = useState(null);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({ q, kind, year, month }), [q, kind, year, month]);
@@ -200,13 +206,38 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
     }
   }, [workspaceId, faceSearch]);
 
+  useEffect(() => {
+    if (mode !== 'map' || !showPath || !workspaceId) { setPath(null); return undefined; }
+    let cancelled = false;
+    getGalleryPath(workspaceId, filters)
+      .then((data) => { if (!cancelled) setPath(data); })
+      .catch(() => { if (!cancelled) setPath(null); });
+    return () => { cancelled = true; };
+  }, [mode, showPath, workspaceId, filters]);
+
+  const openPlace = useCallback(async (latitude, longitude, radiusKm) => {
+    setPlace({ latitude, longitude, loading: true, items: [], total: 0 });
+    setFocusPoint({ latitude, longitude, zoom: radiusKm <= 0.5 ? 16 : 13 });
+    try {
+      const data = await getGalleryPlace(workspaceId, latitude, longitude, {
+        ...filters, radius_km: radiusKm, page_size: 40,
+      });
+      setPlace({
+        latitude, longitude, loading: false, items: data.items, total: data.total_count,
+        first: data.first_taken_at, last: data.last_taken_at,
+      });
+    } catch (e) {
+      setPlace({ latitude, longitude, loading: false, items: [], total: 0, error: e.message });
+    }
+  }, [workspaceId, filters]);
+
   const loadMore = useCallback(() => {
     if (isLoadingMore || isLoading) return;
     if (page >= totalPages) return;
     loadPage(page + 1, false);
   }, [isLoadingMore, isLoading, page, totalPages, loadPage]);
 
-  const shown = faceSearch ? faceSearch.items : items;
+  const shown = faceSearch ? faceSearch.items : (place && mode === 'map' ? place.items : items);
   const openAt = (item) => setOpenIndex(shown.findIndex((i) => i.id === item.id));
   const step = (delta) => {
     setOpenIndex((current) => {
@@ -243,7 +274,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
     <main className="gal-root">
       <header className="gal-head">
         <div className="gal-head-title">
-          <h1>갤러리</h1>
+          <div className="gal-head-line">
+            <ImageIcon size={18} color="var(--accent-primary)" />
+            <h1>갤러리</h1>
+            {summary && <span className="gal-head-count">{summary.total_count.toLocaleString()}개</span>}
+          </div>
           <p>
             {workspaceName && <span className="gal-ws">{workspaceName}</span>}
             {summary ? (
@@ -261,6 +296,14 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
                     title="사진 속 얼굴을 찾는 중입니다. 끝나면 사진 위의 얼굴을 눌러 같은 사람을 찾을 수 있습니다."
                   >
                     <Users size={11} /> 얼굴 찾는 중 {Math.floor((faceStatus.scanned / Math.max(1, faceStatus.total)) * 100)}%
+                  </span>
+                )}
+                {summary.undated_count > 0 && (
+                  <span
+                    className="gal-undated"
+                    title="촬영 정보가 없어 올린 날짜를 기준으로 놓인 항목입니다"
+                  >
+                    촬영일 없음 {summary.undated_count.toLocaleString()}
                   </span>
                 )}
                 {summary.first_taken_at && (
@@ -325,20 +368,86 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
       <div className={`gal-body ${mode === 'map' ? 'is-map' : ''}`}>
         {mode === 'map' ? (
           <>
-            <GalleryMap
-              clusters={clusters}
-              theme={theme}
-              focus={focusPoint}
-              onBoundsChange={setMapView}
-              onOpenCluster={(cluster) => setFocusPoint({ latitude: cluster.latitude, longitude: cluster.longitude })}
-            />
-            <aside className="gal-map-side">
-              <div className="gal-map-side-head">
-                <strong>{periodLabel}</strong>
-                <span>위치가 남아 있는 {placed.toLocaleString()}개</span>
+            <div className="gal-map-wrap">
+              <GalleryMap
+                clusters={clusters}
+                theme={theme}
+                language={language}
+                path={showPath ? path?.points : null}
+                focus={focusPoint}
+                onBoundsChange={setMapView}
+                onOpenCluster={(cluster) => openPlace(cluster.latitude, cluster.longitude,
+                  Math.max(0.4, (mapView?.zoom || 6) >= 12 ? 0.5 : 12))}
+                onPickPathPoint={(id) => {
+                  const point = path?.points?.find((p) => p.id === id);
+                  if (point) openPlace(point.latitude, point.longitude, 0.3);
+                }}
+              />
+              <div className="gal-map-tools">
+                <button
+                  type="button"
+                  className={`gal-map-toggle ${showPath ? 'is-on' : ''}`}
+                  onClick={() => setShowPath((v) => !v)}
+                  title="사진이 찍힌 순서대로 이어 봅니다. 실제 이동 경로가 아니라, 사진이 남은 자리들입니다."
+                >
+                  <ArrowRight size={13} />
+                  <span>이동 순서</span>
+                </button>
+                {showPath && path && (
+                  <span className="gal-map-note">
+                    {path.total_count.toLocaleString()}곳
+                    {path.sampled && ` 중 ${path.points.length.toLocaleString()}곳`}
+                    {' '}· 찍힌 순서
+                  </span>
+                )}
               </div>
-              <TimelineRail months={summary?.months} year={year} month={month}
-                            onPick={({ year: y, month: m }) => { setYear(y); setMonth(m); }} />
+            </div>
+
+            <aside className="gal-map-side">
+              {place ? (
+                <>
+                  <div className="gal-map-side-head">
+                    <button type="button" className="gal-place-back" onClick={() => setPlace(null)}>
+                      <ChevronLeft size={13} /> 연도별로
+                    </button>
+                    <strong>이 장소의 사진</strong>
+                    <span>
+                      {place.loading ? '찾는 중…' : `${place.total.toLocaleString()}개`}
+                      {place.first && !place.loading && (
+                        ` · ${place.first.slice(0, 7).replace('-', '.')}`
+                        + (place.last.slice(0, 7) !== place.first.slice(0, 7)
+                          ? ` – ${place.last.slice(0, 7).replace('-', '.')}` : '')
+                      )}
+                    </span>
+                  </div>
+                  <div className="gal-place-grid">
+                    {place.items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="gal-place-tile"
+                        onClick={() => openAt(item)}
+                        title={`${item.name}\n${(item.taken_at || '').slice(0, 10)}`}
+                      >
+                        <img src={getThumbnailUrl(item.id)} alt={item.name} loading="lazy" />
+                        {item.file_type === 'video' && <span className="gal-place-play" />}
+                      </button>
+                    ))}
+                    {!place.loading && !place.items.length && (
+                      <p className="gal-place-empty">이 자리에는 사진이 없습니다.</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="gal-map-side-head">
+                    <strong>{periodLabel}</strong>
+                    <span>위치가 남아 있는 {placed.toLocaleString()}개</span>
+                  </div>
+                  <TimelineRail months={summary?.months} year={year} month={month}
+                                onPick={({ year: y, month: m }) => { setYear(y); setMonth(m); setPlace(null); }} />
+                </>
+              )}
             </aside>
           </>
         ) : faceSearch ? (

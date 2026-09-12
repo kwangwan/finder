@@ -7,6 +7,15 @@ export default defineConfig({
   // .env file to manage (only VITE_-prefixed keys are exposed to client code).
   envDir: '..',
   plugins: [react()],
+  optimizeDeps: {
+    // The map library ships a web worker beside its main module, and the dev
+    // server's dependency pre-bundling rewrites the module without carrying
+    // the worker with it — the worker then 404s, no tiles are ever requested
+    // and the map is a black rectangle. Only in dev: a production build emits
+    // the worker properly. Excluded so that what is developed against is what
+    // ships.
+    exclude: ['maplibre-gl'],
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

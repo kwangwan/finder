@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, MapPin, Camera, Clock, Download, Maximize2, Users } from '../../utils/icons';
+import {
+  X, ChevronLeft, ChevronRight, MapPin, Camera, Clock, Download, Maximize2, Users, UploadCloud,
+} from '../../utils/icons';
 import VideoPlayer from '../common/VideoPlayer';
 import {
   getMediaPreviewUrl, getThumbnailUrl, ensureMediaToken, clearMediaToken, getFacesInItem,
@@ -152,6 +154,7 @@ export default function GalleryLightbox({
 
   if (!item) return null;
 
+  const hasTakenAt = !!item.taken_at;
   const when = fullDate(item.taken_at || item.created_at);
   const where = coordinateText(item.latitude, item.longitude);
   const isVideo = item.file_type === 'video';
@@ -247,7 +250,18 @@ export default function GalleryLightbox({
         <div className="gal-light-meta">
           <span className="gal-light-name">{item.name}</span>
           <span className="gal-light-facts">
-            {when && <span><Clock size={12} /> {when}</span>}
+            {when && (
+              hasTakenAt ? (
+                <span><Clock size={12} /> {when}</span>
+              ) : (
+                <span
+                  className="gal-light-undated"
+                  title="이 파일에는 촬영 정보가 없어, 올린 날짜를 기준으로 정렬합니다"
+                >
+                  <UploadCloud size={12} /> 올린 날짜 {when}
+                </span>
+              )
+            )}
             {item.camera && <span><Camera size={12} /> {item.camera}</span>}
             {where && (
               <button type="button" className="gal-light-place" onClick={() => onShowOnMap?.(item)} title="지도에서 보기">

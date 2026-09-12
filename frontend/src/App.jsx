@@ -2331,6 +2331,9 @@ export default function App() {
             workspaceId={activeWorkspace?.id}
             workspaceName={activeWorkspace?.name || ''}
             theme={theme}
+            // Place names on the map are drawn in the language this account
+            // reads, not in whichever one each country happens to use.
+            language={currentUser?.language}
           />
         ) : activeView === 'schedule' ? (
           <ScheduleExplorer
