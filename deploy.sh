@@ -20,7 +20,10 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 echo "building $TAG"
-docker compose build "$@"
+# Everything, always. Building one service and then tagging all three as
+# latest leaves the other two pointing at an image that does not exist —
+# and the layer cache makes an unchanged service almost free anyway.
+docker compose build
 
 for service in backend frontend sync; do
     docker tag "knowledge-base-$service:$TAG" "knowledge-base-$service:latest"
