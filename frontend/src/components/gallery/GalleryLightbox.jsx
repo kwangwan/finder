@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   X, ChevronLeft, ChevronRight, MapPin, Camera, Clock, Download, Maximize2, Users, UploadCloud,
+  ExternalLink,
 } from '../../utils/icons';
 import VideoPlayer from '../common/VideoPlayer';
 import {
@@ -46,6 +47,7 @@ export default function GalleryLightbox({
   onShowOnMap,
   onDownload,
   onSearchFace,
+  onOpenInWindow,
 }) {
   const [src, setSrc] = useState(() => (item ? getMediaPreviewUrl(item.id) : null));
   const [isChromeVisible, setChromeVisible] = useState(true);
@@ -281,9 +283,20 @@ export default function GalleryLightbox({
             )}
           </span>
         </div>
-        <button type="button" className="gal-light-download" onClick={() => onDownload?.(item)} title="원본 내려받기">
-          <Download size={15} />
-        </button>
+        <div className="gal-light-acts">
+          {onOpenInWindow && (
+            <button
+              type="button"
+              onClick={() => onOpenInWindow(item)}
+              title="새 창으로 열기"
+            >
+              <ExternalLink size={15} />
+            </button>
+          )}
+          <button type="button" onClick={() => onDownload?.(item)} title="원본 내려받기">
+            <Download size={15} />
+          </button>
+        </div>
       </footer>
     </div>
   );

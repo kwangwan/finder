@@ -7698,7 +7698,7 @@ input.bd-name:focus {
 
 .gal-light-video { width: min(100%, 1500px); height: 100%; padding: 1.5rem; }
 
-.gal-light-close, .gal-light-nav, .gal-light-download {
+.gal-light-close, .gal-light-nav, .gal-light-acts button {
   position: absolute;
   border: none;
   background: rgba(255, 255, 255, 0.07);
@@ -7758,7 +7758,8 @@ input.bd-name:focus {
   border-bottom: 1px dotted rgba(255, 255, 255, 0.35);
 }
 .gal-light-place:hover { color: #fff; }
-.gal-light-download { position: static; width: 38px; height: 38px; flex: none; }
+.gal-light-acts { display: flex; gap: 6px; flex: none; }
+.gal-light-acts button { position: static; width: 38px; height: 38px; flex: none; }
 
 @media (max-width: 900px) {
   /* The header was taking a third of a phone screen before a single

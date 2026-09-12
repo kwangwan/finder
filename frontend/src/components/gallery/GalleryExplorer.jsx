@@ -169,7 +169,7 @@ function readUrlState() {
   }
 }
 
-export default function GalleryExplorer({ workspaceId, workspaceName, theme, language }) {
+export default function GalleryExplorer({ workspaceId, workspaceName, theme, language, onOpenInWindow }) {
   const initial = useMemo(readUrlState, []);
   const [mode, setMode] = useState(initial.mode);
   const [kind, setKind] = useState(initial.kind);
@@ -221,6 +221,18 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [sheetTall, setSheetTall] = useState(false);
   const gripFrom = useRef(null);
   const factsRef = useRef(null);
+
+  // A filter belongs to the library it was set on. A year, an uploader, a
+  // camera, a word in a file name — none of them mean the same thing in the
+  // next workspace, and carrying them across is how the gallery came to say
+  // "7개" at the top and show nothing underneath: the header's counts are not
+  // narrowed by year or camera, so the two disagreed with no way to see why.
+  const firstWorkspaceRef = useRef(true);
+  useEffect(() => {
+    if (firstWorkspaceRef.current) { firstWorkspaceRef.current = false; return; }
+    setYear(null); setMonth(null); setQueryText(''); setKind('all');
+    setUploader(''); setCamera([]); setHasPlace(''); setPlace(null); setFaceSearch(null);
+  }, [workspaceId]);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({
@@ -314,11 +326,15 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
-    getGallerySummary(workspaceId, { q, kind, uploader: uploader || null })
+    getGallerySummary(workspaceId, {
+      q, kind, uploader: uploader || null,
+      camera: camera.length ? camera.join('|') : null,
+      placed: hasPlace || null,
+    })
       .then((data) => { if (!cancelled) setSummary(data); })
       .catch(() => { if (!cancelled) setSummary(null); });
     return () => { cancelled = true; };
-  }, [workspaceId, q, kind, uploader]);
+  }, [workspaceId, q, kind, uploader, camera, hasPlace]);
 
   // How far the face index has got. Asked once on arrival and then every
   // half minute only while it is still behind — a library that has been
@@ -570,6 +586,17 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
 
   const activeFilters = [q, kind !== 'all', uploader, camera.length, hasPlace]
     .filter(Boolean).length;
+
+  // Everything currently narrowing the library, in words — so an empty screen
+  // can say what emptied it.
+  const narrowings = [
+    year ? `${year}년${month ? ` ${month}월` : ''}` : null,
+    q ? `"${q}"` : null,
+    kind === 'image' ? '사진만' : kind === 'video' ? '영상만' : null,
+    uploader ? uploaders.find((p) => p.id === uploader)?.name : null,
+    camera.length ? (camera.length === 1 ? camera[0] : `카메라 ${camera.length}대`) : null,
+    hasPlace === 'yes' ? '지도에 있는 것' : hasPlace === 'no' ? '위치 없는 것' : null,
+  ].filter(Boolean);
 
   const clearFilters = () => {
     setYear(null); setMonth(null); setQueryText(''); setKind('all');
@@ -868,7 +895,12 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   onReachEnd={loadMore}
                   isLoadingMore={isLoadingMore}
                   hasMore={page < totalPages}
-                  emptyMessage={q || year ? '조건에 맞는 사진이 없습니다.' : '이 워크스페이스에는 아직 사진이 없습니다.'}
+                  // Empty because of what was asked, or empty because there is
+                  // nothing — those are different sentences, and the first one
+                  // has to say which narrowing is doing it.
+                  emptyMessage={narrowings.length
+                    ? `${narrowings.join(' · ')} 조건에 맞는 사진이 없습니다.`
+                    : '이 워크스페이스에는 아직 사진이 없습니다.'}
                 />
               )}
             </div>
@@ -891,6 +923,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
           onShowOnMap={showOnMap}
           onDownload={download}
           onSearchFace={searchByFace}
+          onOpenInWindow={onOpenInWindow && ((item) => { setOpenId(null); onOpenInWindow(item); })}
         />
       )}
     </main>
