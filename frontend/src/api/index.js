@@ -145,6 +145,16 @@ async function fetchMediaToken() {
   return mediaTokenCache.token;
 }
 
+// How many times in a row a failed refresh is chased before the tab stops
+// asking, and how long it waits each time. A tab left open overnight behind a
+// backend that is down, or one whose session ended in a way that was not a
+// 401, used to ask again every few seconds for as long as it stayed open —
+// forever, in the logs. The five-minute timer and anything the person does
+// next still start it up again, so this only ends the chasing, never the
+// feature.
+const MEDIA_TOKEN_RETRIES = 4;
+let mediaTokenFailures = 0;
+
 export async function ensureMediaToken() {
   if (!getStoredToken()) return null;
   if (mediaTokenCache.token && Date.now() < mediaTokenCache.expiresAt) {
@@ -152,13 +162,22 @@ export async function ensureMediaToken() {
   }
   if (!mediaTokenRefreshPromise) {
     mediaTokenRefreshPromise = fetchMediaToken()
+      .then((token) => {
+        mediaTokenFailures = 0;
+        return token;
+      })
       .catch((err) => {
         // A failed refresh (e.g. the backend momentarily overloaded during a
         // large upload) used to just sit there until the next 5-minute
         // interval tick — every thumbnail/preview/download on the page would
         // 401 for however much of that window remained. Retry soon instead.
-        console.warn('[Media Token] refresh failed, retrying shortly:', err);
-        setTimeout(() => { if (getStoredToken()) ensureMediaToken(); }, 5000);
+        mediaTokenFailures += 1;
+        if (mediaTokenFailures <= MEDIA_TOKEN_RETRIES) {
+          console.warn(`[Media Token] refresh failed (${mediaTokenFailures}), retrying shortly:`, err);
+          setTimeout(() => { if (getStoredToken()) ensureMediaToken(); }, 5000 * mediaTokenFailures);
+        } else {
+          console.warn('[Media Token] refresh keeps failing; waiting for the next attempt:', err);
+        }
         return null;
       })
       .finally(() => { mediaTokenRefreshPromise = null; });
@@ -179,7 +198,12 @@ export function clearMediaToken() {
 if (getStoredToken()) {
   ensureMediaToken();
 }
-setInterval(() => { if (getStoredToken()) ensureMediaToken(); }, 5 * 60 * 1000);
+setInterval(() => {
+  // The slow tick forgives a run of failures: whatever was wrong has had
+  // five minutes to stop being wrong.
+  mediaTokenFailures = 0;
+  if (getStoredToken()) ensureMediaToken();
+}, 5 * 60 * 1000);
 
 export async function getAuthConfig() {
   try {
