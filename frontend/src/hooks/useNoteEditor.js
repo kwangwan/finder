@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useCreateBlockNote } from '@blocknote/react';
+import { SyntaxHighlightingExtension } from '@blocknote/core';
+import { createCodeHighlighter } from '../utils/codeHighlighter';
 import { BlockNoteSchema, createCodeBlockSpec, defaultBlockSpecs, cleanHTMLToMarkdown } from '@blocknote/core';
 import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
@@ -1049,11 +1051,16 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   const layoutTablePasteFixRef = useRef(null);
   if (!layoutTablePasteFixRef.current) layoutTablePasteFixRef.current = createLayoutTablePasteFix();
 
+  // Colour for code blocks. The highlighter itself is fetched on first use —
+  // see utils/codeHighlighter.js — so a document without code costs nothing.
+  const syntaxHighlighting = SyntaxHighlightingExtension({ createHighlighter: createCodeHighlighter });
+
   const editor = useCreateBlockNote(
     collab
       ? withCollaboration({
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
+          extensions: [syntaxHighlighting],
           _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current, layoutTablePasteFixRef.current] },
           uploadFile: async (uploadedFile) => {
             setIsUploadingImage(true);
@@ -1076,6 +1083,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
       : {
           schema: blockNoteSchema,
           dictionary: blockNoteKo,
+          extensions: [syntaxHighlighting],
           _tiptapOptions: { extensions: [androidBeforeInputEnterFixRef.current, layoutTablePasteFixRef.current] },
         },
     [file?.id, syncUrl, collab]
