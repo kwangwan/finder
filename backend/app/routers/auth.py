@@ -30,35 +30,48 @@ from app.services.login_throttle import login_throttle, login_keys, client_addre
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
-async def signup_was_invited(db: AsyncSession, email: str, invite_token: str | None) -> bool:
+async def signup_was_invited_by_an_administrator(
+    db: AsyncSession, email: str, invite_token: str | None
+) -> bool:
     """
-    Whether somebody here asked for this person.
+    Whether an administrator asked for this person by name.
 
     Anyone can open an account — the sign-up form is on the public internet —
-    and an account that is approved the moment it is made is a member of the
-    shared workspace, which is where everything the company keeps together
-    lives. Approval is what stands between the two, so it is granted to people
-    who were invited (by the link they were sent, or by an invitation already
-    waiting for their address) and asked for otherwise. Capacity is still a
-    separate matter, settled by the quota an administrator gives out.
+    and an approved account is a member of the shared workspace, where
+    everything the company keeps together lives. Approval is what stands
+    between those two facts.
+
+    An administrator's invitation carries that decision already, so such a
+    sign-up is approved on arrival; this is the same rule
+    `process_invite_token_if_any` applies to an invitation that turns up
+    later. Any workspace owner can invite anybody, so a workspace invitation
+    is not that decision: the person joins the workspace they were invited to
+    and waits, which is what the invitation was for. Everyone else waits too.
+    Capacity remains a separate matter, settled by the quota an administrator
+    gives out.
     """
     email = (email or "").lower().strip()
     if not email:
         return False
+    candidates = []
     if invite_token:
         res = await db.execute(select(Invitation).where(Invitation.token == invite_token))
         inv = res.scalar_one_or_none()
         # The link belongs to the address it was sent to. Without this, one
         # invitation could open any number of accounts under any address.
-        if inv and inv.status == "pending" and not inv.is_expired and inv.email.lower().strip() == email:
-            return True
+        if inv and inv.email.lower().strip() == email:
+            candidates.append(inv)
     res = await db.execute(
         select(Invitation).where(
             func.lower(Invitation.email) == email,
             Invitation.status == "pending",
         )
     )
-    return any(not inv.is_expired for inv in res.scalars().all())
+    candidates.extend(res.scalars().all())
+    return any(
+        inv.status == "pending" and not inv.is_expired and inv.is_admin_invite
+        for inv in candidates
+    )
 
 
 async def process_invite_token_if_any(db: AsyncSession, user: User, invite_token: str | None = None):
@@ -303,7 +316,7 @@ async def register_with_password(req: PasswordRegisterRequest, db: AsyncSession 
         picture=f"https://api.dicebear.com/7.x/bottts/svg?seed={email}",
         is_superadmin=is_first_user,
         language=normalize_language(req.language),
-        is_approved=is_first_user or await signup_was_invited(db, email, req.invite_token),
+        is_approved=is_first_user or await signup_was_invited_by_an_administrator(db, email, req.invite_token),
         is_active=True,
         storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
         last_login_at=datetime.now(timezone.utc)
@@ -422,7 +435,7 @@ async def login_with_google(req: GoogleLoginRequest, db: AsyncSession = Depends(
             google_id=google_profile.get("google_id"),
             is_superadmin=is_first_user,
             language=normalize_language(req.language),
-            is_approved=is_first_user or await signup_was_invited(db, email, req.invite_token),
+            is_approved=is_first_user or await signup_was_invited_by_an_administrator(db, email, req.invite_token),
             is_active=True,
             storage_quota_bytes=100 * 1024 * 1024 * 1024 if is_first_user else 0,
             last_login_at=datetime.now(timezone.utc)

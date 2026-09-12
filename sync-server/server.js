@@ -31,11 +31,40 @@ const REVALIDATE_INTERVAL_MS = 2 * 60 * 1000;
 // is both correct (single source of truth for access rules) and requires
 // zero new backend code.
 
-// The token of the last client that authenticated for each document, used to
-// write the room back on its behalf. The room is written with somebody's own
-// credentials rather than a back door: only a person who may write the document
-// may keep its room.
+// The tokens of the clients currently in each document, newest first, used to
+// write the room back on somebody's behalf. The room is written with a
+// person's own credentials rather than through a back door: only someone who
+// may write the document may keep its room.
+//
+// A set rather than one token, because "the last person who arrived" is not
+// the same as "somebody who may write". A reader — anyone in the shared
+// workspace without write access, or someone looking at a colleague's folder
+// — arriving in a room would otherwise become the account every save was
+// attempted as, and every save would be refused for as long as they stayed.
+// The room would then live only in this server's memory, which is the whole
+// thing this exists to prevent.
 const documentTokens = new Map();
+
+function rememberToken(documentName, token) {
+  if (!token) return;
+  const tokens = documentTokens.get(documentName) || [];
+  const without = tokens.filter((t) => t !== token);
+  without.unshift(token);
+  documentTokens.set(documentName, without);
+}
+
+function forgetToken(documentName, token) {
+  const tokens = documentTokens.get(documentName);
+  if (!tokens) return;
+  const left = tokens.filter((t) => t !== token);
+  if (left.length) documentTokens.set(documentName, left);
+  else documentTokens.delete(documentName);
+}
+
+function tokensFor(documentName, preferred) {
+  const tokens = documentTokens.get(documentName) || [];
+  return preferred ? [preferred, ...tokens.filter((t) => t !== preferred)] : tokens;
+}
 
 async function loadCollabState(token, fileId) {
   if (!token) return null;
@@ -61,19 +90,35 @@ async function loadCollabState(token, fileId) {
   }
 }
 
-async function storeCollabState(token, fileId, state) {
-  if (!token || !state?.byteLength) return;
-  const res = await fetch(`${BACKEND_INTERNAL_URL}/api/files/${fileId}/collab-state`, {
-    method: 'PUT',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
-    body: state,
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) {
-    // Thrown on purpose: Hocuspocus keeps a document whose store failed in
-    // memory rather than unloading it, and tries again.
-    throw new Error(`backend answered ${res.status}`);
+async function storeCollabState(fileId, state, preferredToken) {
+  if (!state?.byteLength) return;
+  const tokens = tokensFor(fileId, preferredToken);
+  if (!tokens.length) throw new Error('nobody here can write this document');
+
+  let lastStatus = null;
+  for (const token of tokens) {
+    const res = await fetch(`${BACKEND_INTERNAL_URL}/api/files/${fileId}/collab-state`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
+      body: state,
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.ok) return;
+    lastStatus = res.status;
+    // This person cannot write it — either not allowed or no longer signed
+    // in. Somebody else in the room may be able to, so try them; and stop
+    // counting on this one.
+    if (res.status === 401 || res.status === 403) {
+      forgetToken(fileId, token);
+      continue;
+    }
+    // Anything else is the backend having trouble, which the next person's
+    // token will not fix.
+    break;
   }
+  // Thrown on purpose: Hocuspocus keeps a document whose store failed in
+  // memory rather than unloading it, and tries again.
+  throw new Error(`backend answered ${lastStatus ?? 'nothing usable'}`);
 }
 
 async function canAccessFile(token, fileId) {
@@ -95,7 +140,7 @@ const server = new Server({
     if (!(await canAccessFile(token, documentName))) {
       throw new Error('문서에 접근할 권한이 없습니다.');
     }
-    documentTokens.set(documentName, token);
+    rememberToken(documentName, token);
     // Handed to every hook for this connection, so a store triggered by this
     // person's edit is written as them.
     return { token };
@@ -103,18 +148,14 @@ const server = new Server({
 
   async onLoadDocument({ documentName, document, context }) {
     if (document.isEmpty('blocknote')) {
-      const state = await loadCollabState(context?.token || documentTokens.get(documentName), documentName);
+      const state = await loadCollabState(context?.token || tokensFor(documentName)[0], documentName);
       if (state) Y.applyUpdate(document, state);
     }
     return document;
   },
 
   async onStoreDocument({ documentName, document, context }) {
-    await storeCollabState(
-      context?.token || documentTokens.get(documentName),
-      documentName,
-      Y.encodeStateAsUpdate(document),
-    );
+    await storeCollabState(documentName, Y.encodeStateAsUpdate(document), context?.token);
   },
 
   async afterUnloadDocument({ documentName }) {
@@ -135,6 +176,12 @@ const server = new Server({
     console.log(`[sync] client connected: ${documentName}`);
   },
   async onDisconnect({ documentName }) {
+    // Deliberately keeps their token. The room's last save happens *after*
+    // the last person leaves — that is the whole point of keeping it — and
+    // taking their credentials away as they go would leave that save with
+    // nobody to make it. They are dropped when the room itself is
+    // (afterUnloadDocument), and a token that has since expired is skipped
+    // by the store, which simply tries the next person's.
     console.log(`[sync] client disconnected: ${documentName}`);
   }
 });
