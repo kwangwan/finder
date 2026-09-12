@@ -39,6 +39,7 @@ import {
 import { getMediaPreviewUrl, downloadFileChunked, getFileDetail, ensureMediaToken, clearMediaToken } from '../../api';
 import { useNoteEditor, BN_THEME, blocksToMarkdownTableSafe } from '../../hooks/useNoteEditor';
 import AttachExistingFileModal from '../editor/AttachExistingFileModal';
+import DocumentToolbar from '../editor/DocumentToolbar';
 import FileLinksPanel, { useFileLinks } from './FileLinksPanel';
 import VersionHistoryModal from '../editor/VersionHistoryModal';
 import VideoPlayer from '../common/VideoPlayer';
@@ -758,6 +759,16 @@ export default function PreviewWindow({
                 <Loader2 size={20} className="spin" color="var(--accent-primary)" />
                 <span>내용을 불러오는 중...</span>
               </div>
+            )}
+            {/* What a document can be made of, offered rather than left to
+                whoever knows to type "/" or knows markdown. */}
+            {noteEditor.editor && (
+              <DocumentToolbar
+                editor={noteEditor.editor}
+                isUploading={noteEditor.isUploadingImage}
+                onUploadFile={noteEditor.handleUploadAndInsertFile}
+                onAttachExisting={() => noteEditor.setIsAttachModalOpen(true)}
+              />
             )}
             {noteEditor.editor && (
               <div className="editor-pane-blocknote" onClick={handleAttachmentClick}>

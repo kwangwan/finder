@@ -2972,6 +2972,110 @@ h1, h2, h3, h4, h5, h6,
   position: relative;
   overflow: hidden;
   display: flex;
+  /* The formatting bar sits above the document, so this stacks. */
+  flex-direction: column;
+}
+
+/* What a document can be made of, said with icons above it. Quiet: it is a
+   permanent fixture on every document window, so it reads as part of the
+   chrome until it is used. Wraps rather than scrolls — a phone gets two rows
+   instead of buttons it cannot reach. */
+.doc-toolbar {
+  display: flex;
+  /* One row that can be swiped rather than two that eat a third of a phone:
+     everything fits on a desktop window, and where it does not, the row
+     scrolls instead of growing downwards into the document. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+}
+
+.doc-toolbar::-webkit-scrollbar { display: none; }
+
+.doc-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.doc-toolbar-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  background: var(--bg-tertiary);
+}
+
+.doc-toolbar-btn.is-on {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.doc-toolbar-btn:disabled { opacity: 0.45; cursor: default; }
+
+.doc-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border-subtle);
+}
+
+/* A finger needs more than 28px, and a phone has the width to spare once the
+   row is allowed to wrap. */
+@media (hover: none) {
+  .doc-toolbar { gap: 4px; padding: 7px 8px; }
+  .doc-toolbar-btn { width: 34px; height: 34px; }
+  .doc-toolbar-divider { margin: 0 2px; }
+}
+
+/* The language of a code block. BlockNote draws the picker at opacity 0 and
+   fades it in a second after the pointer enters the block, so on a phone —
+   where nothing ever hovers — it can never be seen at all, and on a desktop
+   only somebody who already knew it was there would find it. It is shown
+   always, and reads as a control rather than as the first line of the code. */
+.editor-pane-blocknote .bn-editor [data-content-type="codeBlock"] > div > select {
+  opacity: 1;
+  color: var(--text-tertiary, #9aa4b2);
+  background: color-mix(in srgb, #fff 8%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  top: 6px;
+  left: 12px;
+  font-size: 0.72rem;
+}
+
+.editor-pane-blocknote .bn-editor [data-content-type="codeBlock"]:hover > div > select,
+.editor-pane-blocknote .bn-editor [data-content-type="codeBlock"] > div > select:focus {
+  opacity: 1;
+  color: #fff;
+  background: color-mix(in srgb, #fff 16%, transparent);
+}
+
+/* Room for the picker above the first line, which otherwise sits under it. */
+.editor-pane-blocknote .bn-editor [data-content-type="codeBlock"] > pre {
+  padding-top: 32px;
+}
+
+@media (hover: none) {
+  .editor-pane-blocknote .bn-editor [data-content-type="codeBlock"] > div > select {
+    font-size: 0.8rem;
+    padding: 3px 8px;
+  }
 }
 
 .os-code-viewport {

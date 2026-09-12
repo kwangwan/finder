@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { useCreateBlockNote } from '@blocknote/react';
-import { BlockNoteSchema, defaultBlockSpecs, cleanHTMLToMarkdown } from '@blocknote/core';
+import { BlockNoteSchema, createCodeBlockSpec, defaultBlockSpecs, cleanHTMLToMarkdown } from '@blocknote/core';
 import { withCollaboration } from '@blocknote/core/yjs';
 import { ko as blockNoteKo } from '@blocknote/core/locales';
 import { Extension } from '@tiptap/core';
@@ -121,6 +121,93 @@ function parseWithName(spec, targetTag) {
   };
 }
 
+// What a code block can be marked as. A code block knows its language
+// already — it is a prop, and the markdown it is saved as writes it after the
+// fence — but with none configured there was only ever one to choose from, so
+// every block stayed 일반 텍스트 and nothing said otherwise. Given more than
+// one, the block draws its own picker in the corner.
+//
+// 일반 텍스트 first because it is the default; the rest by name, which is how
+// a list this long is searched (a native picker also jumps by first letter).
+const CODE_BLOCK_LANGUAGES = {
+  text: { name: '일반 텍스트', aliases: ['plaintext', 'plain'] },
+  bash: { name: 'Bash / Shell', aliases: ['sh', 'shell', 'zsh'] },
+  c: { name: 'C' },
+  cpp: { name: 'C++', aliases: ['c++'] },
+  csharp: { name: 'C#', aliases: ['cs'] },
+  css: { name: 'CSS' },
+  dockerfile: { name: 'Dockerfile', aliases: ['docker'] },
+  go: { name: 'Go', aliases: ['golang'] },
+  html: { name: 'HTML' },
+  java: { name: 'Java' },
+  javascript: { name: 'JavaScript', aliases: ['js', 'jsx'] },
+  json: { name: 'JSON' },
+  kotlin: { name: 'Kotlin', aliases: ['kt'] },
+  markdown: { name: 'Markdown', aliases: ['md'] },
+  php: { name: 'PHP' },
+  python: { name: 'Python', aliases: ['py'] },
+  r: { name: 'R' },
+  ruby: { name: 'Ruby', aliases: ['rb'] },
+  rust: { name: 'Rust', aliases: ['rs'] },
+  sql: { name: 'SQL' },
+  swift: { name: 'Swift' },
+  typescript: { name: 'TypeScript', aliases: ['ts', 'tsx'] },
+  xml: { name: 'XML' },
+  yaml: { name: 'YAML', aliases: ['yml'] },
+};
+
+/**
+ * The id this language is known by here, or none.
+ *
+ * `sh` and `bash` are the same language written two ways, and a document
+ * written somewhere else can say either; the alias table is what that is for.
+ * A language nobody here knows — `objc`, say — is left exactly as the document
+ * says it, because it is not ours to rewrite.
+ */
+function knownCodeLanguage(language) {
+  const id = String(language || '').trim().toLowerCase();
+  if (!id) return null;
+  if (CODE_BLOCK_LANGUAGES[id]) return id;
+  const byAlias = Object.entries(CODE_BLOCK_LANGUAGES)
+    .find(([, meta]) => (meta.aliases || []).includes(id));
+  return byAlias ? byAlias[0] : null;
+}
+
+// BlockNote draws the picker by looking the block's language up in the list,
+// and *throws* when it is not there — which takes the whole editor down for a
+// document holding a fence it has never heard of, and for the word somebody
+// typed right after ```. Rendered as plain text in that case; the document
+// keeps saying what it said.
+const stockCodeBlockSpec = createCodeBlockSpec({ supportedLanguages: CODE_BLOCK_LANGUAGES });
+const codeBlockSpec = {
+  ...stockCodeBlockSpec,
+  implementation: {
+    ...stockCodeBlockSpec.implementation,
+    render(block, editor) {
+      const known = knownCodeLanguage(block.props?.language) || 'text';
+      const safe = known === block.props?.language
+        ? block
+        : { ...block, props: { ...block.props, language: known } };
+      return stockCodeBlockSpec.implementation.render.call(this, safe, editor);
+    },
+  },
+};
+
+/** A fence written with an alias (```sh, ```py) says the language this list
+ *  knows it by, so the block opens on the right one. */
+export function normaliseCodeLanguages(blocks) {
+  return blocks.map((block) => {
+    const children = block.children?.length ? normaliseCodeLanguages(block.children) : block.children;
+    if (block.type === 'codeBlock') {
+      const known = knownCodeLanguage(block.props?.language);
+      if (known && known !== block.props?.language) {
+        return { ...block, props: { ...block.props, language: known }, children };
+      }
+    }
+    return children === block.children ? block : { ...block, children };
+  });
+}
+
 const stockAudioSpec = defaultBlockSpecs.audio;
 const stockFileSpec = defaultBlockSpecs.file;
 
@@ -148,7 +235,8 @@ export const blockNoteSchema = BlockNoteSchema.create({
         ...stockFileSpec.implementation,
         parse: parseWithName(stockFileSpec, 'embed')
       }
-    }
+    },
+    codeBlock: codeBlockSpec
   }
 });
 
@@ -742,7 +830,9 @@ function upgradeAttachmentLinks(blocks) {
 /** Markdown as it is stored turned into blocks as the editor holds them. */
 export function markdownToBlocks(editor, markdown) {
   const parsed = editor.tryParseMarkdownToBlocks(expandBlankParagraphs(markdown) || ' ');
-  const blocks = restoreBlankParagraphs(upgradeAttachmentLinks(upgradeVideoLinks(restoreIndentation(parsed))));
+  const blocks = normaliseCodeLanguages(
+    restoreBlankParagraphs(upgradeAttachmentLinks(upgradeVideoLinks(restoreIndentation(parsed)))),
+  );
   // replaceBlocks refuses an empty list, and a document that parsed to nothing
   // is an empty document, not a missing one.
   return blocks.length ? blocks : [{ type: 'paragraph' }];
@@ -1093,19 +1183,47 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
    * what "첨부" used to mean here. The same file can be attached to as many
    * documents as it is useful in; nothing is copied and nothing is moved.
    */
+  const insertAttachmentBlock = (url, name, kind) => {
+    const type = kind === 'image' ? 'image'
+      : kind === 'video' ? 'video'
+        : kind === 'audio' ? 'audio' : 'file';
+    const cursor = editor.getTextCursorPosition();
+    // The name is carried for every kind, players included: it is what the
+    // document writes as the attachment's `data-name` and what brings the file
+    // back with its own name when the document is read again.
+    editor.insertBlocks([{ type, props: { url, name } }], cursor.block, 'after');
+    handleEditorChange();
+  };
+
   const handleInsertExistingFile = (picked) => {
     if (!picked?.id) return;
-    const url = getMediaPreviewUrl(picked.id);
-    const type = picked.file_type === 'image' ? 'image'
-      : picked.file_type === 'video' ? 'video'
-        : picked.file_type === 'audio' ? 'audio' : 'file';
-    const cursor = editor.getTextCursorPosition();
-    editor.insertBlocks(
-      [{ type, props: type === 'video' ? { url } : { url, name: picked.name } }],
-      cursor.block,
-      'after',
-    );
-    handleEditorChange();
+    insertAttachmentBlock(getMediaPreviewUrl(picked.id), picked.name, picked.file_type);
+  };
+
+  /**
+   * A picture or a video chosen from the device, put where the caret is.
+   *
+   * The same upload the editor already does for a dragged-in image, reached
+   * from the toolbar so it does not have to be dragged or typed for.
+   */
+  const handleUploadAndInsertFile = async (file) => {
+    if (!file) return;
+    setIsUploadingImage(true);
+    try {
+      const uploaded = await uploadNoteImage(file, workspaceIdRef.current, fileRef.current?.folder_id);
+      const kind = file.type.startsWith('image/') ? 'image'
+        : file.type.startsWith('video/') ? 'video'
+          : file.type.startsWith('audio/') ? 'audio' : 'file';
+      insertAttachmentBlock(uploaded.previewUrl, file.name, kind);
+    } catch (err) {
+      await showAlert({
+        title: '올리지 못했습니다',
+        message: err?.message || '파일을 올리는 중 오류가 발생했습니다.',
+        type: 'error',
+      });
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const handleVersionRestored = async (updatedFile) => {
@@ -1161,6 +1279,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
     isHistoryModalOpen,
     setIsHistoryModalOpen,
     handleInsertExistingFile,
+    handleUploadAndInsertFile,
     handleVersionRestored,
     handleExportMarkdown,
     handleExportPdf
