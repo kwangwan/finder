@@ -219,6 +219,9 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   // one to ask what is here, one to narrow it.
   const [showFacts, setShowFacts] = useState(false);
   const [filterSheet, setFilterSheet] = useState(false);
+  const [sheetTall, setSheetTall] = useState(false);
+  const gripFrom = useRef(null);
+  const factsRef = useRef(null);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({
@@ -531,6 +534,51 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const uploaderName = uploader ? uploaders.find((p) => p.id === uploader)?.name : null;
   const placed = summary?.placed_count || 0;
 
+  /**
+   * What is in here, and how much of it.
+   *
+   * Six facts laid across the top read as clutter on any screen, and on a
+   * phone they read as most of the screen. They are worth having and they
+   * are not worth being looked at every time, which is what (i) is for.
+   */
+  const facts = (
+    <div className="gal-facts-list">
+      {workspaceName && <span className="gal-ws">{workspaceName}</span>}
+      {summary ? (
+        <>
+          <span>사진 {summary.image_count.toLocaleString()}</span>
+          <span>영상 {summary.video_count.toLocaleString()}</span>
+          {placed > 0 && (
+            <span title="위치가 기록된 사진과 영상">
+              <MapPin size={11} /> {placed.toLocaleString()}
+            </span>
+          )}
+          {faceStatus && faceStatus.pending > 0 && (
+            <span
+              className="gal-indexing"
+              title="사진 속 얼굴을 찾는 중입니다. 끝나면 사진 위의 얼굴을 눌러 같은 사람을 찾을 수 있습니다."
+            >
+              <Users size={11} /> 얼굴 찾는 중 {Math.floor((faceStatus.scanned / Math.max(1, faceStatus.total)) * 100)}%
+            </span>
+          )}
+          {summary.undated_count > 0 && (
+            <span
+              className="gal-undated"
+              title="촬영 정보가 없어 올린 날짜를 기준으로 놓인 항목입니다"
+            >
+              촬영일 없음 {summary.undated_count.toLocaleString()}
+            </span>
+          )}
+          {summary.first_taken_at && (
+            <span className="gal-span">
+              {summary.first_taken_at.slice(0, 7).replace('-', '.')} – {summary.last_taken_at.slice(0, 7).replace('-', '.')}
+            </span>
+          )}
+        </>
+      ) : <span>&nbsp;</span>}
+    </div>
+  );
+
   const activeFilters = [q, kind !== 'all', uploader, camera.length, hasPlace]
     .filter(Boolean).length;
 
@@ -615,70 +663,43 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             <ImageIcon size={18} color="var(--accent-primary)" />
             <h1>갤러리</h1>
             {summary && <span className="gal-head-count">{summary.total_count.toLocaleString()}개</span>}
-            {narrow && summary && (
-              <button
-                type="button"
-                className={`gal-facts-open ${showFacts ? 'is-on' : ''}`}
-                aria-expanded={showFacts}
-                aria-label="이 갤러리에 무엇이 얼마나 있는지"
-                onClick={() => setShowFacts((v) => !v)}
-              >
-                <Info size={14} />
-              </button>
+            {summary && (
+              <span className="gal-facts" ref={factsRef}>
+                <button
+                  type="button"
+                  className={`gal-facts-open ${showFacts ? 'is-on' : ''}`}
+                  aria-expanded={showFacts}
+                  aria-label="이 갤러리에 무엇이 얼마나 있는지"
+                  onClick={() => setShowFacts((v) => !v)}
+                >
+                  <Info size={14} />
+                </button>
+                {showFacts && (
+                  <Popover anchorRef={factsRef} onClose={() => setShowFacts(false)} className="gal-facts-pop">
+                    {facts}
+                  </Popover>
+                )}
+              </span>
             )}
           </div>
-          <p className={narrow && !showFacts ? 'is-folded' : ''}>
-            {workspaceName && <span className="gal-ws">{workspaceName}</span>}
-            {summary ? (
-              <>
-                <span>사진 {summary.image_count.toLocaleString()}</span>
-                <span>영상 {summary.video_count.toLocaleString()}</span>
-                {placed > 0 && (
-                  <span title="위치가 기록된 사진과 영상">
-                    <MapPin size={11} /> {placed.toLocaleString()}
-                  </span>
-                )}
-                {faceStatus && faceStatus.pending > 0 && (
-                  <span
-                    className="gal-indexing"
-                    title="사진 속 얼굴을 찾는 중입니다. 끝나면 사진 위의 얼굴을 눌러 같은 사람을 찾을 수 있습니다."
-                  >
-                    <Users size={11} /> 얼굴 찾는 중 {Math.floor((faceStatus.scanned / Math.max(1, faceStatus.total)) * 100)}%
-                  </span>
-                )}
-                {summary.undated_count > 0 && (
-                  <span
-                    className="gal-undated"
-                    title="촬영 정보가 없어 올린 날짜를 기준으로 놓인 항목입니다"
-                  >
-                    촬영일 없음 {summary.undated_count.toLocaleString()}
-                  </span>
-                )}
-                {summary.first_taken_at && (
-                  <span className="gal-span">
-                    {summary.first_taken_at.slice(0, 7).replace('-', '.')} – {summary.last_taken_at.slice(0, 7).replace('-', '.')}
-                  </span>
-                )}
-              </>
-            ) : <span>&nbsp;</span>}
-          </p>
         </div>
 
-        {/* On a phone the whole row would not fit, and sliding it sideways is a
-            gesture nobody discovers. Only the two views stay out — they are what
-            the page is switched between — and everything that narrows the library
-            goes behind one button that says how many narrowings are on. */}
+        {/* Switching between the photographs and the map is what this page is
+            for; narrowing which photographs is a thing you occasionally do to
+            it. Lined up together they read as five equal buttons, and the one
+            that matters disappears among them. So the views stand alone and
+            everything else is behind one button that says how many are on —
+            on a wide screen as much as a narrow one, because being lost in a
+            row is not a problem only phones have. */}
         <div className="gal-tools">
-          {narrow ? (
-            <button
-              type="button"
-              className={`gal-filter-open ${activeFilters ? "is-set" : ""}`}
-              onClick={() => setFilterSheet(true)}
-            >
-              <SlidersHorizontal size={13} />
-              <span>거르기{activeFilters ? ` ${activeFilters}` : ""}</span>
-            </button>
-          ) : filterControls}
+          <button
+            type="button"
+            className={`gal-filter-open ${activeFilters ? "is-set" : ""}`}
+            onClick={() => setFilterSheet(true)}
+          >
+            <SlidersHorizontal size={13} />
+            <span>필터{activeFilters ? ` ${activeFilters}` : ""}</span>
+          </button>
           <div className="gal-seg" role="group" aria-label="보기 방식">
             <button type="button" className={mode === 'grid' ? 'is-on' : ''} onClick={() => setMode('grid')} title="사진으로 보기">
               <LayoutGrid size={13} />
@@ -693,11 +714,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       {/* Everything that narrows the library, on a screen with no room for it
           in a row. Closing is the same as applying: the list behind it has
           already been changing as each one was chosen. */}
-      {narrow && filterSheet && (
+      {filterSheet && (
         <div className="gal-sheet-back" onClick={() => setFilterSheet(false)} role="presentation">
-          <div className="gal-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="거르기">
+          <div className="gal-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="필터">
             <header>
-              <strong>거르기</strong>
+              <strong>필터</strong>
               <button type="button" onClick={() => setFilterSheet(false)} aria-label="닫기">
                 <X size={16} />
               </button>
@@ -850,7 +871,30 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               </div>
             </div>
 
-            <aside className="gal-map-side">
+            <aside className={`gal-map-side ${narrow && sheetTall ? 'is-tall' : ''}`}>
+              {/* On a phone this is a sheet over the map, and a sheet that is
+                  one size is the wrong size twice: too short to look through
+                  photographs, too tall to see where they were taken. The grip
+                  moves it between the two — pulled or tapped, because a grip
+                  that only answers to a drag looks like decoration. */}
+              {narrow && (
+                <button
+                  type="button"
+                  className="gal-sheet-grip"
+                  aria-label={sheetTall ? '지도 보기' : '사진 크게 보기'}
+                  aria-expanded={sheetTall}
+                  onClick={() => setSheetTall((v) => !v)}
+                  onTouchStart={(e) => { gripFrom.current = e.touches[0]?.clientY ?? null; }}
+                  onTouchEnd={(e) => {
+                    const from = gripFrom.current;
+                    const to = e.changedTouches[0]?.clientY;
+                    gripFrom.current = null;
+                    if (from == null || to == null || Math.abs(to - from) < 24) return;
+                    e.preventDefault();          // a drag is not also a tap
+                    setSheetTall(to < from);
+                  }}
+                />
+              )}
               {place ? (
                 <GalleryPlacePanel
                   place={place}

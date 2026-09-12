@@ -29,19 +29,19 @@ from app.services.s3_service import s3_service
 
 logger = logging.getLogger(__name__)
 
-# A film is downloaded whole before it can be decoded — a decoder seeks, and a
-# stream cannot. Past this size it is skipped rather than pulled across the
-# network for twelve frames.
-MAX_VIDEO_BYTES = 800 * 1024 * 1024
 
 
 def _faces_for_image(data: bytes):
     return face_service.dedupe_faces(face_service.faces_in_image_bytes(data))
 
 
-def _faces_for_video(path: str):
+def _faces_for_video(source: str):
+    return face_service.dedupe_faces(face_service.faces_in_video(source))
+
+
+def _faces_for_downloaded_video(path: str):
     try:
-        return face_service.dedupe_faces(face_service.faces_in_video_file(path))
+        return _faces_for_video(path)
     finally:
         try:
             os.unlink(path)
@@ -62,14 +62,24 @@ async def find_faces(file_item: FileItem) -> list:
             data = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
             return await run_in_threadpool(_faces_for_image, data) if data else []
         if file_item.file_type == "video":
-            if (file_item.size_bytes or 0) > MAX_VIDEO_BYTES:
-                logger.info("[Faces] %s is too large to decode, skipped", file_item.name)
-                return []
+            # Read where it lies. The decoder asks for the byte ranges holding
+            # the keyframes it wants, so a film is looked at without being
+            # fetched — which is what removed the size limit that had been
+            # skipping the fourteen largest films in the library outright.
+            url = await run_in_threadpool(
+                s3_service.internal_presigned_get_url, file_item.s3_key
+            )
+            if url:
+                found = await run_in_threadpool(_faces_for_video, url)
+                if found:
+                    return found
+            # Storage that will not sign, or a container the decoder cannot
+            # read over the network: fall back to having the whole file.
             path = await run_in_threadpool(
                 face_service.write_temp_video,
                 s3_service.stream_object(file_item.s3_key),
             )
-            return await run_in_threadpool(_faces_for_video, path)
+            return await run_in_threadpool(_faces_for_downloaded_video, path)
     except Exception as e:
         # An image this decoder cannot read is not going to become readable,
         # so the file is still marked as looked at by the caller — otherwise

@@ -156,6 +156,25 @@ class S3Service:
             print(f"[S3 Error] generate_presigned_put_url: {e}")
             raise
 
+    def internal_presigned_get_url(self, s3_key: str, expires_in: int = 3600) -> Optional[str]:
+        """
+        An address for this object that only this side of the network can use.
+
+        The ordinary presigned URL is signed for the public host, because it is
+        meant for a browser. This one is signed for the storage server itself,
+        for work happening here — reading a film's keyframes, say — so it goes
+        straight across the LAN instead of out through the tunnel and back.
+        """
+        try:
+            return self.client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket_name, "Key": s3_key},
+                ExpiresIn=expires_in,
+            )
+        except Exception as e:
+            logger.warning(f"[S3] could not sign an internal URL for {s3_key}: {e}")
+            return None
+
     def generate_presigned_get_url(self, s3_key: str, filename: Optional[str] = None, expires_in: int = 3600) -> str:
         """Generate presigned GET URL for file download/viewing."""
         try:
