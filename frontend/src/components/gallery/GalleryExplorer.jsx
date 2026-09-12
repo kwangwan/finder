@@ -316,28 +316,33 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
 
   const PLACE_PAGE = 60;
 
-  const openPlace = useCallback(async (latitude, longitude, atZoom) => {
+  /**
+   * Open one dot on the map.
+   *
+   * `bounds` is the ground that dot actually covers, which the map endpoint
+   * sends with it. Asking by that rather than by a radius around its centre
+   * is the difference between "the photographs this dot is made of" and
+   * "everything within a few kilometres" — a dot holding a single photograph
+   * used to answer with a hundred from the dots beside it.
+   */
+  const openPlace = useCallback(async (latitude, longitude, atZoom, bounds) => {
     const zoom = atZoom ?? 14;
     const radiusKm = placeRadiusKm(zoom);
-    setPlace({
-      latitude, longitude, radiusKm, loading: true,
-      items: [], total: 0, page: 0, totalPages: 0,
-    });
+    const area = bounds ? { bbox: bounds.join(',') } : { radius_km: radiusKm };
+    const base = { latitude, longitude, radiusKm, bounds: bounds || null };
+    setPlace({ ...base, loading: true, items: [], total: 0, page: 0, totalPages: 0 });
     setFocusPoint({ latitude, longitude, zoom });
     try {
       const data = await getGalleryPlace(workspaceId, latitude, longitude, {
-        ...filters, radius_km: radiusKm, page: 1, page_size: PLACE_PAGE,
+        ...filters, ...area, page: 1, page_size: PLACE_PAGE,
       });
       setPlace({
-        latitude, longitude, radiusKm, loading: false, items: data.items,
+        ...base, loading: false, items: data.items,
         total: data.total_count, page: data.page, totalPages: data.total_pages,
         first: data.first_taken_at, last: data.last_taken_at,
       });
     } catch (e) {
-      setPlace({
-        latitude, longitude, radiusKm, loading: false, items: [],
-        total: 0, page: 0, totalPages: 0, error: e.message,
-      });
+      setPlace({ ...base, loading: false, items: [], total: 0, page: 0, totalPages: 0, error: e.message });
     }
   }, [workspaceId, filters]);
 
@@ -353,7 +358,9 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
     setPlace((current) => ({ ...current, loading: true }));
     try {
       const data = await getGalleryPlace(workspaceId, place.latitude, place.longitude, {
-        ...filters, radius_km: place.radiusKm, page: place.page + 1, page_size: PLACE_PAGE,
+        ...filters,
+        ...(place.bounds ? { bbox: place.bounds.join(',') } : { radius_km: place.radiusKm }),
+        page: place.page + 1, page_size: PLACE_PAGE,
       });
       setPlace((current) => (current && current.latitude === place.latitude ? {
         ...current,
@@ -531,7 +538,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                 focus={focusPoint}
                 onBoundsChange={setMapView}
                 onOpenCluster={(cluster) => openPlace(
-                  cluster.latitude, cluster.longitude, stepIn(mapView?.zoom),
+                  cluster.latitude, cluster.longitude, stepIn(mapView?.zoom), cluster.bounds,
                 )}
                 onPickPathPoint={(id) => {
                   // A single photograph's dot is already one photograph, so

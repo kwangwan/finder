@@ -399,6 +399,14 @@ async def gallery_map(
             func.count(FileItem.id).label("count"),
             func.min(cast(FileItem.id, String)).label("sample_id"),
             func.max(func.coalesce(FileItem.taken_at, FileItem.created_at)).label("latest"),
+            # The ground this dot actually stands for. Without it the panel
+            # beside the map had to guess from the zoom level, and a dot
+            # holding one photograph answered with a hundred from the dots
+            # around it.
+            func.min(FileItem.gps_latitude).label("min_lat"),
+            func.max(FileItem.gps_latitude).label("max_lat"),
+            func.min(FileItem.gps_longitude).label("min_lon"),
+            func.max(FileItem.gps_longitude).label("max_lon"),
         )
         .where(and_(*conditions))
         .group_by(lat_cell, lon_cell)
@@ -414,6 +422,7 @@ async def gallery_map(
                 "count": r.count,
                 "sample_id": r.sample_id,
                 "latest": r.latest.isoformat() if r.latest else None,
+                "bounds": [float(r.min_lat), float(r.min_lon), float(r.max_lat), float(r.max_lon)],
             }
             for r in rows
         ],
@@ -498,6 +507,7 @@ async def gallery_place(
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
     uploader: Optional[uuid.UUID] = None,
+    bbox: Optional[str] = Query(None, description="south,west,north,east — the ground a dot covers"),
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
@@ -516,19 +526,34 @@ async def gallery_place(
     await _require_member(db, current_user, workspace_id)
     zone = _zone(tz)
 
-    import math as _math
-    lat_span = radius_km / 111.0
-    lon_span = radius_km / max(1.0, 111.0 * _math.cos(_math.radians(latitude)))
-
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
         date_from=None, date_to=None, bbox=None, placed_only=True, uploader=uploader,
     )
-    conditions += [
-        FileItem.gps_latitude.between(latitude - lat_span, latitude + lat_span),
-        FileItem.gps_longitude.between(longitude - lon_span, longitude + lon_span),
-    ]
+
+    if bbox:
+        # Asked for by the exact ground a dot on the map covers, so what the
+        # panel lists is what that dot is made of — no more, and none of its
+        # neighbours. A hair of slack, because the bounds came back as floats
+        # and the same numbers have to match themselves.
+        try:
+            south, west, north, east = (float(v) for v in bbox.split(","))
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail="범위를 읽을 수 없습니다.")
+        slack = 1e-7
+        conditions += [
+            FileItem.gps_latitude.between(south - slack, north + slack),
+            FileItem.gps_longitude.between(west - slack, east + slack),
+        ]
+    else:
+        import math as _math
+        lat_span = radius_km / 111.0
+        lon_span = radius_km / max(1.0, 111.0 * _math.cos(_math.radians(latitude)))
+        conditions += [
+            FileItem.gps_latitude.between(latitude - lat_span, latitude + lat_span),
+            FileItem.gps_longitude.between(longitude - lon_span, longitude + lon_span),
+        ]
 
     total = (await db.execute(
         select(func.count(FileItem.id)).where(and_(*conditions))

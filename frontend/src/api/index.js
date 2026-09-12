@@ -2186,6 +2186,8 @@ export async function getGalleryPath(workspaceId, filters = {}) {
 }
 
 export async function getGalleryPlace(workspaceId, latitude, longitude, filters = {}) {
+  // `bbox` (the ground a dot on the map covers) wins over `radius_km` when
+  // both are present — see the gallery router.
   const params = galleryParams(workspaceId, { latitude, longitude, ...filters });
   const res = await apiFetch(`${API_BASE}/gallery/place?${params}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('이 장소의 사진을 불러오지 못했습니다.');
