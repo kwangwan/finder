@@ -318,6 +318,29 @@ async def init_db():
         except Exception as e:
             print(f"[DB Migration Warning] Could not backfill username history: {e}")
 
+        # The gallery reads the same table as everything else but asks it a
+        # different question — "this workspace's photos, newest first" and
+        # "this workspace's photos within these coordinates" — and answers
+        # those on every scroll and every pan. Both are partial indexes: the
+        # library is media, and a document or a board has no business making
+        # them bigger.
+        for name, ddl in (
+            ("idx_files_gallery_taken",
+             "CREATE INDEX IF NOT EXISTS idx_files_gallery_taken ON kb_files "
+             "(workspace_id, taken_at DESC NULLS LAST, id DESC) "
+             "WHERE file_type IN ('image','video') AND is_trashed = FALSE"),
+            ("idx_files_gallery_place",
+             "CREATE INDEX IF NOT EXISTS idx_files_gallery_place ON kb_files "
+             "(workspace_id, gps_latitude, gps_longitude) "
+             "WHERE file_type IN ('image','video') AND is_trashed = FALSE "
+             "AND gps_latitude IS NOT NULL"),
+        ):
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(ddl))
+            except Exception as e:
+                print(f"[DB Init Index Warning] Could not create {name}: {e}")
+
         # Create HNSW index on embeddings if not exists
         try:
             async with conn.begin_nested():

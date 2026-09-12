@@ -94,6 +94,11 @@ import {
   Palette as LuPalette,
   Paperclip as LuPaperclip,
   Play as LuPlay,
+  MapPin as LuMapPin,
+  ImageOff as LuImageOff,
+  LayoutGrid as LuLayoutGrid,
+  Map as LuMap,
+  CalendarRange as LuCalendarRange,
   Plus as LuPlus,
   Quote as LuQuote,
   RefreshCw as LuRefreshCw,
@@ -259,5 +264,10 @@ export const Volume2 = makeIcon(LuVolume2);
 // not the letter X.
 export const X = makeIcon(LuX);
 export const XCircle = makeIcon(LuXCircle);
+export const MapPin = makeIcon(LuMapPin);
+export const ImageOff = makeIcon(LuImageOff);
+export const LayoutGrid = makeIcon(LuLayoutGrid);
+export const Map = makeIcon(LuMap);
+export const CalendarRange = makeIcon(LuCalendarRange);
 export const ZoomIn = makeIcon(LuZoomIn);
 export const ZoomOut = makeIcon(LuZoomOut);

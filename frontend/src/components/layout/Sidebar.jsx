@@ -16,8 +16,7 @@ import {
   Trash2,
   CalendarCheck,
   ChevronsLeft,
-  Flag
-} from '../../utils/icons';
+  Flag, Image as ImageIcon } from '../../utils/icons';
 import { folderIconColor } from '../../utils/folderColors';
 import WorkspaceSwitcher from '../workspace/WorkspaceSwitcher';
 import { setItemDragData, isItemDrag, getDraggedItems, canDropOnFolder, dropIntent, getDragWorkspaceHint } from '../../utils/fileDragDrop';
@@ -367,6 +366,16 @@ export default function Sidebar({
         >
           <CalendarCheck size={16} />
           <span>일정</span>
+        </li>
+        {/* Photographs are not browsed the way documents are — by when and
+            where they happened, not by which folder they landed in — so they
+            get their own way in rather than a filter on the file list. */}
+        <li
+          className={`menu-item ${activeView === 'gallery' ? 'active' : ''}`}
+          onClick={() => onSelectView('gallery')}
+        >
+          <ImageIcon size={16} />
+          <span>갤러리</span>
         </li>
         <li 
           className={`menu-item ${activeView === 'favorites' ? 'active' : ''}`}

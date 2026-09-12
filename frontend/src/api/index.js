@@ -2096,3 +2096,60 @@ export async function openWindowStateStream({ signal, onOpen, onVersion } = {}) 
     }
   }
 }
+
+/**
+ * Gallery
+ *
+ * The library asked three ways: a page of it, the shape of the whole of it,
+ * and where it happened. Each one carries the browser's own time zone,
+ * because which evening a photo belongs to is a local question.
+ */
+const galleryZone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul';
+  } catch (e) {
+    return 'Asia/Seoul';
+  }
+};
+
+function galleryParams(workspaceId, filters = {}) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, tz: galleryZone() });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '' || value === false) return;
+    params.set(key, String(value));
+  });
+  return params;
+}
+
+export async function listGalleryItems(workspaceId, filters = {}) {
+  const res = await apiFetch(`${API_BASE}/gallery/items?${galleryParams(workspaceId, filters)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('갤러리를 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getGallerySummary(workspaceId, filters = {}) {
+  const res = await apiFetch(`${API_BASE}/gallery/summary?${galleryParams(workspaceId, filters)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('갤러리 요약을 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getGalleryMap(workspaceId, filters = {}) {
+  const res = await apiFetch(`${API_BASE}/gallery/map?${galleryParams(workspaceId, filters)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('지도를 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getGalleryNeighbours(workspaceId, fileId, radiusKm = 2) {
+  const res = await apiFetch(
+    `${API_BASE}/gallery/neighbours?${galleryParams(workspaceId, { file_id: fileId, radius_km: radiusKm })}`,
+    { headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error('주변 사진을 불러오지 못했습니다.');
+  return res.json();
+}

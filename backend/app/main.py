@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
-from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state, reports, favorites, boards
+from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state, reports, favorites, boards, gallery
 from app.routers.trash import _auto_purge_expired
 from app.routers.storage import cleanup_stale_chunk_sessions, cleanup_phantom_files, backfill_missing_thumbnails
 from app.routers.folders import reconcile_orphaned_trashed_files
@@ -189,6 +189,7 @@ app.include_router(system.router)
 app.include_router(window_state.router)
 app.include_router(favorites.router)
 app.include_router(boards.router)
+app.include_router(gallery.router)
 
 @app.get("/")
 async def root():

@@ -16,6 +16,7 @@ import InvitationManagerModal from './components/admin/InvitationManagerModal';
 import TrashExplorer from './components/trash/TrashExplorer';
 import ReportsExplorer from './components/admin/ReportsExplorer';
 import ScheduleExplorer from './components/board/ScheduleExplorer';
+import GalleryExplorer from './components/gallery/GalleryExplorer';
 import ReportModal from './components/modals/ReportModal';
 import FolderShareModal from './components/modals/FolderShareModal';
 import ContextMenu from './components/common/ContextMenu';
@@ -2325,7 +2326,13 @@ export default function App() {
           onLogout={handleLogout}
         />
 
-        {activeView === 'schedule' ? (
+        {activeView === 'gallery' ? (
+          <GalleryExplorer
+            workspaceId={activeWorkspace?.id}
+            workspaceName={activeWorkspace?.name || ''}
+            theme={theme}
+          />
+        ) : activeView === 'schedule' ? (
           <ScheduleExplorer
             workspaceId={activeWorkspace?.id}
             workspaceName={activeWorkspace?.name || ''}
