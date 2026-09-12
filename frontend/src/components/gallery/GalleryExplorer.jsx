@@ -569,6 +569,15 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               촬영일 없음 {summary.undated_count.toLocaleString()}
             </span>
           )}
+          {/* Only once the trail has been drawn — it is a fact about the line,
+              not about the library. */}
+          {showPath && path && (
+            <span title="한자리에서 이어 찍은 사진을 한 지점으로 묶은 수입니다. 빠지는 사진은 없습니다.">
+              <MapPin size={11} /> 머문 자리 {path.points.length.toLocaleString()}곳
+              {path.undated > 0
+                && ` · 촬영 시각이 없는 ${path.undated.toLocaleString()}장은 순서를 몰라 선에서 뺍니다`}
+            </span>
+          )}
           {summary.first_taken_at && (
             <span className="gal-span">
               {summary.first_taken_at.slice(0, 7).replace('-', '.')} – {summary.last_taken_at.slice(0, 7).replace('-', '.')}

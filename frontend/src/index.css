@@ -7979,14 +7979,6 @@ input.bd-name:focus {
   border-color: color-mix(in srgb, var(--accent-primary) 60%, transparent);
   background: color-mix(in srgb, var(--accent-primary) 78%, var(--gal-panel));
 }
-.gal-map-note {
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  background: var(--gal-panel);
-  border-radius: 999px;
-  padding: 0.3rem 0.6rem;
-  backdrop-filter: blur(6px);
-}
 
 .gal-place-back {
   align-self: flex-start;
