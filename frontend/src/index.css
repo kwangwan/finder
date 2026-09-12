@@ -7590,9 +7590,35 @@ input.bd-name:focus {
 .gal-light-download { position: static; width: 38px; height: 38px; flex: none; }
 
 @media (max-width: 900px) {
-  .gal-head { padding: 1rem 1rem 0.7rem; }
+  /* The header was taking a third of a phone screen before a single
+     photograph appeared: a title line, a line of counts, and a row of
+     controls that wrapped onto three. It says the same things in one band
+     now — the counts stay, because "how much is here" is why the page was
+     opened, and the controls run off the side to be scrolled rather than
+     stacking. */
+  .gal-head {
+    padding: 0.6rem 0.85rem 0.5rem;
+    gap: 0.5rem;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .gal-head-title h1 { font-size: 1.02rem; }
+  .gal-head-line { gap: 0.4rem; }
+  .gal-head-title p { margin-top: 0.15rem; font-size: 0.68rem; gap: 0.45rem; }
+  .gal-ws { display: none; }
+  .gal-tools {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    gap: 0.4rem;
+    padding-bottom: 0.1rem;
+  }
+  .gal-tools::-webkit-scrollbar { display: none; }
+  .gal-tools > * { flex: none; }
+  .gal-search { flex: 1 1 auto; min-width: 108px; }
   .gal-scroll { padding: 0 0.75rem 4rem 1rem; }
-  .gal-search input { width: 120px; }
+  .gal-search input { width: 100%; min-width: 0; }
   /* The rail becomes a strip across the top: a phone has no room for a column
      beside the pictures, and the years still have to be reachable. */
   .gal-body { flex-direction: column; }
@@ -7608,7 +7634,30 @@ input.bd-name:focus {
   }
   .gal-rail-year { flex: none; }
   .gal-rail-months { position: absolute; display: none; }
-  .gal-map-side { display: none; }
+  /* The panel beside the map has nowhere to be beside anything on a phone, so
+     it comes up from the bottom over the map instead of not existing. It used
+     to be hidden outright, which left no way at all to see what a dot holds —
+     the one thing the map is for. */
+  .gal-map-side {
+    display: flex;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: 44%;
+    max-height: 56vh;
+    border-left: none;
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -14px 34px -14px rgba(0, 0, 0, 0.75);
+    z-index: 6;
+  }
+  .gal-map-side-head { padding-top: 0.55rem; }
+  /* The sheet covers the bottom of the map, so the map's own buttons move up
+     out from under it. */
+  .gal-body.is-map .maplibregl-ctrl-bottom-right,
+  .gal-body.is-map .maplibregl-ctrl-bottom-left { bottom: 45%; }
   .gal-light-nav { width: 44px; height: 44px; }
 }
 
@@ -7840,10 +7889,10 @@ input.bd-name:focus {
   background: rgba(255, 255, 255, 0.18);
   font-size: 0.62rem;
 }
-.gal-undated {
-  color: var(--accent-amber, #f59e0b);
-  opacity: 0.9;
-}
+/* A count, not a warning. Amber made a plain fact about a handful of files
+   read as something wrong that wanted attending to, every time the gallery was
+   opened. It sits with the other counts now and says the same thing. */
+.gal-undated { color: var(--text-muted); }
 .gal-light-undated { color: rgba(255, 255, 255, 0.72); }
 
 .gal-chip-who {

@@ -93,19 +93,36 @@ def _apply_filters(
     bbox: Optional[str],
     placed_only: bool,
     uploader: Optional[uuid.UUID] = None,
+    camera: Optional[str] = None,
+    placed: Optional[str] = None,
 ):
     """Everything the caller narrowed the library down by."""
     if uploader:
         conditions.append(FileItem.created_by == uploader)
+    # Names only. The box used to search camera makes and models as well, which
+    # meant typing a word and not knowing which of three things it had matched
+    # — and nobody guesses "SM-G991N" into a search box anyway. The cameras are
+    # a list to choose from now, which is what a fixed handful of values wants
+    # to be.
     if q and q.strip():
-        needle = f"%{q.strip()}%"
-        conditions.append(
-            or_(
-                FileItem.name.ilike(needle),
-                FileItem.camera_model.ilike(needle),
-                FileItem.camera_make.ilike(needle),
-            )
-        )
+        conditions.append(FileItem.name.ilike(f"%{q.strip()}%"))
+    if camera:
+        wanted = [c for c in camera.split("|") if c]
+        if wanted:
+            conditions.append(or_(*[
+                func.concat(
+                    func.coalesce(FileItem.camera_make, ""), " ",
+                    func.coalesce(FileItem.camera_model, ""),
+                ) == c
+                for c in wanted
+            ]))
+    # Whether it is on the map. "Which of these will never appear in the map
+    # view" is a real question about a library, and it had no way of being
+    # asked.
+    if placed == "yes":
+        conditions.append(FileItem.gps_latitude.isnot(None))
+    elif placed == "no":
+        conditions.append(FileItem.gps_latitude.is_(None))
 
     # Dates are compared in the viewer's own time zone, the same one the
     # timeline is grouped by, so a month in the rail and that month's filter
@@ -167,6 +184,36 @@ async def _require_member(db: AsyncSession, user: User, workspace_id: uuid.UUID)
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
 
 
+@router.get("/cameras")
+async def gallery_cameras(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    What took the photographs, and how many each.
+
+    A handful of values that never change is a list to choose from, not
+    something to type. Make and model are joined into the one name a person
+    would use for the thing — "Samsung SM-G991N" rather than two columns — and
+    that joined name is what the filter matches on.
+    """
+    await _require_member(db, current_user, workspace_id)
+    name = func.trim(func.concat(
+        func.coalesce(FileItem.camera_make, ""), " ",
+        func.coalesce(FileItem.camera_model, ""),
+    ))
+    rows = (await db.execute(
+        select(name.label("name"), func.count(FileItem.id).label("count"))
+        .where(and_(*_media_conditions(workspace_id, "all")))
+        .group_by(name)
+        .having(name != "")
+        .order_by(func.count(FileItem.id).desc())
+        .limit(60)
+    )).all()
+    return {"items": [{"name": r.name, "count": r.count} for r in rows]}
+
+
 @router.get("/uploaders")
 async def gallery_uploaders(
     workspace_id: uuid.UUID,
@@ -226,6 +273,8 @@ async def list_gallery_items(
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -245,7 +294,7 @@ async def list_gallery_items(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
         date_from=date_from, date_to=date_to, bbox=bbox, placed_only=placed_only,
-        uploader=uploader,
+        uploader=uploader, camera=camera, placed=placed,
     )
 
     total = (await db.execute(
@@ -279,6 +328,8 @@ async def gallery_summary(
     kind: str = Query("all", pattern="^(all|image|video)$"),
     uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -296,7 +347,7 @@ async def gallery_summary(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=None, month=None,
-        date_from=None, date_to=None, bbox=None, placed_only=False, uploader=uploader,
+        date_from=None, date_to=None, bbox=None, placed_only=False, uploader=uploader, camera=camera, placed=placed,
     )
 
     local_taken = func.timezone(str(zone), func.coalesce(FileItem.taken_at, FileItem.created_at))
@@ -388,6 +439,8 @@ async def gallery_map(
     bbox: Optional[str] = None,
     uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -407,7 +460,7 @@ async def gallery_map(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader, camera=camera, placed=placed,
     )
 
     grid = _grid_size(zoom)
@@ -543,6 +596,8 @@ async def gallery_path(
     bbox: Optional[str] = None,
     uploader: Optional[uuid.UUID] = None,
     tz: Optional[str] = None,
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -586,7 +641,7 @@ async def gallery_path(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader, camera=camera, placed=placed,
     )
     total = (await db.execute(
         select(func.count(FileItem.id)).where(and_(*conditions))
@@ -631,6 +686,8 @@ async def gallery_place(
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -654,7 +711,7 @@ async def gallery_place(
         return _apply_filters(
             _media_conditions(workspace_id, kind),
             q=q, zone=zone, year=year, month=month,
-            date_from=from_day, date_to=to_day, bbox=None, placed_only=True, uploader=uploader,
+            date_from=from_day, date_to=to_day, bbox=None, placed_only=True, uploader=uploader, camera=camera, placed=placed,
         )
 
     conditions = base(date_from, date_to)
@@ -725,6 +782,8 @@ async def gallery_neighbours(
     file_id: uuid.UUID,
     radius_km: float = Query(1.0, gt=0, le=200),
     limit: int = Query(24, ge=1, le=100),
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):

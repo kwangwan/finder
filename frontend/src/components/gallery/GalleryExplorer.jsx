@@ -6,14 +6,15 @@ import {
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
   getFaceMatches, getThumbnailUrl, getFaceIndexStatus, getGalleryPath, getGalleryPlace,
-  listGalleryUploaders,
+  listGalleryUploaders, listGalleryCameras,
 } from '../../api';
 import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
 import GalleryMap from './GalleryMap';
 import TimelineRail from './TimelineRail';
 import GalleryPlacePanel from './GalleryPlacePanel';
-import { Dropdown } from '../board/controls';
+import { Dropdown, Popover } from '../board/controls';
+import { ChevronDown } from '../../utils/icons';
 
 /**
  * 갤러리 — the whole library, by when and by where.
@@ -30,6 +31,65 @@ import { Dropdown } from '../board/controls';
  * finds "the ones from the old camera" — and it waits for a pause in typing
  * before asking.
  */
+
+/**
+ * Several of a short, fixed list.
+ *
+ * A handful of values that never change — the three cameras a family owns —
+ * is a list to choose from, not a word to type into a search box and hope. And
+ * it has to be several: "the two phones, not the old one" is the actual
+ * question, and picking one at a time cannot ask it.
+ */
+function MultiPick({ label, allLabel, options, values, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const chosen = options.filter((o) => values.includes(o.value));
+  const summary = chosen.length === 0
+    ? allLabel
+    : chosen.length === 1 ? chosen[0].short : `${label} ${chosen.length}개`;
+
+  const toggle = (value) => {
+    onChange(values.includes(value) ? values.filter((v) => v !== value) : [...values, value]);
+  };
+
+  return (
+    <span className="ui-dd gal-pick" ref={ref}>
+      <button
+        type="button"
+        className={`ui-dd-btn ${chosen.length ? 'is-set' : ''}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="ui-dd-label">{summary}</span>
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <Popover anchorRef={ref} onClose={() => setOpen(false)} className="ui-dd-menu">
+          <span role="listbox" aria-multiselectable="true">
+            <button type="button" role="option" aria-selected={!chosen.length}
+                    className={!chosen.length ? 'on' : ''} onClick={() => onChange([])}>
+              <span>{allLabel}</span>
+            </button>
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="option"
+                aria-selected={values.includes(o.value)}
+                className={values.includes(o.value) ? 'on' : ''}
+                onClick={() => toggle(o.value)}
+              >
+                <span>{o.label}</span>
+              </button>
+            ))}
+          </span>
+        </Popover>
+      )}
+    </span>
+  );
+}
 
 const PAGE_SIZE = 80;
 
@@ -85,10 +145,12 @@ function readUrlState() {
       month: params.get('gmonth') ? Number(params.get('gmonth')) : null,
       kind: ['image', 'video'].includes(params.get('gkind')) ? params.get('gkind') : 'all',
       uploader: params.get('guploader') || '',
+      camera: params.get('gcam') ? params.get('gcam').split('|').filter(Boolean) : [],
+      placed: ['yes', 'no'].includes(params.get('gplaced')) ? params.get('gplaced') : '',
       q: params.get('gq') || '',
     };
   } catch (e) {
-    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: '', q: '' };
+    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: '', camera: [], placed: '', q: '' };
   }
 }
 
@@ -100,6 +162,9 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [month, setMonth] = useState(initial.month);
   const [uploader, setUploader] = useState(initial.uploader);
   const [uploaders, setUploaders] = useState([]);
+  const [cameras, setCameras] = useState([]);
+  const [camera, setCamera] = useState(initial.camera);
+  const [hasPlace, setHasPlace] = useState(initial.placed);
   const [queryText, setQueryText] = useState(initial.q);
   const q = useDebounced(queryText);
 
@@ -134,8 +199,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const [place, setPlace] = useState(null);
 
   const requestId = useRef(0);
-  const filters = useMemo(() => ({ q, kind, year, month, uploader: uploader || null }),
-    [q, kind, year, month, uploader]);
+  const filters = useMemo(() => ({
+    q, kind, year, month, uploader: uploader || null,
+    camera: camera.length ? camera.join('|') : null,
+    placed: hasPlace || null,
+  }), [q, kind, year, month, uploader, camera, hasPlace]);
 
   // The address bar carries the view, so a reload — or a link sent to
   // somebody — comes back to the same year in the same mode. Each change is
@@ -161,6 +229,8 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       set('gmonth', month);
       set('gkind', kind);
       set('guploader', uploader);
+      set('gcam', camera.join('|'));
+      set('gplaced', hasPlace);
       set('gq', q);
       set('gphoto', openId);
       const first = !wroteUrlRef.current;
@@ -174,7 +244,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
       if (first) window.history.replaceState({}, '', url);
       else window.history.pushState({}, '', url);
     } catch (e) { /* the view still works without the address bar agreeing */ }
-  }, [mode, year, month, kind, uploader, q, openId]);
+  }, [mode, year, month, kind, uploader, camera, hasPlace, q, openId]);
 
   /**
    * Going back inside the gallery.
@@ -208,6 +278,9 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
     listGalleryUploaders(workspaceId)
       .then((data) => { if (!cancelled) setUploaders(data.items || []); })
       .catch(() => { if (!cancelled) setUploaders([]); });
+    listGalleryCameras(workspaceId)
+      .then((data) => { if (!cancelled) setCameras(data.items || []); })
+      .catch(() => { if (!cancelled) setCameras([]); });
     return () => { cancelled = true; };
   }, [workspaceId]);
 
@@ -488,7 +561,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             <input
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
-              placeholder="이름이나 카메라로 찾기"
+              placeholder="파일 이름으로 찾기"
               aria-label="갤러리 검색"
             />
             {queryText && (
@@ -521,6 +594,31 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             />
           )}
 
+          {cameras.length > 1 && (
+            <MultiPick
+              label="카메라"
+              allLabel="카메라 전체"
+              values={camera}
+              options={cameras.map((c) => ({
+                value: c.name,
+                short: c.name,
+                label: `${c.name} · ${c.count.toLocaleString()}`,
+              }))}
+              onChange={(next) => { setCamera(next); setPlace(null); }}
+            />
+          )}
+
+          <Dropdown
+            value={hasPlace}
+            label="위치로 거르기"
+            options={[
+              { value: '', label: '위치 상관없이' },
+              { value: 'yes', label: '지도에 있는 것' },
+              { value: 'no', label: '위치 없는 것' },
+            ]}
+            onChange={(value) => { setHasPlace(value); setPlace(null); }}
+          />
+
           <div className="gal-seg" role="group" aria-label="보기 방식">
             <button type="button" className={mode === 'grid' ? 'is-on' : ''} onClick={() => setMode('grid')} title="사진으로 보기">
               <LayoutGrid size={13} />
@@ -532,16 +630,23 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
         </div>
       </header>
 
-      {(year || month || q || kind !== 'all' || uploader) && (
+      {(year || month || q || kind !== 'all' || uploader || camera.length || hasPlace) && (
         <div className="gal-filterbar">
           <span className="gal-chip-label">{periodLabel}</span>
           {uploaderName && <span className="gal-chip-who">{uploaderName}</span>}
+          {camera.length > 0 && (
+            <span className="gal-chip-who">
+              {camera.length === 1 ? camera[0] : `카메라 ${camera.length}대`}
+            </span>
+          )}
+          {hasPlace && <span className="gal-chip-who">{hasPlace === 'yes' ? '지도에 있는 것' : '위치 없는 것'}</span>}
           <span className="gal-chip-count">{totalCount.toLocaleString()}개</span>
           <button
             type="button"
             className="gal-chip-clear"
             onClick={() => {
-              setYear(null); setMonth(null); setQueryText(''); setKind('all'); setUploader('');
+              setYear(null); setMonth(null); setQueryText(''); setKind('all');
+              setUploader(''); setCamera([]); setHasPlace('');
             }}
           >
             조건 지우기
