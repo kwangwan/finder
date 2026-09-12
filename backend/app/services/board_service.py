@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from typing import Iterable, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, and_, case, func, select
+from sqlalchemy import Integer, and_, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -640,3 +640,27 @@ async def copy_tasks(db: AsyncSession, source_file_id, target_file_id, user: Use
             db.add(BoardTaskAssignee(task_id=new_id, user_id=uid))
     await db.flush()
     return {"tasks": len(rows), "documents": len(rows), "bytes": copied_bytes}
+
+async def detach_task_documents(db: AsyncSession, workspace_id) -> int:
+    """
+    Let a workspace's files go without its 할 일 arguing about it.
+
+    `kb_board_tasks` points at `kb_files` twice: `file_id` is the board it
+    belongs to (deleted with it) and `document_id` is its own document (set to
+    NULL when that document goes, because a task outlives its document). When
+    a whole workspace is deleted, Postgres performs both actions in one
+    cascade and can run the SET NULL *update* against a task row whose board
+    has already gone — which fails the `file_id` foreign key and takes the
+    entire deletion down with a 500. Deleting a workspace holding a 일정 board
+    could not be done at all.
+
+    Clearing the document references first means there is no update left for
+    the cascade to trip over. Returns how many tasks were detached.
+    """
+    document_ids = select(FileItem.id).where(FileItem.workspace_id == workspace_id)
+    result = await db.execute(
+        update(BoardTask)
+        .where(BoardTask.document_id.in_(document_ids))
+        .values(document_id=None)
+    )
+    return result.rowcount or 0

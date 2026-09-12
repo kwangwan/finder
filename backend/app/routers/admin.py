@@ -162,6 +162,10 @@ async def delete_user(
                 except Exception as e:
                     print(f"[MinIO Warning] Could not delete thumbnail S3 object {f.thumbnail_s3_key}: {e}")
 
+    from app.services.board_service import detach_task_documents
+    for ws in owned:
+        await detach_task_documents(db, ws.id)
+
     await db.delete(user)
     await db.commit()
     return None

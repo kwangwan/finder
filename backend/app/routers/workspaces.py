@@ -318,6 +318,11 @@ async def delete_workspace(
 
     await deletion_service.enqueue_files_batch(db, files_to_delete)
 
+    # Before the cascade runs — see board_service.detach_task_documents. A
+    # workspace holding a 일정 board could not be deleted at all without this.
+    from app.services.board_service import detach_task_documents
+    await detach_task_documents(db, workspace_id)
+
     await db.delete(workspace)
     await db.commit()
     return {"status": "success", "message": "워크스페이스가 삭제되었습니다."}
