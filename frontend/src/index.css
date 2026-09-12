@@ -7751,8 +7751,6 @@ input.bd-name:focus {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 3px;
-  padding: 0.35rem 0.7rem 2rem;
-  overflow-y: auto;
 }
 .gal-place-tile {
   position: relative;
@@ -7812,3 +7810,63 @@ input.bd-name:focus {
   padding: 0.4rem 0.7rem;
   font-size: 0.76rem;
 }
+
+/* ── 이 장소의 사진 ─────────────────────────────────────────────────────
+   A place is rarely one visit, so the panel is a timeline rather than a
+   heap: a heading per day, and the next page pulled in as it is scrolled. */
+
+.gal-place-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.7rem 2rem;
+}
+
+.gal-place-day { margin-bottom: 0.9rem; }
+.gal-place-day header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.45rem 0 0.35rem;
+  background: linear-gradient(to bottom, var(--gal-ground) 70%, transparent);
+}
+.gal-place-day h4 {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+.gal-place-day header span {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gal-place-more {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0 1rem;
+  min-height: 34px;
+}
+.gal-place-more span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.gal-place-more button {
+  border: 1px solid var(--border-subtle);
+  background: var(--gal-ink);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.gal-place-more button:hover { color: var(--text-primary); background: var(--gal-ink-strong); }

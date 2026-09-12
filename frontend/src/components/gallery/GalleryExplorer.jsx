@@ -12,6 +12,7 @@ import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
 import GalleryMap from './GalleryMap';
 import TimelineRail from './TimelineRail';
+import GalleryPlacePanel from './GalleryPlacePanel';
 import { Dropdown } from '../board/controls';
 
 /**
@@ -313,23 +314,58 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
     return () => { cancelled = true; };
   }, [mode, showPath, workspaceId, filters]);
 
+  const PLACE_PAGE = 60;
+
   const openPlace = useCallback(async (latitude, longitude, atZoom) => {
     const zoom = atZoom ?? 14;
     const radiusKm = placeRadiusKm(zoom);
-    setPlace({ latitude, longitude, loading: true, items: [], total: 0 });
+    setPlace({
+      latitude, longitude, radiusKm, loading: true,
+      items: [], total: 0, page: 0, totalPages: 0,
+    });
     setFocusPoint({ latitude, longitude, zoom });
     try {
       const data = await getGalleryPlace(workspaceId, latitude, longitude, {
-        ...filters, radius_km: radiusKm, page_size: 40,
+        ...filters, radius_km: radiusKm, page: 1, page_size: PLACE_PAGE,
       });
       setPlace({
-        latitude, longitude, loading: false, items: data.items, total: data.total_count,
+        latitude, longitude, radiusKm, loading: false, items: data.items,
+        total: data.total_count, page: data.page, totalPages: data.total_pages,
         first: data.first_taken_at, last: data.last_taken_at,
       });
     } catch (e) {
-      setPlace({ latitude, longitude, loading: false, items: [], total: 0, error: e.message });
+      setPlace({
+        latitude, longitude, radiusKm, loading: false, items: [],
+        total: 0, page: 0, totalPages: 0, error: e.message,
+      });
     }
   }, [workspaceId, filters]);
+
+  /**
+   * The rest of this place, a page at a time.
+   *
+   * A corner somebody has returned to for years holds more photographs than
+   * any first request should carry, so the panel starts with a page and
+   * grows as it is scrolled — the same bargain the main grid makes.
+   */
+  const loadMorePlace = useCallback(async () => {
+    if (!place || place.loading || place.page >= place.totalPages) return;
+    setPlace((current) => ({ ...current, loading: true }));
+    try {
+      const data = await getGalleryPlace(workspaceId, place.latitude, place.longitude, {
+        ...filters, radius_km: place.radiusKm, page: place.page + 1, page_size: PLACE_PAGE,
+      });
+      setPlace((current) => (current && current.latitude === place.latitude ? {
+        ...current,
+        items: [...current.items, ...data.items],
+        page: data.page,
+        totalPages: data.total_pages,
+        loading: false,
+      } : current));
+    } catch (e) {
+      setPlace((current) => (current ? { ...current, loading: false } : current));
+    }
+  }, [workspaceId, filters, place]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMore || isLoading) return;
@@ -535,39 +571,12 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
 
             <aside className="gal-map-side">
               {place ? (
-                <>
-                  <div className="gal-map-side-head">
-                    <button type="button" className="gal-place-back" onClick={() => setPlace(null)}>
-                      <ChevronLeft size={13} /> 연도별로
-                    </button>
-                    <strong>이 장소의 사진</strong>
-                    <span>
-                      {place.loading ? '찾는 중…' : `${place.total.toLocaleString()}개`}
-                      {place.first && !place.loading && (
-                        ` · ${place.first.slice(0, 7).replace('-', '.')}`
-                        + (place.last.slice(0, 7) !== place.first.slice(0, 7)
-                          ? ` – ${place.last.slice(0, 7).replace('-', '.')}` : '')
-                      )}
-                    </span>
-                  </div>
-                  <div className="gal-place-grid">
-                    {place.items.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className="gal-place-tile"
-                        onClick={() => openAt(item)}
-                        title={`${item.name}\n${(item.taken_at || '').slice(0, 10)}`}
-                      >
-                        <img src={getThumbnailUrl(item.id)} alt={item.name} loading="lazy" />
-                        {item.file_type === 'video' && <span className="gal-place-play" />}
-                      </button>
-                    ))}
-                    {!place.loading && !place.items.length && (
-                      <p className="gal-place-empty">이 자리에는 사진이 없습니다.</p>
-                    )}
-                  </div>
-                </>
+                <GalleryPlacePanel
+                  place={place}
+                  onBack={() => setPlace(null)}
+                  onOpen={openAt}
+                  onLoadMore={loadMorePlace}
+                />
               ) : (
                 <>
                   <div className="gal-map-side-head">
