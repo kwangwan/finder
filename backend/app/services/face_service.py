@@ -32,6 +32,8 @@ import urllib.request
 from pathlib import Path
 from typing import List, Optional
 
+import threading
+
 import av
 import cv2
 import numpy as np
@@ -134,9 +136,23 @@ def models_ready() -> bool:
     return all((MODEL_DIR / spec["filename"]).exists() for spec in MODELS.values())
 
 
+# The models are shared objects with state — the detector is told the size of
+# the picture it is about to look at, and then looks at it. The sweep examines
+# several files at once, so without this one thread sets the size for its
+# photograph while another is midway through a different one, and the network
+# runs against a buffer shaped for somebody else's image. It fails loudly when
+# the shapes disagree ("buf.shape() == m.shape()"), and the file is written off
+# as unreadable and marked as looked at, which is the quiet part: it is never
+# examined again.
+#
+# Held around the model work only. The waiting — fetching megabytes from
+# storage — is outside it, and that was what the concurrency was for.
+_cv_lock = threading.Lock()
+
+
 def _get_detector(width: int, height: int):
     """
-    YuNet, sized for this picture.
+    YuNet, sized for this picture. Call with _cv_lock held.
 
     The detector is told the exact size of what it is about to look at, so it
     is kept and re-sized rather than rebuilt per photograph.
@@ -189,12 +205,17 @@ def faces_in_image(image: np.ndarray, frame_time: Optional[float] = None) -> Lis
 
     work, _ = _prepare(image)
     height, width = work.shape[:2]
-    detector = _get_detector(width, height)
-    _, detections = detector.detect(work)
-    if detections is None:
-        return []
+    with _cv_lock:
+        detector = _get_detector(width, height)
+        _, detections = detector.detect(work)
+        if detections is None:
+            return []
+        recogniser = _get_recogniser()
+        return _describe(work, detections, recogniser, width, height, frame_time)
 
-    recogniser = _get_recogniser()
+
+def _describe(work, detections, recogniser, width, height, frame_time):
+    """The numbers that identify each detected face. Call with _cv_lock held."""
     faces = []
     for row in detections:
         x, y, w, h = row[:4]
