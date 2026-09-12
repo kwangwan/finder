@@ -1,16 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 // Named imports: this build of maplibre-gl has no default export.
 import { Map as MapLibreMap, Marker, NavigationControl, setWorkerUrl } from 'maplibre-gl';
-// The worker, as an asset this build emits and can name.
+// The worker, built as a worker rather than copied as a file.
 //
-// Left alone, maplibre finds its worker by looking for a file of a fixed name
-// *beside its own module* — which after bundling means /assets/, where no such
-// file was ever emitted. It 404s, no worker starts, not one tile is ever
-// requested, and the map is a black rectangle that reports no error at all.
-// Handing it the bundled URL is the whole fix, and it is why the map worked
-// in development (served straight from node_modules, worker included) and not
-// once deployed.
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
+// Two things were wrong before. Maplibre finds its worker by looking for a
+// fixed name *beside its own module*, which after bundling means /assets/,
+// where nothing of that name exists — so it 404s, no worker starts, not a
+// single tile is requested, and the map is a black rectangle that reports no
+// error at all. Handing it a URL fixed that. But `?url` only copies the one
+// file, and that file's first line imports `./maplibre-gl-shared.mjs` beside
+// it — which was never emitted either, so the worker died the moment it
+// loaded and the map stayed exactly as black.
+//
+// `?worker&url` builds the worker with its imports folded in, so what is
+// served is a worker that can actually run alone.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 setWorkerUrl(maplibreWorkerUrl);
