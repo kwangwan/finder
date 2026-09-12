@@ -698,7 +698,8 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
             onClick={() => setFilterSheet(true)}
           >
             <SlidersHorizontal size={13} />
-            <span>필터{activeFilters ? ` ${activeFilters}` : ""}</span>
+            <span className="gal-filter-word">필터</span>
+            {activeFilters > 0 && <span className="gal-filter-n">{activeFilters}</span>}
           </button>
           <div className="gal-seg" role="group" aria-label="보기 방식">
             <button type="button" className={mode === 'grid' ? 'is-on' : ''} onClick={() => setMode('grid')} title="사진으로 보기">

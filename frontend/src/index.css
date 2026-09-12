@@ -7613,29 +7613,36 @@ input.bd-name:focus {
      now — the counts stay, because "how much is here" is why the page was
      opened, and the controls run off the side to be scrolled rather than
      stacking. */
+  /* One band: the name of the page, what is in it, how it is narrowed, and
+     which view. Everything that needed more room than that is now behind the
+     two buttons, so there is no second line to fit. */
   .gal-head {
-    padding: 0.6rem 0.85rem 0.5rem;
+    padding: 0.55rem 0.8rem;
     gap: 0.5rem;
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .gal-head-title h1 { font-size: 1.02rem; }
-  .gal-head-line { gap: 0.4rem; }
-  .gal-head-title p { margin-top: 0.15rem; font-size: 0.68rem; gap: 0.45rem; }
-  .gal-ws { display: none; }
-  .gal-tools {
-    width: 100%;
+    align-items: center;
+    flex-direction: row;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    gap: 0.4rem;
-    padding-bottom: 0.1rem;
   }
-  .gal-tools::-webkit-scrollbar { display: none; }
+  .gal-head-title { min-width: 0; }
+  .gal-head-title h1 { font-size: 1rem; }
+  .gal-head-line { gap: 0.35rem; }
+  .gal-tools { width: auto; flex-wrap: nowrap; gap: 0.35rem; }
   .gal-tools > * { flex: none; }
-  .gal-search { flex: 1 1 auto; min-width: 108px; }
+  /* The word is what the icon already says. */
+  .gal-filter-word { display: none; }
+  .gal-filter-open { padding: 0.34rem 0.55rem; gap: 0.22rem; }
+  .gal-tools .gal-seg[aria-label="보기 방식"] { margin-left: 0; }
+  .gal-tools .gal-seg[aria-label="보기 방식"] button { padding: 0.32rem 0.6rem; }
   .gal-scroll { padding: 0 0.75rem 4rem 1rem; }
-  .gal-search input { width: 100%; min-width: 0; }
+  .gal-sheet-back { align-items: flex-end; padding: 0; }
+  .gal-sheet {
+    width: 100%;
+    max-height: 82vh;
+    border: none;
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -18px 44px -18px rgba(0, 0, 0, 0.7);
+  }
   /* The rail becomes a strip across the top: a phone has no room for a column
      beside the pictures, and the years still have to be reachable. */
   .gal-body { flex-direction: column; }
@@ -7765,24 +7772,43 @@ input.bd-name:focus {
   border-color: var(--accent-primary);
   background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
 }
+.gal-filter-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 0.25em;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+}
 
+/* A dialog where there is room to put one, and a sheet where there is not.
+   A panel pinned across the bottom of a wide screen is a phone's answer
+   wearing a desk's proportions. */
 .gal-sheet-back {
   position: fixed;
   inset: 0;
   z-index: 9400;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
 }
 .gal-sheet {
-  width: 100%;
-  max-height: 82vh;
+  width: min(420px, 100%);
+  max-height: min(80vh, 620px);
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
-  border-radius: 16px 16px 0 0;
-  border-top: 1px solid var(--border-subtle);
-  box-shadow: 0 -18px 44px -18px rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 0 26px 60px -24px rgba(0, 0, 0, 0.7);
 }
 .gal-sheet > header {
   display: flex;
