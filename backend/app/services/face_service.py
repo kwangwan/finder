@@ -78,7 +78,14 @@ os.environ.setdefault("OMP_NUM_THREADS", "2")
 # Kept as a fraction rather than a pixel count because the detector now reports
 # boxes in the original picture's coordinates, and "44 pixels" means something
 # different on a phone photograph than on a thumbnail.
-MIN_DETECTION_SCORE = float(os.getenv("FACE_MIN_SCORE", "0.50"))
+#
+# 0.60 rather than the detector's own 0.50, and this was looked at rather than
+# guessed: below 0.60 the index fills with clouds, the backs of heads, tree
+# bark and shop signs. That costs more than the few real faces it also holds,
+# because the junk is alike enough to cluster with itself — one such box, when
+# pressed, answered with five hundred files of nothing. From 0.60 up the
+# detections are faces, profiles and masks included.
+MIN_DETECTION_SCORE = float(os.getenv("FACE_MIN_SCORE", "0.60"))
 MIN_FACE_FRACTION = 44 / 2048
 
 # How many moments are taken from one clip, and how close together they may be
