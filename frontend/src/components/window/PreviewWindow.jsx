@@ -489,7 +489,10 @@ export default function PreviewWindow({
   }
   if (isMarkdown) {
     menuItems.push(
-      { key: 'md', group: 3, label: '마크다운으로 내려받기', icon: <Download size={13} />,
+      // An export, like the PDF beside it — the file is written out in another
+      // format, not fetched as it is stored. And its own icon: the same arrow
+      // twice in one menu says the two lines do the same thing.
+      { key: 'md', group: 3, label: '마크다운으로 내보내기', icon: <FileCode size={13} />,
         run: () => noteEditor.handleExportMarkdown() },
       // Red is for the one thing in here that cannot be undone. Exporting a
       // PDF is not that, and wearing the warning colour made it look like it.
