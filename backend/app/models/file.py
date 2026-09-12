@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, BigInteger, Boolean, Text, DateTime, ForeignKey, JSON, Float, Integer
+from sqlalchemy import Column, String, BigInteger, Boolean, Text, DateTime, ForeignKey, JSON, Float, Integer, LargeBinary
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy import event, inspect
 from sqlalchemy.orm import relationship
@@ -47,6 +47,21 @@ class FileItem(Base):
     media_scanned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    # The live collaborative state of this document's editing room, as a Yjs
+    # update — what everyone with it open is looking at, including edits that
+    # have not been written back as markdown yet.
+    #
+    # The sync server keeps nothing of its own: a room exists only while
+    # somebody is in it, so when the last person left with an unsaved edit, the
+    # work went with the room. This is that room, kept. It is authoritative
+    # only for restoring the room; `content` remains the document — what search,
+    # export and history read — and is written by the clients as before.
+    # Cleared whenever the markdown is replaced by something other than the
+    # room itself (restoring an old version), so that a stale room cannot
+    # resurrect what was deliberately replaced.
+    collab_state = Column(LargeBinary, nullable=True)
+    collab_state_at = Column(DateTime(timezone=True), nullable=True)
+
     # When this file last changed in a way a *listing* of it shows: it was
     # added, renamed, moved, thrown away or restored. `updated_at` cannot
     # answer that — a document's autosave moves it every second the author is

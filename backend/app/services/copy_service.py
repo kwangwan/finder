@@ -130,7 +130,9 @@ async def _copy_one_file(
         is_markdown=src.is_markdown,
         tags=list(src.tags or []),
         # Deliberately not carried over: is_favorite (a copy is not the item
-        # the user starred) and the trash flags (a copy is always live).
+        # the user starred), the trash flags (a copy is always live), and
+        # collab_state (a copy has no editing room of its own yet — the first
+        # person to open it starts one from the content copied here).
         taken_at=src.taken_at,
         gps_latitude=src.gps_latitude,
         gps_longitude=src.gps_longitude,

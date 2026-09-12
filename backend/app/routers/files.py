@@ -2,13 +2,13 @@ import uuid
 import math
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, or_, and_, desc, asc, func
 import urllib.parse
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from app.core.database import get_db
 from app.models import CopyJob, DocumentChunk, FileItem, FileVersion, Folder, User, WorkspaceMember
@@ -40,6 +40,11 @@ router = APIRouter(prefix="/api/files", tags=["Files & Notes"])
 
 # Per file, how many historical snapshots to keep — pruned by the periodic job.
 VERSION_RETENTION_COUNT = 100
+
+# A ceiling on the kept editing room (see FileItem.collab_state). A Yjs state
+# carries its own edit history, so a document worked on for months grows well
+# past the text in it; past this it is refused rather than dragged along.
+MAX_COLLAB_STATE_BYTES = 8 * 1024 * 1024
 
 # History is kept per half hour: every save inside the same half-hour window
 # lands on that window's one row, which therefore always holds the document as
@@ -928,6 +933,64 @@ def _to_version_response(version: FileVersion, editor_name: Optional[str], inclu
         data["content"] = version.content
     return data
 
+@router.get("/{file_id}/collab-state")
+async def get_collab_state(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    The editing room as it was last left, for the sync server to open it with.
+
+    Answers 204 when there is none, which is how the sync server knows to hand
+    the first client an empty room and let it seed the room from the document's
+    markdown — the way it has always worked for a document nobody was in.
+    """
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+    state = (await db.execute(
+        select(FileItem.collab_state).where(FileItem.id == file_id)
+    )).scalar_one_or_none()
+    if not state:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return Response(content=bytes(state), media_type="application/octet-stream")
+
+
+@router.put("/{file_id}/collab-state")
+async def put_collab_state(
+    file_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Keep the editing room as it stands.
+
+    Written by the sync server while people are editing and once more as the
+    last of them leaves, so that an edit nobody managed to save is still there
+    when the document is next opened. It is not the document — `content` is,
+    and the clients write that — so this never touches it.
+    """
+    file_item = await db.get(FileItem, file_id)
+    if not file_item or file_item.is_trashed:
+        raise HTTPException(status_code=404, detail="문서를 찾을 수 없습니다.")
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
+
+    state = await request.body()
+    if not state:
+        raise HTTPException(status_code=400, detail="저장할 상태가 비어 있습니다.")
+    if len(state) > MAX_COLLAB_STATE_BYTES:
+        # A room this large is not a document any more, and keeping it would
+        # cost every reader of this row. The markdown the clients write is
+        # unaffected; only the room is let go.
+        raise HTTPException(status_code=413, detail="편집 상태가 너무 큽니다.")
+
+    file_item.collab_state = state
+    file_item.collab_state_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"stored": len(state)}
+
+
 @router.get("/{file_id}/versions", response_model=List[FileVersionResponse])
 async def list_file_versions(
     file_id: uuid.UUID,
@@ -1009,6 +1072,12 @@ async def restore_file_version(
     file_item.content = version.content
     file_item.size_bytes = new_size
     file_item.last_edited_by = current_user.id
+    # The editing room still holds what was just replaced, and a room outlives
+    # the request that replaced it — reopening the document would put the old
+    # text back over the restore. The room is let go; whoever opens the document
+    # next starts a fresh one from the content restored here.
+    file_item.collab_state = None
+    file_item.collab_state_at = None
     # Going back to an older version puts back what it had attached, and drops
     # what was attached after it.
     await link_service.sync_document_links(db, file_item)

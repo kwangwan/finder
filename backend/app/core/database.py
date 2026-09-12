@@ -217,6 +217,10 @@ async def init_db():
             # autosaved — and a document being written in is not a reason to
             # tell everyone looking at the folder that they are out of date.
             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS listing_updated_at TIMESTAMPTZ;",
+            # The editing room, kept, so that the last person to leave cannot
+            # take everyone's unsaved work with them. See FileItem.collab_state.
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS collab_state BYTEA;",
+            "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS collab_state_at TIMESTAMPTZ;",
             "UPDATE kb_files SET listing_updated_at = updated_at WHERE listing_updated_at IS NULL;",
         ]
 
