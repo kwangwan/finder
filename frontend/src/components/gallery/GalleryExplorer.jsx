@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Search, X, LayoutGrid, Map as MapIcon, Image as ImageIcon, Film, Loader2, MapPin,
+  Search, X, LayoutGrid, Map as MapIcon, Image as ImageIcon, Film, Loader2, MapPin, Users,
 } from '../../utils/icons';
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
-  getFaceMatches, getThumbnailUrl,
+  getFaceMatches, getThumbnailUrl, getFaceIndexStatus,
 } from '../../api';
 import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
@@ -80,6 +80,7 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
   // clearing a box. Held beside the ordinary state so that going back does
   // not have to reload what was already there.
   const [faceSearch, setFaceSearch] = useState(null);
+  const [faceStatus, setFaceStatus] = useState(null);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({ q, kind, year, month }), [q, kind, year, month]);
@@ -116,6 +117,27 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
       .catch(() => { if (!cancelled) setSummary(null); });
     return () => { cancelled = true; };
   }, [workspaceId, q, kind]);
+
+  // How far the face index has got. Asked once on arrival and then every
+  // half minute only while it is still behind — a library that has been
+  // looked at needs no ticker.
+  useEffect(() => {
+    if (!workspaceId) return undefined;
+    let cancelled = false;
+    let timer = null;
+    const ask = async () => {
+      try {
+        const data = await getFaceIndexStatus(workspaceId);
+        if (cancelled) return;
+        setFaceStatus(data);
+        if (data.pending > 0) timer = setTimeout(ask, 30000);
+      } catch (e) {
+        if (!cancelled) setFaceStatus(null);
+      }
+    };
+    ask();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [workspaceId]);
 
   const loadPage = useCallback(async (nextPage, replace) => {
     if (!workspaceId) return;
@@ -231,6 +253,14 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
                 {placed > 0 && (
                   <span title="위치가 기록된 사진과 영상">
                     <MapPin size={11} /> {placed.toLocaleString()}
+                  </span>
+                )}
+                {faceStatus && faceStatus.pending > 0 && (
+                  <span
+                    className="gal-indexing"
+                    title="사진 속 얼굴을 찾는 중입니다. 끝나면 사진 위의 얼굴을 눌러 같은 사람을 찾을 수 있습니다."
+                  >
+                    <Users size={11} /> 얼굴 찾는 중 {Math.floor((faceStatus.scanned / Math.max(1, faceStatus.total)) * 100)}%
                   </span>
                 )}
                 {summary.first_taken_at && (

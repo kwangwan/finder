@@ -7597,3 +7597,9 @@ input.bd-name:focus {
   cursor: pointer;
 }
 .gal-face-back:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.09); }
+
+.gal-indexing {
+  color: var(--accent-primary);
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}

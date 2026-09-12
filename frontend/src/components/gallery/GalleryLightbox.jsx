@@ -51,6 +51,7 @@ export default function GalleryLightbox({
   const idleTimer = useRef(null);
   const retriedRef = useRef(false);
   const [faces, setFaces] = useState([]);
+  const [scanned, setScanned] = useState(true);
   const [frame, setFrame] = useState(null);
   const imageRef = useRef(null);
   const stageRef = useRef(null);
@@ -82,8 +83,13 @@ export default function GalleryLightbox({
     if (!item) return undefined;
     let cancelled = false;
     setFaces([]);
+    setScanned(true);
     getFacesInItem(item.id)
-      .then((data) => { if (!cancelled) setFaces(data.faces || []); })
+      .then((data) => {
+        if (cancelled) return;
+        setFaces(data.faces || []);
+        setScanned(data.scanned !== false);
+      })
       .catch(() => { if (!cancelled) setFaces([]); });
     return () => { cancelled = true; };
   }, [item?.id]);
@@ -252,6 +258,11 @@ export default function GalleryLightbox({
             {faces.length > 0 && (
               <span title="사진 위의 얼굴을 누르면 같은 사람을 찾습니다">
                 <Users size={12} /> {faces.length}명
+              </span>
+            )}
+            {!scanned && (
+              <span title="이 사진은 아직 얼굴을 찾기 전입니다">
+                <Users size={12} /> 얼굴 찾는 중
               </span>
             )}
           </span>
