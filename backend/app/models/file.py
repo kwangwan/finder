@@ -45,6 +45,10 @@ class FileItem(Base):
     # backfill can tell "not attempted yet" from "attempted, this file simply
     # has no metadata" (screenshots never do) and never re-reads it forever.
     media_scanned_at = Column(DateTime(timezone=True), nullable=True)
+    # When this file was last looked at for faces — separate from
+    # media_scanned_at, because that sweep reads a few kilobytes of header and
+    # this one decodes the whole picture.
+    faces_scanned_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     # The live collaborative state of this document's editing room, as a Yjs

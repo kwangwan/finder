@@ -5,6 +5,10 @@ services:
     env_file: .env
     volumes:
       - ./backend/storage_data:/app/storage_data
+      # The two face models, fetched once and kept across deploys. Not in the
+      # image (37MB of weights do not belong in a code repository) and not in
+      # storage_data, which is for files this app was given.
+      - ./backend/model_cache:/app/model_cache
     ports:
       # Host-local only. nginx reaches this over the compose network
       # (http://backend:8001) and the tunnel runs on this machine, so nothing

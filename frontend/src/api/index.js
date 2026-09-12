@@ -2153,3 +2153,26 @@ export async function getGalleryNeighbours(workspaceId, fileId, radiusKm = 2) {
   if (!res.ok) throw new Error('주변 사진을 불러오지 못했습니다.');
   return res.json();
 }
+
+export async function getFacesInItem(fileId) {
+  const res = await apiFetch(`${API_BASE}/gallery/items/${fileId}/faces`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('얼굴 정보를 불러오지 못했습니다.');
+  return res.json();
+}
+
+export async function getFaceMatches(workspaceId, faceId, page = 1, pageSize = 80) {
+  const params = galleryParams(workspaceId, { page, page_size: pageSize });
+  const res = await apiFetch(`${API_BASE}/gallery/faces/${faceId}/matches?${params}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('같은 얼굴을 찾지 못했습니다.');
+  return res.json();
+}
+
+export async function getFaceIndexStatus(workspaceId) {
+  const res = await apiFetch(`${API_BASE}/gallery/faces/status?${galleryParams(workspaceId)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('얼굴 색인 상태를 불러오지 못했습니다.');
+  return res.json();
+}

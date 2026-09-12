@@ -4,6 +4,7 @@ import {
 } from '../../utils/icons';
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
+  getFaceMatches, getThumbnailUrl,
 } from '../../api';
 import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
@@ -74,6 +75,11 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
   const [mapView, setMapView] = useState(null);
   const [focusPoint, setFocusPoint] = useState(null);
   const [openIndex, setOpenIndex] = useState(-1);
+  // A face search is its own thing, not a filter: it has no year, no month
+  // and no map, and leaving it is going back to the library rather than
+  // clearing a box. Held beside the ordinary state so that going back does
+  // not have to reload what was already there.
+  const [faceSearch, setFaceSearch] = useState(null);
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({ q, kind, year, month }), [q, kind, year, month]);
@@ -143,20 +149,50 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
     return () => { cancelled = true; };
   }, [mode, workspaceId, filters, mapView]);
 
+  const searchByFace = useCallback(async (face, fromItem) => {
+    setOpenIndex(-1);
+    setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0, loading: true });
+    try {
+      const data = await getFaceMatches(workspaceId, face.id, 1, PAGE_SIZE);
+      setFaceSearch({
+        face, fromItem, items: data.items, total: data.total_count,
+        page: data.page, totalPages: data.total_pages, loading: false,
+      });
+    } catch (e) {
+      setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0,
+                      loading: false, error: e.message });
+    }
+  }, [workspaceId]);
+
+  const loadMoreFaces = useCallback(async () => {
+    if (!faceSearch || faceSearch.loading || faceSearch.page >= faceSearch.totalPages) return;
+    setFaceSearch((s) => ({ ...s, loading: true }));
+    try {
+      const data = await getFaceMatches(workspaceId, faceSearch.face.id, faceSearch.page + 1, PAGE_SIZE);
+      setFaceSearch((s) => ({
+        ...s, items: [...s.items, ...data.items], page: data.page,
+        totalPages: data.total_pages, loading: false,
+      }));
+    } catch (e) {
+      setFaceSearch((s) => ({ ...s, loading: false }));
+    }
+  }, [workspaceId, faceSearch]);
+
   const loadMore = useCallback(() => {
     if (isLoadingMore || isLoading) return;
     if (page >= totalPages) return;
     loadPage(page + 1, false);
   }, [isLoadingMore, isLoading, page, totalPages, loadPage]);
 
-  const openAt = (item) => setOpenIndex(items.findIndex((i) => i.id === item.id));
+  const shown = faceSearch ? faceSearch.items : items;
+  const openAt = (item) => setOpenIndex(shown.findIndex((i) => i.id === item.id));
   const step = (delta) => {
     setOpenIndex((current) => {
       const next = current + delta;
-      if (next < 0 || next >= items.length) return current;
+      if (next < 0 || next >= shown.length) return current;
       // Opening the last few of a page pulls the next one in, so arrowing
       // through a year never stops at a page boundary.
-      if (next > items.length - 6) loadMore();
+      if (next > shown.length - 6) (faceSearch ? loadMoreFaces : loadMore)();
       return next;
     });
   };
@@ -275,6 +311,42 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
                             onPick={({ year: y, month: m }) => { setYear(y); setMonth(m); }} />
             </aside>
           </>
+        ) : faceSearch ? (
+          <div className="gal-scroll">
+            <div className="gal-face-bar">
+              <span className="gal-face-chip">
+                <img
+                  src={getThumbnailUrl(faceSearch.fromItem.id)}
+                  alt=""
+                  style={{
+                    // The thumbnail, pushed around so the face fills the circle.
+                    objectPosition: `${faceSearch.face.box[0] * 100 + faceSearch.face.box[2] * 50}% `
+                      + `${faceSearch.face.box[1] * 100 + faceSearch.face.box[3] * 50}%`,
+                    transform: `scale(${Math.min(4, Math.max(1.6, 0.55 / Math.max(0.06, faceSearch.face.box[2])))})`,
+                  }}
+                />
+              </span>
+              <div className="gal-face-said">
+                <strong>이 사람이 나온 사진</strong>
+                <span>
+                  {faceSearch.loading && !faceSearch.items.length
+                    ? '찾는 중…'
+                    : `${faceSearch.total.toLocaleString()}개를 찾았습니다`}
+                </span>
+              </div>
+              <button type="button" className="gal-face-back" onClick={() => setFaceSearch(null)}>
+                <X size={13} /> 갤러리로 돌아가기
+              </button>
+            </div>
+            <GalleryGrid
+              items={faceSearch.items}
+              onOpen={openAt}
+              onReachEnd={loadMoreFaces}
+              isLoadingMore={faceSearch.loading}
+              hasMore={faceSearch.page < faceSearch.totalPages}
+              emptyMessage={faceSearch.loading ? '찾는 중…' : '이 사람이 나온 다른 사진을 찾지 못했습니다.'}
+            />
+          </div>
         ) : (
           <>
             <div className="gal-scroll">
@@ -299,16 +371,19 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme }) {
         )}
       </div>
 
-      {openIndex >= 0 && items[openIndex] && (
+      {openIndex >= 0 && shown[openIndex] && (
         <GalleryLightbox
-          item={items[openIndex]}
+          item={shown[openIndex]}
           onClose={() => setOpenIndex(-1)}
           onPrev={() => step(-1)}
           onNext={() => step(1)}
           hasPrev={openIndex > 0}
-          hasNext={openIndex < items.length - 1 || page < totalPages}
+          hasNext={openIndex < shown.length - 1 || (faceSearch
+            ? faceSearch.page < faceSearch.totalPages
+            : page < totalPages)}
           onShowOnMap={showOnMap}
           onDownload={download}
+          onSearchFace={searchByFace}
         />
       )}
     </main>

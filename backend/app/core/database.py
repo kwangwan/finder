@@ -318,6 +318,26 @@ async def init_db():
         except Exception as e:
             print(f"[DB Migration Warning] Could not backfill username history: {e}")
 
+        # Faces. The column marks a file as looked at (and stays set even when
+        # nothing was found, so an empty photograph is not examined forever);
+        # the index is the same kind the document search already uses.
+        for name, ddl in (
+            ("kb_files.faces_scanned_at",
+             "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS faces_scanned_at TIMESTAMPTZ"),
+            ("idx_faces_embedding_hnsw",
+             "CREATE INDEX IF NOT EXISTS idx_faces_embedding_hnsw ON kb_face_signatures "
+             "USING hnsw (embedding vector_cosine_ops)"),
+            ("idx_files_faces_pending",
+             "CREATE INDEX IF NOT EXISTS idx_files_faces_pending ON kb_files (id) "
+             "WHERE file_type IN ('image','video') AND is_trashed = FALSE "
+             "AND faces_scanned_at IS NULL"),
+        ):
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(ddl))
+            except Exception as e:
+                print(f"[DB Init Warning] Could not apply {name}: {e}")
+
         # The gallery reads the same table as everything else but asks it a
         # different question — "this workspace's photos, newest first" and
         # "this workspace's photos within these coordinates" — and answers
@@ -325,9 +345,13 @@ async def init_db():
         # library is media, and a document or a board has no business making
         # them bigger.
         for name, ddl in (
+            # Indexed on the expression the gallery actually sorts by — when
+            # the photograph happened, falling back to when it arrived. An
+            # index on taken_at alone cannot serve a COALESCE of two columns,
+            # and Postgres quietly sorts the whole workspace instead.
             ("idx_files_gallery_taken",
              "CREATE INDEX IF NOT EXISTS idx_files_gallery_taken ON kb_files "
-             "(workspace_id, taken_at DESC NULLS LAST, id DESC) "
+             "(workspace_id, (COALESCE(taken_at, created_at)) DESC, id DESC) "
              "WHERE file_type IN ('image','video') AND is_trashed = FALSE"),
             ("idx_files_gallery_place",
              "CREATE INDEX IF NOT EXISTS idx_files_gallery_place ON kb_files "

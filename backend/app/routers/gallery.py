@@ -409,3 +409,132 @@ async def gallery_neighbours(
         select(FileItem).where(and_(*conditions)).order_by(distance.asc()).limit(limit)
     )).scalars().all()
     return {"items": [_item(f) for f in rows]}
+
+
+# ── 얼굴 ──────────────────────────────────────────────────────────────────
+#
+# Searching a photo library by face is the one thing that cannot be done with
+# what a file already knows about itself, so it needs an index of its own —
+# built once by a sweep, then asked the same way document search is asked, in
+# Postgres, over vectors.
+
+
+@router.get("/faces/status")
+async def faces_status(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """How much of this workspace has been looked at, and what was found."""
+    await _require_member(db, current_user, workspace_id)
+    from app.models import FaceSignature
+    from app.services import face_index_service, face_service
+
+    pending = await face_index_service.pending_count(db, workspace_id)
+    total_media = (await db.execute(
+        select(func.count(FileItem.id)).where(and_(*_media_conditions(workspace_id, "all")))
+    )).scalar_one()
+    faces = (await db.execute(
+        select(func.count(FaceSignature.id)).where(FaceSignature.workspace_id == workspace_id)
+    )).scalar_one()
+    files_with_faces = (await db.execute(
+        select(func.count(func.distinct(FaceSignature.file_id)))
+        .where(FaceSignature.workspace_id == workspace_id)
+    )).scalar_one()
+
+    return {
+        "scanned": total_media - pending,
+        "total": total_media,
+        "pending": pending,
+        "faces": faces,
+        "files_with_faces": files_with_faces,
+        "models_ready": face_service.models_ready(),
+    }
+
+
+@router.get("/items/{file_id}/faces")
+async def faces_in_item(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    The faces in one photograph, as boxes over it.
+
+    What the viewer sees drawn on the picture, and what they click to ask for
+    everywhere else this person appears.
+    """
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+    from app.models import FaceSignature
+
+    file_item = await db.get(FileItem, file_id)
+    rows = (await db.execute(
+        select(FaceSignature).where(FaceSignature.file_id == file_id)
+        .order_by(FaceSignature.box_x)
+    )).scalars().all()
+    return {
+        "faces": [r.to_dict() for r in rows],
+        "scanned": bool(file_item and file_item.faces_scanned_at),
+    }
+
+
+@router.get("/faces/{face_id}/matches")
+async def faces_like_this(
+    face_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Everywhere else this person appears.
+
+    One file can hold several sightings of the same person — a video most of
+    all — so matches are folded down to files before they are paged, and a
+    file is ranked by its closest sighting rather than by how many it has.
+    """
+    await _require_member(db, current_user, workspace_id)
+    from app.models import FaceSignature
+    from app.services import face_index_service
+
+    face = await db.get(FaceSignature, face_id)
+    if face is None:
+        raise HTTPException(status_code=404, detail="얼굴을 찾을 수 없습니다.")
+    if not await access_service.can_access_file(db, current_user, face.file_id):
+        raise HTTPException(status_code=403, detail="이 얼굴에 접근할 권한이 없습니다.")
+
+    matches = await face_index_service.similar_faces(db, face.embedding, workspace_id)
+
+    best: dict = {}
+    for row in matches:
+        current = best.get(row.file_id)
+        if current is None or row.similarity > current:
+            best[row.file_id] = row.similarity
+    ordered = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
+    total = len(ordered)
+    window = ordered[(page - 1) * page_size: page * page_size]
+
+    if not window:
+        return {"items": [], "total_count": total, "page": page, "page_size": page_size, "total_pages": 0}
+
+    ids = [file_id for file_id, _ in window]
+    rows = (await db.execute(select(FileItem).where(FileItem.id.in_(ids)))).scalars().all()
+    by_id = {r.id: r for r in rows}
+    items = []
+    for file_id, similarity in window:
+        file_item = by_id.get(file_id)
+        if file_item is None:
+            continue
+        entry = _item(file_item)
+        entry["similarity"] = round(float(similarity), 4)
+        items.append(entry)
+
+    return {
+        "items": items,
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size if total else 0,
+    }

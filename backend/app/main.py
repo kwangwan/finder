@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from fastapi.concurrency import run_in_threadpool
 from app.core.database import init_db, AsyncSessionLocal
 from app.routers import folders, files, storage, search, system, auth, admin, workspaces, invitations, trash, window_state, reports, favorites, boards, gallery
 from app.routers.trash import _auto_purge_expired
@@ -37,6 +38,45 @@ async def _daily_storage_alert():
                         print(f"[{settings.APP_NAME}] Daily shared-storage warning sent.")
         except Exception as e:
             print(f"[{settings.APP_NAME}] Daily storage alert error: {e}")
+
+
+async def _face_index_worker():
+    """
+    Keep the face index up with what people upload.
+
+    Deliberately unhurried. A handful of files at a time with a pause between
+    batches, because this runs inside the same process that serves everybody
+    and finding faces is the only thing this app does that will happily eat a
+    whole CPU. The backlog of an existing library is not its job — that is
+    `run_face_backlog.py`, which runs in a container of its own — this is for
+    the photographs that arrive from now on.
+    """
+    from app.services import face_index_service, face_service
+    await asyncio.sleep(90)   # let the app finish waking up first
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                pending = await face_index_service.pending_count(db)
+            if not pending:
+                await asyncio.sleep(600)
+                continue
+            if not face_service.models_ready():
+                # Fetched once, on the first file that needs them. If that
+                # fails — no network, say — there is no point hammering it.
+                try:
+                    await run_in_threadpool(face_service._model_path, "yunet")
+                    await run_in_threadpool(face_service._model_path, "sface")
+                except Exception as e:
+                    print(f"[{settings.APP_NAME}] Face models unavailable: {e}")
+                    await asyncio.sleep(3600)
+                    continue
+            await face_index_service.sweep(batch_size=4, limit=20)
+            await asyncio.sleep(20)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"[{settings.APP_NAME}] Face indexing error: {e}")
+            await asyncio.sleep(300)
 
 
 async def _periodic_trash_cleanup():
@@ -132,9 +172,11 @@ async def lifespan(app: FastAPI):
     await copy_service.requeue_orphans()
     copy_service.start_worker()
     cleanup_task = asyncio.create_task(_periodic_trash_cleanup())
+    face_task = asyncio.create_task(_face_index_worker())
     
     yield
     
+    face_task.cancel()
     cleanup_task.cancel()
     daily_alert_task.cancel()
     board_digest_task.cancel()

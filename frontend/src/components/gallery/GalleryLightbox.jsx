@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, MapPin, Camera, Clock, Download, Maximize2 } from '../../utils/icons';
+import { X, ChevronLeft, ChevronRight, MapPin, Camera, Clock, Download, Maximize2, Users } from '../../utils/icons';
 import VideoPlayer from '../common/VideoPlayer';
-import { getMediaPreviewUrl, getThumbnailUrl, ensureMediaToken, clearMediaToken } from '../../api';
+import {
+  getMediaPreviewUrl, getThumbnailUrl, ensureMediaToken, clearMediaToken, getFacesInItem,
+} from '../../api';
 
 /**
  * One photograph, with the room to be looked at.
@@ -41,12 +43,17 @@ export default function GalleryLightbox({
   hasNext,
   onShowOnMap,
   onDownload,
+  onSearchFace,
 }) {
   const [src, setSrc] = useState(() => (item ? getMediaPreviewUrl(item.id) : null));
   const [isChromeVisible, setChromeVisible] = useState(true);
   const [isLoaded, setLoaded] = useState(false);
   const idleTimer = useRef(null);
   const retriedRef = useRef(false);
+  const [faces, setFaces] = useState([]);
+  const [frame, setFrame] = useState(null);
+  const imageRef = useRef(null);
+  const stageRef = useRef(null);
 
   // A fresh address for a picture whose token has run out — the same recovery
   // the rest of the app does, kept to one attempt so a genuinely missing file
@@ -67,6 +74,40 @@ export default function GalleryLightbox({
     setLoaded(false);
     setSrc(getMediaPreviewUrl(item.id));
   }, [item?.id]);
+
+  // Who is in this one. Asked for separately and quietly: the picture must
+  // not wait on it, and a library that has not been looked at yet simply has
+  // nothing to draw.
+  useEffect(() => {
+    if (!item) return undefined;
+    let cancelled = false;
+    setFaces([]);
+    getFacesInItem(item.id)
+      .then((data) => { if (!cancelled) setFaces(data.faces || []); })
+      .catch(() => { if (!cancelled) setFaces([]); });
+    return () => { cancelled = true; };
+  }, [item?.id]);
+
+  const measure = useCallback(() => {
+    const image = imageRef.current;
+    if (!image) return;
+    // offsetWidth rather than getBoundingClientRect: the picture fades in
+    // with a slight scale, and the rect would be measured mid-animation —
+    // leaving every face box a percent or two adrift. These are layout
+    // numbers, which the transform does not touch.
+    setFrame({
+      left: image.offsetLeft,
+      top: image.offsetTop,
+      width: image.offsetWidth,
+      height: image.offsetHeight,
+    });
+  }, []);
+
+  // The window can change size under an open picture.
+  useEffect(() => {
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [measure]);
 
   const wake = useCallback(() => {
     setChromeVisible(true);
@@ -119,7 +160,11 @@ export default function GalleryLightbox({
       aria-modal="true"
       aria-label={item.name}
     >
-      <div className="gal-light-stage" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div
+        className="gal-light-stage"
+        ref={stageRef}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
         {isVideo ? (
           <div className="gal-light-video">
             <VideoPlayer
@@ -140,13 +185,39 @@ export default function GalleryLightbox({
               <img className="gal-light-blur" src={getThumbnailUrl(item.id)} alt="" aria-hidden="true" />
             )}
             <img
+              ref={imageRef}
               className={`gal-light-img ${isLoaded ? 'is-loaded' : ''}`}
               src={src}
               alt={item.name}
-              onLoad={() => setLoaded(true)}
+              onLoad={() => { setLoaded(true); measure(); }}
               onError={recoverSrc}
               draggable={false}
             />
+            {/* The faces, over exactly where the picture ended up. A photograph
+                is letterboxed inside the window, so the boxes — which are
+                fractions of the photograph — are laid on a pane matched to the
+                picture's own rectangle, measured rather than assumed. */}
+            {isLoaded && isChromeVisible && faces.length > 0 && frame && (
+              <div className="gal-face-pane" style={frame}>
+                {faces.map((face) => (
+                  <button
+                    key={face.id}
+                    type="button"
+                    className="gal-face-box"
+                    style={{
+                      left: `${face.box[0] * 100}%`,
+                      top: `${face.box[1] * 100}%`,
+                      width: `${face.box[2] * 100}%`,
+                      height: `${face.box[3] * 100}%`,
+                    }}
+                    onClick={(e) => { e.stopPropagation(); onSearchFace?.(face, item); }}
+                    title="이 사람이 나온 사진 찾기"
+                  >
+                    <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -178,6 +249,11 @@ export default function GalleryLightbox({
               </button>
             )}
             {item.width && item.height && <span><Maximize2 size={12} /> {item.width} × {item.height}</span>}
+            {faces.length > 0 && (
+              <span title="사진 위의 얼굴을 누르면 같은 사람을 찾습니다">
+                <Users size={12} /> {faces.length}명
+              </span>
+            )}
           </span>
         </div>
         <button type="button" className="gal-light-download" onClick={() => onDownload?.(item)} title="원본 내려받기">
