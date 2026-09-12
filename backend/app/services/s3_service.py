@@ -101,7 +101,7 @@ class S3Service:
             )
         )
 
-    def _get_local_path(self, s3_key: str) -> Path:
+    def _get_local_path(self, s3_key: str, for_write: bool = False) -> Path:
         """Get local filesystem path for a given s3_key.
 
         s3_key is frequently built from a user-supplied filename (e.g. "uploads/{uuid}/{filename}").
@@ -113,7 +113,12 @@ class S3Service:
         p = (self.local_dir / s3_key).resolve()
         if self.local_dir.resolve() not in p.parents and p != self.local_dir.resolve():
             raise ValueError(f"Refusing to resolve s3_key outside storage directory: {s3_key!r}")
-        p.parent.mkdir(parents=True, exist_ok=True)
+        # Only when something is about to be written. Asking where a file
+        # *would* be — which every read does before falling back — used to
+        # create the folder it would have been in, so the disk filled up with
+        # empty directories for files that live in storage.
+        if for_write:
+            p.parent.mkdir(parents=True, exist_ok=True)
         return p
 
     def _ensure_bucket(self):
@@ -259,25 +264,25 @@ class S3Service:
 
     def put_object(self, s3_key: str, data: bytes, content_type: str = "text/markdown; charset=utf-8") -> bool:
         """
-        Directly upload bytes to local storage and MinIO.
+        Store bytes. In storage, and only on this machine's disk if storage
+        could not take them.
+
+        It used to write the local copy first, every time, and call it a
+        cache. Nothing ever read it while storage was healthy and nothing ever
+        removed it, so every note, thumbnail, avatar and small upload left a
+        permanent second copy on the server's disk — 25GB of it by the time
+        anyone looked, on a disk that had run out of room.
+
+        The local path is still a real fallback: the readers below try it when
+        storage cannot answer, so bytes written here during an outage are
+        still served and are not lost. That is the only thing it is for now,
+        and it says so in the log when it happens.
 
         Returns whether the bytes ended up somewhere they can be read back
         from. It used to return nothing at all, so a caller asking "did that
         work" — the avatar upload did — read the None as failure and refused
         every image it had just stored correctly.
         """
-        local_ok = False
-        # 1. Save to local storage cache
-        try:
-            local_path = self._get_local_path(s3_key)
-            with open(local_path, "wb") as f:
-                f.write(data)
-            local_ok = True
-        except Exception as e:
-            print(f"[Local Storage Warning] Could not save to local path: {e}")
-
-        # 2. Upload to MinIO if client is available
-        remote_ok = False
         if self.client:
             try:
                 self.client.put_object(
@@ -286,11 +291,19 @@ class S3Service:
                     Body=data,
                     ContentType=content_type
                 )
-                remote_ok = True
+                return True
             except Exception as e:
-                print(f"[S3 Warning] put_object to S3 failed (saved locally): {e}")
+                print(f"[S3 Warning] put_object to S3 failed, keeping a local copy: {e}")
 
-        return local_ok or remote_ok
+        try:
+            local_path = self._get_local_path(s3_key, for_write=True)
+            with open(local_path, "wb") as f:
+                f.write(data)
+            print(f"[Local Storage] {s3_key} was written to this machine's disk because storage did not take it")
+            return True
+        except Exception as e:
+            print(f"[Local Storage Warning] Could not save to local path: {e}")
+            return False
 
     def get_object_content(self, s3_key: str) -> Optional[bytes]:
         """Download object content from S3 or local cache."""
@@ -440,7 +453,7 @@ class S3Service:
         try:
             src_path = self._get_local_path(src_key)
             if src_path.exists():
-                shutil.copy2(src_path, self._get_local_path(dst_key))
+                shutil.copy2(src_path, self._get_local_path(dst_key, for_write=True))
                 copied = True
         except Exception as e:
             print(f"[Local Storage Warning] Could not copy local file: {e}")
