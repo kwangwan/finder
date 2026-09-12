@@ -81,9 +81,25 @@ class AccessService:
         return True
 
     async def require_write(self, db: AsyncSession, user: User, workspace_id: Optional[uuid.UUID]) -> None:
-        """Raise 403 when the user may read this workspace but not change it."""
+        """
+        Raise 403 unless the user may change things in this workspace.
+
+        Two questions, because they are two questions. Membership was left to
+        the caller — every route asks it, or fetches the thing through
+        something that does — and `can_write_workspace` only ever answered the
+        second one, saying yes to anybody outside the shared workspace. A name
+        like require_write reads as the whole check, and one route took it
+        that way, which was enough to let a stranger write into a workspace
+        they had never been part of. Asked here now, so the name is true.
+        """
+        from fastapi import HTTPException
+        if workspace_id and not user.is_superadmin:
+            if not await self.is_workspace_member(db, user, workspace_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail="이 워크스페이스에 접근할 권한이 없습니다."
+                )
         if not await self.can_write_workspace(db, user, workspace_id):
-            from fastapi import HTTPException
             raise HTTPException(
                 status_code=403,
                 detail="공용 워크스페이스에 대한 쓰기 권한이 없습니다. 관리자에게 문의하세요."
