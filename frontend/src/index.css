@@ -8060,10 +8060,6 @@ input.bd-name:focus {
   background: rgba(255, 255, 255, 0.18);
   font-size: 0.62rem;
 }
-/* A count, not a warning. Amber made a plain fact about a handful of files
-   read as something wrong that wanted attending to, every time the gallery was
-   opened. It sits with the other counts now and says the same thing. */
-.gal-undated { color: var(--text-muted); }
 .gal-light-undated { color: rgba(255, 255, 255, 0.72); }
 
 .gal-chip-who {

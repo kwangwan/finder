@@ -556,14 +556,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
               <Users size={11} /> 얼굴 찾는 중 {Math.floor((faceStatus.scanned / Math.max(1, faceStatus.total)) * 100)}%
             </span>
           )}
-          {summary.undated_count > 0 && (
-            <span
-              className="gal-undated"
-              title="촬영 정보가 없어 올린 날짜를 기준으로 놓인 항목입니다"
-            >
-              촬영일 없음 {summary.undated_count.toLocaleString()}
-            </span>
-          )}
           {summary.first_taken_at && (
             <span className="gal-span">
               {summary.first_taken_at.slice(0, 7).replace('-', '.')} – {summary.last_taken_at.slice(0, 7).replace('-', '.')}
@@ -855,19 +847,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   <ArrowRight size={13} />
                   <span>촬영 시간순</span>
                 </button>
-                {showPath && path && (
-                  <span className="gal-map-note">
-                    {uploaderName ? `${uploaderName}님의 사진 ` : '사진 '}
-                    {path.total_count.toLocaleString()}장
-                    {' '}· 머문 자리 {path.points.length.toLocaleString()}곳
-                    {' '}· 찍힌 시간 순서, 화살표가 다음 방향
-                    {path.undated > 0 && (
-                      <span title="촬영 시각이 없으면 순서를 알 수 없어 선에서 뺍니다. 올린 날짜를 쓰면 실제로 가지 않은 구간이 그려집니다.">
-                        {' '}· 촬영 시각이 없는 {path.undated.toLocaleString()}장 제외
-                      </span>
-                    )}
-                  </span>
-                )}
               </div>
             </div>
 
