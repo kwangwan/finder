@@ -906,14 +906,6 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
                   onBack={() => setPlace(null)}
                   onOpen={openAt}
                   onLoadMore={loadMorePlace}
-                  // Rearranging the map, now that it is a thing you ask for
-                  // rather than a thing that happens to you.
-                  onZoomIn={() => setFocusPoint({
-                    latitude: place.latitude,
-                    longitude: place.longitude,
-                    zoom: stepIn(mapView?.zoom),
-                  })}
-                  canZoomIn={(mapView?.zoom || 0) < 16}
                   // The same ground, without the days — the place rather than
                   // the visit.
                   onShowWholePlace={() => openPlace(place.latitude, place.longitude, {
