@@ -189,11 +189,101 @@ async def sweep(batch_size: int = 8, limit: Optional[int] = None, workspace_id=N
 
 # How alike two faces have to be before this app will say they are the same
 # person. SFace's own guidance is 0.363 cosine *distance*; as a similarity on
-# unit vectors that is about 0.64. Held a little above it here, because in a
-# family library the cost of a stranger appearing in a search is higher than
-# the cost of missing one photograph — the missing one is still findable by
-# date, and the stranger is just wrong.
+# unit vectors that is about 0.64. Held a little above it here, because a
+# stranger turning up in a search is worse than a photograph missing from one:
+# the missing one is still findable by date, and the stranger is just wrong.
 SAME_PERSON_SIMILARITY = 0.66
+
+# Reaching from one face to the next. Higher than the threshold above, because
+# a step taken from a face that was itself only a guess is where a search
+# starts drifting into other people — each link has to be surer than the first
+# one was.
+LINK_SIMILARITY = 0.70
+
+# How many of the surest matches are stepped from, and how far each one reaches.
+EXPAND_FROM = 24
+REACH_PER_FACE = 40
+
+
+# Every face this one leads to, directly or through a face it is sure of.
+#
+# One photograph of a person is one angle of them. Search with a profile and
+# the frontal photographs of the same person fall below any threshold worth
+# having — not because the threshold is wrong, but because the question was
+# asked with half the evidence. This is what made the search feel accurate and
+# forgetful at once: what it found was right, and it kept missing the rest.
+#
+# So it asks twice. The faces it is surest of become questions in their own
+# right, and what they find is folded in. A profile is close to a
+# three-quarter view, which is close to a frontal one; none of those steps is a
+# guess, and together they cross a distance no single comparison could. Each
+# step has to be surer than the first (LINK_SIMILARITY), and the reach is
+# limited, because the same chaining that chases one person around six years
+# will wander into another person if it is let run.
+#
+# A result's score is the product along the path it was reached by, so a face
+# found directly always outranks one reached through somebody, and a face
+# reached through a weak link ranks below one reached through a strong one.
+_SIMILAR_FACES = """
+    WITH direct AS (
+        SELECT s.id, s.file_id, s.box_x, s.box_y, s.box_w, s.box_h, s.frame_time,
+               s.embedding,
+               1 - (s.embedding <=> CAST(:vec AS vector)) AS score,
+               0 AS steps
+        FROM kb_face_signatures s
+        JOIN kb_files f ON f.id = s.file_id
+        WHERE s.workspace_id = :ws
+          AND f.is_trashed = FALSE
+          AND 1 - (s.embedding <=> CAST(:vec AS vector)) >= :threshold
+        -- No ORDER BY and no LIMIT here, deliberately. Written with them,
+        -- Postgres answers this from the HNSW index, and an HNSW scan returns
+        -- what its walk happened to visit — hnsw.ef_search rows, not every row
+        -- that satisfies the filter. The count then depends on which plan was
+        -- chosen, which is how the same search returned three hundred files one
+        -- way and a hundred and fifty the other. A filter without an ordering
+        -- is an exact scan, and "every face this close" is an exact question.
+    ),
+    seed AS (
+        SELECT embedding, score FROM direct ORDER BY score DESC LIMIT :fan
+    ),
+    reached AS (
+        SELECT n.id, n.file_id, n.box_x, n.box_y, n.box_w, n.box_h, n.frame_time,
+               seed.score * (1 - (n.embedding <=> seed.embedding)) AS score,
+               1 AS steps
+        FROM seed
+        CROSS JOIN LATERAL (
+            SELECT o.id, o.file_id, o.box_x, o.box_y, o.box_w, o.box_h,
+                   o.frame_time, o.embedding
+            FROM kb_face_signatures o
+            JOIN kb_files f2 ON f2.id = o.file_id
+            WHERE o.workspace_id = :ws
+              AND f2.is_trashed = FALSE
+              AND 1 - (o.embedding <=> seed.embedding) >= :link
+            -- Bounded by how sure the step has to be rather than by a row
+            -- count, for the same reason. What this costs is a pass over the
+            -- workspace's faces per seed; on a library many times this size
+            -- the seeds are what to reduce, not the exactness.
+        ) n
+    ),
+    best AS (
+        SELECT DISTINCT ON (id)
+               id, file_id, box_x, box_y, box_w, box_h, frame_time, score, steps
+        FROM (
+            SELECT id, file_id, box_x, box_y, box_w, box_h, frame_time, score, steps FROM direct
+            UNION ALL
+            SELECT id, file_id, box_x, box_y, box_w, box_h, frame_time, score, steps FROM reached
+        ) every_face
+        ORDER BY id, steps ASC, score DESC
+    )
+    SELECT id, file_id, box_x, box_y, box_w, box_h, frame_time, score AS similarity
+    FROM best
+    -- Whatever it found before, it still finds. The cap is a cap on the
+    -- answer's size, and if it is spent on faces reached through somebody
+    -- else, a face that answered the question directly falls off the end —
+    -- which would make this a trade rather than an improvement.
+    ORDER BY steps ASC, similarity DESC
+    LIMIT :limit
+"""
 
 
 async def similar_faces(
@@ -202,29 +292,24 @@ async def similar_faces(
     workspace_id,
     *,
     threshold: float = SAME_PERSON_SIMILARITY,
-    limit: int = 500,
+    limit: int = 4000,
 ):
     """
-    Every face in this workspace close enough to be the same person.
+    Every face in this workspace that is the same person as this one.
 
-    Ordered by the database, using the cosine index: `<=>` is cosine distance,
-    so similarity is one minus it. The work stays in Postgres because pulling
-    twelve thousand vectors into Python to sort them there would be both
-    slower and pointless.
+    The work stays in Postgres, on the cosine index: pulling twelve thousand
+    vectors into Python to sort them there would be both slower and pointless.
     """
     rows = (await db.execute(
-        text("""
-            SELECT s.id, s.file_id, s.box_x, s.box_y, s.box_w, s.box_h,
-                   s.frame_time, 1 - (s.embedding <=> CAST(:vec AS vector)) AS similarity
-            FROM kb_face_signatures s
-            JOIN kb_files f ON f.id = s.file_id
-            WHERE s.workspace_id = :ws
-              AND f.is_trashed = FALSE
-              AND 1 - (s.embedding <=> CAST(:vec AS vector)) >= :threshold
-            ORDER BY s.embedding <=> CAST(:vec AS vector)
-            LIMIT :limit
-        """),
-        {"vec": str(list(embedding)), "ws": str(workspace_id),
-         "threshold": threshold, "limit": limit},
+        text(_SIMILAR_FACES),
+        {
+            "vec": str(list(embedding)),
+            "ws": str(workspace_id),
+            "threshold": threshold,
+            "link": LINK_SIMILARITY,
+            "fan": EXPAND_FROM,
+            "per_seed": REACH_PER_FACE,
+            "limit": limit,
+        },
     )).all()
     return rows
