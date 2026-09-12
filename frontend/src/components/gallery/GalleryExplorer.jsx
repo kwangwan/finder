@@ -169,7 +169,9 @@ function readUrlState() {
   }
 }
 
-export default function GalleryExplorer({ workspaceId, workspaceName, theme, language, onOpenInWindow }) {
+export default function GalleryExplorer({
+  workspaceId, workspaceName, theme, language, userId, onOpenInWindow,
+}) {
   const initial = useMemo(readUrlState, []);
   const [mode, setMode] = useState(initial.mode);
   const [kind, setKind] = useState(initial.kind);
@@ -222,16 +224,56 @@ export default function GalleryExplorer({ workspaceId, workspaceName, theme, lan
   const gripFrom = useRef(null);
   const factsRef = useRef(null);
 
-  // A filter belongs to the library it was set on. A year, an uploader, a
-  // camera, a word in a file name — none of them mean the same thing in the
-  // next workspace, and carrying them across is how the gallery came to say
-  // "7개" at the top and show nothing underneath: the header's counts are not
-  // narrowed by year or camera, so the two disagreed with no way to see why.
+  /**
+   * A filter belongs to the library it was set on, and to the person who set it.
+   *
+   * Carrying them across workspaces is how the gallery came to say "7개" at the
+   * top and show nothing underneath — an uploader and a camera from another
+   * library match nothing here, and the header's counts were not narrowed by
+   * all of them, so the two disagreed with no way to see why.
+   *
+   * Dropping them on every switch would have been the other wrong answer: come
+   * back to a library you were half-way through reading and you are at the
+   * beginning again. They are kept instead, one set per workspace per account,
+   * and the one belonging to wherever you have just arrived is put back.
+   */
+  const filterScope = `gallery:filters:${userId || 'me'}:${workspaceId || 'none'}`;
+  const scopeRef = useRef(filterScope);
   const firstWorkspaceRef = useRef(true);
+
   useEffect(() => {
-    if (firstWorkspaceRef.current) { firstWorkspaceRef.current = false; return; }
-    setYear(null); setMonth(null); setQueryText(''); setKind('all');
-    setUploader(''); setCamera([]); setHasPlace(''); setPlace(null); setFaceSearch(null);
+    // Only ever writes under the workspace the current state actually belongs
+    // to; on the render where the workspace changes, this is not yet it.
+    if (!workspaceId || scopeRef.current !== filterScope) return;
+    try {
+      window.localStorage.setItem(filterScope, JSON.stringify({
+        year, month, kind, uploader, camera, hasPlace, q: queryText,
+      }));
+    } catch (e) { /* a browser that will not remember still works */ }
+  }, [filterScope, workspaceId, year, month, kind, uploader, camera, hasPlace, queryText]);
+
+  useEffect(() => {
+    // The first arrival keeps whatever the address bar asked for — a link
+    // somebody sent has to open on what it names.
+    if (firstWorkspaceRef.current) {
+      firstWorkspaceRef.current = false;
+      scopeRef.current = filterScope;
+      return;
+    }
+    let saved = null;
+    try { saved = JSON.parse(window.localStorage.getItem(filterScope) || 'null'); }
+    catch (e) { saved = null; }
+    scopeRef.current = filterScope;
+    setYear(saved?.year ?? null);
+    setMonth(saved?.month ?? null);
+    setKind(saved?.kind ?? 'all');
+    setUploader(saved?.uploader ?? '');
+    setCamera(Array.isArray(saved?.camera) ? saved.camera : []);
+    setHasPlace(saved?.hasPlace ?? '');
+    setQueryText(saved?.q ?? '');
+    setPlace(null);
+    setFaceSearch(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
   const requestId = useRef(0);

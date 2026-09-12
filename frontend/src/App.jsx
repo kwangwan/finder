@@ -2390,6 +2390,7 @@ export default function App() {
             // Place names on the map are drawn in the language this account
             // reads, not in whichever one each country happens to use.
             language={currentUser?.language}
+            userId={currentUser?.id}
             // A photograph can also be opened the way every other file is —
             // in a window, alongside the rest of what is open.
             onOpenInWindow={handleOpenFile}
