@@ -7184,6 +7184,11 @@ input.bd-name:focus {
 
 .gal-month { margin-bottom: 2.1rem; }
 
+/* A sticky heading fades into whatever is scrolling under it. Where that fade
+   begins has to be below the letters, not through them: at 62% the gradient
+   was already going transparent level with the text, so the line read as if
+   it were dissolving from the baseline down. The solid part now runs past the
+   descenders and the fade happens in the space after. */
 .gal-month-head {
   position: sticky;
   top: 0;
@@ -7191,8 +7196,8 @@ input.bd-name:focus {
   display: flex;
   align-items: baseline;
   gap: 0.7rem;
-  padding: 0.7rem 0 0.6rem;
-  background: linear-gradient(to bottom, var(--gal-ground, #07090e) 62%, transparent);
+  padding: 0.7rem 0 1.05rem;
+  background: linear-gradient(to bottom, var(--gal-ground, #07090e) 74%, transparent);
   backdrop-filter: blur(2px);
 }
 .gal-month-head h3 {
@@ -7912,8 +7917,8 @@ input.bd-name:focus {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  padding: 0.9rem 0 0.85rem;
-  background: linear-gradient(to bottom, var(--gal-ground, #07090e) 70%, transparent);
+  padding: 0.9rem 0 1.2rem;
+  background: linear-gradient(to bottom, var(--gal-ground, #07090e) 80%, transparent);
 }
 .gal-face-chip {
   width: 46px;
@@ -8066,8 +8071,8 @@ input.bd-name:focus {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.4rem;
-  padding: 0.45rem 0 0.35rem;
-  background: linear-gradient(to bottom, var(--gal-ground) 70%, transparent);
+  padding: 0.45rem 0 0.75rem;
+  background: linear-gradient(to bottom, var(--gal-ground) 80%, transparent);
 }
 .gal-place-day h4 {
   margin: 0;
