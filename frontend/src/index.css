@@ -2942,6 +2942,12 @@ h1, h2, h3, h4, h5, h6,
 }
 .window-menu-pop button:disabled { opacity: 0.5; cursor: default; }
 .window-menu-pop button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.window-menu-rule {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-subtle);
+}
+.window-menu-pop button.is-danger { color: var(--accent-rose); }
 
 .window-header-actions {
   display: flex;

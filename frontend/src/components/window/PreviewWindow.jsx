@@ -441,64 +441,78 @@ export default function PreviewWindow({
   }
 
   /**
-   * What can be done to this file, named.
+   * What can be done to this file, in the order a person would look for it.
+   *
+   * Grouped rather than listed: what the file is, then what it is to you, then
+   * ways of taking a copy away, then the one that destroys it. Thrown together
+   * in the order the code happened to add them — delete between two exports,
+   * history after a download — every reading of the menu is a search.
    *
    * Built as a list rather than written out as buttons so the header stays one
    * button wide whatever kind of file is open, and so each thing gets to say
    * what it is instead of being a shape you have to hover to identify.
    */
   const menuItems = [];
+
+  // 1. What this file is, and what it is called.
+  menuItems.push({ key: 'about', group: 1, label: '상세 정보', icon: <Info size={13} />,
+                   run: () => setShowAbout(true) });
   if (!isBoard) {
     // Renaming used to be "click the title and type", which is invisible until
     // discovered and, on a document, indistinguishable from putting the cursor
     // somewhere. It is a thing you do to the file, so it lives with the other
     // things you do to the file.
-    menuItems.push({ key: 'rename', label: '이름 바꾸기', icon: <Edit3 size={13} />,
+    menuItems.push({ key: 'rename', group: 1, label: '이름 바꾸기', icon: <Edit3 size={13} />,
                      run: () => { setRenameTo(resolvedFile.name || ''); setRenaming(true); } });
   }
-  menuItems.push({ key: 'about', label: '상세 정보', icon: <Info size={13} />,
-                   run: () => setShowAbout(true) });
+
+  // 2. What it is to you, and what has become of it.
   if (isMarkdown) {
     menuItems.push(
-      { key: 'history', label: '문서 히스토리', icon: <Clock size={13} />,
-        run: () => noteEditor.setIsHistoryModalOpen(true) },
-      { key: 'favorite',
+      { key: 'favorite', group: 2,
         label: resolvedFile.is_favorite ? '즐겨찾기에서 빼기' : '즐겨찾기에 넣기',
         icon: <Star size={13} color={resolvedFile.is_favorite ? '#f59e0b' : undefined}
                     fill={resolvedFile.is_favorite ? '#f59e0b' : 'none'} />,
         run: () => onToggleFavorite(fileDetail || file) },
-      { key: 'md', label: '마크다운으로 내려받기', icon: <Download size={13} />,
-        run: () => noteEditor.handleExportMarkdown() },
-      // Red is for the one thing in here that cannot be undone. Exporting a
-      // PDF is not that, and wearing the warning colour made it look like it.
-      { key: 'pdf', label: noteEditor.isExportingPdf ? 'PDF 만드는 중…' : 'PDF로 내보내기',
-        icon: noteEditor.isExportingPdf
-          ? <Loader2 size={13} className="spin" />
-          : <FileText size={13} />,
-        disabled: noteEditor.isExportingPdf,
-        run: () => noteEditor.handleExportPdf() },
+      { key: 'history', group: 2, label: '문서 히스토리', icon: <Clock size={13} />,
+        run: () => noteEditor.setIsHistoryModalOpen(true) },
     );
   }
+
+  // 3. Taking a copy out of here, from the lightest way to the heaviest.
   if (isTextOrCode) {
     menuItems.push({
-      key: 'copy', label: copied ? '복사했습니다' : '내용 복사',
+      key: 'copy', group: 3, label: copied ? '복사했습니다' : '내용 복사',
       icon: copied ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />,
       run: handleCopyContent,
     });
   }
+  if (isMarkdown) {
+    menuItems.push(
+      { key: 'md', group: 3, label: '마크다운으로 내려받기', icon: <Download size={13} />,
+        run: () => noteEditor.handleExportMarkdown() },
+      // Red is for the one thing in here that cannot be undone. Exporting a
+      // PDF is not that, and wearing the warning colour made it look like it.
+      { key: 'pdf', group: 3, label: noteEditor.isExportingPdf ? 'PDF 만드는 중…' : 'PDF로 내보내기',
+        icon: noteEditor.isExportingPdf ? <Loader2 size={13} className="spin" /> : <FileText size={13} />,
+        disabled: noteEditor.isExportingPdf,
+        run: () => noteEditor.handleExportPdf() },
+    );
+  }
   // A board has no stored file behind it — its rows live in the database — so
   // downloading it would hand back nothing.
   if (!isBoard) {
-    menuItems.push({ key: 'download', label: '원본 내려받기', icon: <Download size={13} />,
+    menuItems.push({ key: 'download', group: 3, label: '원본 내려받기', icon: <Download size={13} />,
                      run: handleDownload });
   }
+
+  // 4. Alone at the bottom, because it is the one that cannot be undone.
   if (isMarkdown) {
-    // Last, and apart from the rest: it is the one that cannot be undone. A
-    // 할 일's document is deleted from the 할 일, so the one that cannot work
+    // A 할 일's document is deleted from the 할 일, so the one that cannot work
     // is offered but says why — the server refuses it either way, and being
     // told after pressing is worse.
     menuItems.push({
-      key: 'delete', label: '문서 삭제', danger: true,
+      key: 'delete', group: 4, label: '문서 삭제', danger: true,
       icon: <Trash2 size={13} color={links?.board_task ? 'var(--text-muted)' : 'var(--accent-rose)'} />,
       disabled: !!links?.board_task,
       hint: links?.board_task
@@ -680,11 +694,15 @@ export default function PreviewWindow({
               {isMenuOpen && (
                 <Popover anchorRef={menuRef} align="right" onClose={() => setMenuOpen(false)} className="window-menu-pop">
                   <span role="menu">
-                    {menuItems.map((item) => (
+                    {menuItems.map((item, index) => (
+                      <React.Fragment key={item.key}>
+                        {index > 0 && item.group !== menuItems[index - 1].group && (
+                          <span className="window-menu-rule" aria-hidden="true" />
+                        )}
                       <button
-                        key={item.key}
                         type="button"
                         role="menuitem"
+                        className={item.danger ? 'is-danger' : undefined}
                         disabled={item.disabled}
                         title={item.hint}
                         onClick={(e) => {
@@ -697,6 +715,7 @@ export default function PreviewWindow({
                         {item.icon}
                         <span>{item.label}</span>
                       </button>
+                      </React.Fragment>
                     ))}
                   </span>
                 </Popover>
