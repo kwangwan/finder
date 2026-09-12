@@ -881,16 +881,22 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
   const doSaveRef = useRef(doSave);
   doSaveRef.current = doSave;
 
-  const isSaveLeader = useCallback(() => {
-    if (!collab?.provider?.awareness) return true;
-    const ids = Array.from(collab.provider.awareness.getStates().keys());
-    if (ids.length === 0) return true;
-    return collab.ydoc.clientID === Math.min(...ids);
-  }, [collab]);
-
-  const isSaveLeaderRef = useRef(isSaveLeader);
-  isSaveLeaderRef.current = isSaveLeader;
-
+  // There used to be a "save leader" here: of the clients in the room, the one
+  // with the lowest Yjs id saved and the rest showed 저장됨 and wrote nothing,
+  // on the understanding that the leader was doing it for them.
+  //
+  // It was not, often enough to matter. The leader can be a phone that locked,
+  // a background tab whose timers the browser has throttled, a window that was
+  // closed a moment ago and whose presence has not timed out yet, or somebody
+  // with no write access at all — and when it is, nobody saves and every other
+  // client says 저장됨 while it happens. The sync server keeps nothing durable
+  // (it relays, by design), so once the last client leaves the room the text is
+  // gone, and reopening the document shows what was last actually stored.
+  //
+  // So every client saves its own document now. They all hold the same
+  // Yjs-merged text, so they write the same bytes, and a write of text that
+  // has not changed costs the server nothing: no version entry, no re-index,
+  // no storage write — it does not even touch the row.
   useEffect(() => {
     if (!enabled || !file?.id || !syncUrl) {
       setCollab(null);
@@ -941,9 +947,7 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
-        if (isSaveLeaderRef.current()) {
-          doSaveRef.current(titleRef.current, tagsRef.current).catch(() => {});
-        }
+        doSaveRef.current(titleRef.current, tagsRef.current).catch(() => {});
       }
       newProvider.destroy();
       newYdoc.destroy();
@@ -1028,10 +1032,6 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
 
     saveTimeoutRef.current = setTimeout(() => {
       saveTimeoutRef.current = null;
-      if (!isSaveLeaderRef.current()) {
-        setSaveStatus('saved');
-        return;
-      }
       doSave(newTitle, newTags);
     }, 1000);
   }, [doSave]);
@@ -1043,7 +1043,6 @@ export function useNoteEditor({ file, activeWorkspaceId, currentUser, enabled, o
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
       }
-      if (!isSaveLeaderRef.current()) return;
       if (saveStatusRef.current !== 'saved') doSaveRef.current(titleRef.current, tagsRef.current);
     };
     const handleVisibility = () => {
