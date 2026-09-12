@@ -5,10 +5,12 @@ import { filterSuggestionItems } from '@blocknote/core';
 import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { BlockNoteView } from '@blocknote/mantine';
 import BoardPane from '../board/BoardPane';
+import { Popover } from '../board/controls';
 import '@blocknote/mantine/style.css';
 import {
   X,
   Minus,
+  MoreHorizontal,
   Maximize2,
   Minimize2,
   Download,
@@ -238,6 +240,7 @@ export default function PreviewWindow({
 
   const displayContent = resolvedFile.content || '';
 
+
   // Opening a note's preview window now IS its (live, collaborative) editor
   // — there is no separate read-only mode or dedicated edit page anymore.
   // `enabled` also waits out the content-prefetch above so the collaborative
@@ -312,6 +315,9 @@ export default function PreviewWindow({
   // Copy text content — for a live note, copy its current (possibly
   // unsaved-to-disk-but-already-in-the-editor) markdown rather than the
   // last-saved snapshot.
+  const menuRef = useRef(null);
+  const [isMenuOpen, setMenuOpen] = useState(false);
+
   const handleCopyContent = () => {
     const content = isMarkdown && noteEditor.editor
       ? blocksToMarkdownTableSafe(noteEditor.editor, noteEditor.editor.document)
@@ -434,6 +440,62 @@ export default function PreviewWindow({
     dockTargetY = centerY - (size.height * MINIMIZE_SCALE) / 2;
   }
 
+  /**
+   * What can be done to this file, named.
+   *
+   * Built as a list rather than written out as buttons so the header stays one
+   * button wide whatever kind of file is open, and so each thing gets to say
+   * what it is instead of being a shape you have to hover to identify.
+   */
+  const menuItems = [];
+  if (isMarkdown) {
+    menuItems.push(
+      { key: 'history', label: '문서 히스토리', icon: <Clock size={13} />,
+        run: () => noteEditor.setIsHistoryModalOpen(true) },
+      { key: 'favorite',
+        label: resolvedFile.is_favorite ? '즐겨찾기에서 빼기' : '즐겨찾기에 넣기',
+        icon: <Star size={13} color={resolvedFile.is_favorite ? '#f59e0b' : undefined}
+                    fill={resolvedFile.is_favorite ? '#f59e0b' : 'none'} />,
+        run: () => onToggleFavorite(fileDetail || file) },
+      { key: 'md', label: '마크다운으로 내려받기', icon: <Download size={13} />,
+        run: () => noteEditor.handleExportMarkdown() },
+      { key: 'pdf', label: noteEditor.isExportingPdf ? 'PDF 만드는 중…' : 'PDF로 내보내기',
+        icon: noteEditor.isExportingPdf
+          ? <Loader2 size={13} className="spin" color="var(--accent-rose)" />
+          : <FileText size={13} color="var(--accent-rose)" />,
+        disabled: noteEditor.isExportingPdf,
+        run: () => noteEditor.handleExportPdf() },
+    );
+  }
+  if (isTextOrCode) {
+    menuItems.push({
+      key: 'copy', label: copied ? '복사했습니다' : '내용 복사',
+      icon: copied ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />,
+      run: handleCopyContent,
+    });
+  }
+  // A board has no stored file behind it — its rows live in the database — so
+  // downloading it would hand back nothing.
+  if (!isBoard) {
+    menuItems.push({ key: 'download', label: '원본 내려받기', icon: <Download size={13} />,
+                     run: handleDownload });
+  }
+  if (isMarkdown) {
+    // Last, and apart from the rest: it is the one that cannot be undone. A
+    // 할 일's document is deleted from the 할 일, so the one that cannot work
+    // is offered but says why — the server refuses it either way, and being
+    // told after pressing is worse.
+    menuItems.push({
+      key: 'delete', label: '문서 삭제', danger: true,
+      icon: <Trash2 size={13} color={links?.board_task ? 'var(--text-muted)' : 'var(--accent-rose)'} />,
+      disabled: !!links?.board_task,
+      hint: links?.board_task
+        ? '이 문서는 일정의 할 일에 연결되어 있어 일정에서 할 일을 삭제해야 합니다'
+        : undefined,
+      run: () => onDeleteFile(resolvedFile.id),
+    });
+  }
+
   return (
     <div
       ref={windowRef}
@@ -504,79 +566,6 @@ export default function PreviewWindow({
 
         {/* Right: Actions & OS Window Controls */}
         <div className="window-header-actions">
-          {/* Note Editor Buttons: History, Favorite, Delete, Markdown/PDF Export */}
-          {isMarkdown && (
-            <>
-              <button
-                type="button"
-                className="window-action-btn icon-only"
-                onClick={(e) => { e.stopPropagation(); noteEditor.setIsHistoryModalOpen(true); }}
-                title="문서 히스토리"
-              >
-                <Clock size={13} />
-              </button>
-              <button
-                type="button"
-                className="window-action-btn icon-only"
-                onClick={(e) => { e.stopPropagation(); onToggleFavorite(fileDetail || file); }}
-                title="즐겨찾기 토글"
-              >
-                <Star size={13} color={resolvedFile.is_favorite ? '#f59e0b' : undefined} fill={resolvedFile.is_favorite ? '#f59e0b' : 'none'} />
-              </button>
-              {/* A 할 일's document is deleted from the 할 일, so the button
-                  that cannot work is not offered — the server refuses it
-                  either way, but being told after clicking is worse. */}
-              <button
-                type="button"
-                className="window-action-btn icon-only"
-                disabled={!!links?.board_task}
-                onClick={(e) => { e.stopPropagation(); if (!links?.board_task) onDeleteFile(resolvedFile.id); }}
-                title={links?.board_task
-                  ? '이 문서는 일정의 할 일에 연결되어 있어 일정에서 할 일을 삭제해야 합니다'
-                  : '문서 삭제'}
-              >
-                <Trash2 size={13} color={links?.board_task ? 'var(--text-muted)' : 'var(--accent-rose)'} />
-              </button>
-              <button
-                type="button"
-                className="window-action-btn icon-only"
-                onClick={(e) => { e.stopPropagation(); noteEditor.handleExportMarkdown(); }}
-                title="마크다운 다운로드 (.md)"
-              >
-                <Download size={13} />
-              </button>
-              <button
-                type="button"
-                className="window-action-btn"
-                disabled={noteEditor.isExportingPdf}
-                onClick={(e) => { e.stopPropagation(); noteEditor.handleExportPdf(); }}
-                title="PDF로 내보내기 / 인쇄"
-              >
-                {noteEditor.isExportingPdf ? (
-                  <Loader2 size={13} className="spin" color="var(--accent-rose)" />
-                ) : (
-                  <FileText size={13} color="var(--accent-rose)" />
-                )}
-                <span>PDF</span>
-              </button>
-            </>
-          )}
-
-          {/* Copy Button for Text/Markdown/Code */}
-          {isTextOrCode && (
-            <button
-              type="button"
-              className="window-action-btn icon-only"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCopyContent();
-              }}
-              title="내용 복사"
-            >
-              {copied ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />}
-            </button>
-          )}
-
           {/* Image Toolbar Controls */}
           {isImage && (
             <>
@@ -627,20 +616,48 @@ export default function PreviewWindow({
             </>
           )}
 
-          {/* A board has no stored file behind it — its rows live in the
-              database — so downloading it would hand back nothing. */}
-          {!isBoard && (
-            <button
-              type="button"
-              className="window-action-btn icon-only"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDownload();
-              }}
-              title="다운로드"
-            >
-              <Download size={13} />
-            </button>
+          {/* Everything you can do *to* the file, behind one button with the
+              names written out. A dozen unlabelled icons in a row is a puzzle
+              solved by hovering each one; how you are *looking* at the file —
+              zoom, rotation, background — stays out here, because those are
+              pressed over and over while looking. */}
+          {menuItems.length > 0 && (
+            <span className="window-menu" ref={menuRef}>
+              <button
+                type="button"
+                className={`window-action-btn icon-only ${isMenuOpen ? 'is-on' : ''}`}
+                aria-haspopup="menu"
+                aria-expanded={isMenuOpen}
+                onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+                title="이 문서로 할 수 있는 것"
+              >
+                <MoreHorizontal size={14} />
+              </button>
+              {isMenuOpen && (
+                <Popover anchorRef={menuRef} align="right" onClose={() => setMenuOpen(false)} className="window-menu-pop">
+                  <span role="menu">
+                    {menuItems.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        role="menuitem"
+                        disabled={item.disabled}
+                        title={item.hint}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (item.disabled) return;
+                          setMenuOpen(false);
+                          item.run();
+                        }}
+                      >
+                        {item.icon}
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </span>
+                </Popover>
+              )}
+            </span>
           )}
 
           <div className="window-header-divider" />

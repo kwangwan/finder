@@ -2838,6 +2838,29 @@ h1, h2, h3, h4, h5, h6,
   flex-shrink: 0;
 }
 
+.window-menu { position: relative; display: inline-flex; }
+.window-action-btn.is-on { background: var(--bg-hover); color: var(--text-primary); }
+.window-menu-pop { padding: 4px; }
+.window-menu-pop [role="menu"] { display: flex; flex-direction: column; min-width: 190px; }
+.window-menu-pop button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.79rem;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.window-menu-pop button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.window-menu-pop button:disabled { opacity: 0.5; cursor: default; }
+.window-menu-pop button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 .window-header-actions {
   display: flex;
   align-items: center;
@@ -2984,20 +3007,43 @@ h1, h2, h3, h4, h5, h6,
   display: flex;
   /* One row that can be swiped rather than two that eat a third of a phone:
      everything fits on a desktop window, and where it does not, the row
-     scrolls instead of growing downwards into the document. */
+     scrolls instead of growing downwards into the document.
+     
+     Which only works if it looks scrollable. The bar used to hide its
+     scrollbar, so in a narrow window the tools simply stopped at the edge with
+     nothing to say there were more — a thin bar and a shadow at whichever edge
+     still has something beyond it. The shadows are painted with the content
+     rather than the box (background-attachment), so they appear exactly when
+     there is somewhere to scroll and go away at the ends. */
   flex-wrap: nowrap;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
-  padding: 5px 8px;
+  padding: 5px 8px 3px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
+  background-color: var(--bg-secondary);
+  background-image:
+    linear-gradient(to right, var(--bg-secondary), transparent),
+    linear-gradient(to left, var(--bg-secondary), transparent),
+    linear-gradient(to right, rgba(0, 0, 0, 0.28), transparent),
+    linear-gradient(to left, rgba(0, 0, 0, 0.28), transparent);
+  background-repeat: no-repeat;
+  background-size: 28px 100%, 28px 100%, 12px 100%, 12px 100%;
+  background-position: left center, right center, left center, right center;
+  background-attachment: local, local, scroll, scroll;
 }
 
-.doc-toolbar::-webkit-scrollbar { display: none; }
+.doc-toolbar::-webkit-scrollbar { height: 6px; }
+.doc-toolbar::-webkit-scrollbar-track { background: transparent; }
+.doc-toolbar::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 999px;
+}
+.doc-toolbar::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 .doc-toolbar-btn {
   display: inline-flex;
