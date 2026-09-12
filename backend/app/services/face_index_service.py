@@ -236,6 +236,16 @@ LINK_SIMILARITY = float(os.getenv("FACE_LINK", "0.48"))
 EXPAND_FROM = 24
 REACH_PER_FACE = 40
 
+# And how unlike the face that was asked about a reached face may be.
+#
+# Without this, one wrong link merges two people: a poor photograph matched
+# seven faces, one of those happened to be the most-photographed person in the
+# library, and stepping from her pulled her entire thirteen hundred files back
+# as the answer. The point of reaching is to recover the near-misses — the same
+# person at an angle, scoring just under the threshold — not to accept anyone a
+# chain can be drawn to. Below this, no path is long enough.
+EXPANSION_FLOOR = float(os.getenv("FACE_EXPANSION_FLOOR", "0.30"))
+
 
 # Every face this one leads to, directly or through a face it is sure of.
 #
@@ -291,6 +301,7 @@ _SIMILAR_FACES = """
             WHERE o.workspace_id = :ws
               AND f2.is_trashed = FALSE
               AND 1 - (o.embedding <=> seed.embedding) >= :link
+              AND 1 - (o.embedding <=> CAST(:vec AS vector)) >= :floor
             -- Bounded by how sure the step has to be rather than by a row
             -- count, for the same reason. What this costs is a pass over the
             -- workspace's faces per seed; on a library many times this size
@@ -339,6 +350,7 @@ async def similar_faces(
             "ws": str(workspace_id),
             "threshold": threshold,
             "link": LINK_SIMILARITY,
+            "floor": EXPANSION_FLOOR,
             "fan": EXPAND_FROM,
             "per_seed": REACH_PER_FACE,
             "limit": limit,
