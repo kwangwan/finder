@@ -3036,6 +3036,11 @@ h1, h2, h3, h4, h5, h6,
 }
 .window-action-btn:disabled { opacity: 0.45; cursor: default; }
 /* Held open: the button keeps the pressed look for as long as its menu is. */
+.window-action-btn.is-keep {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+  color: var(--accent-primary);
+  padding: 0 8px;
+}
 .window-action-btn.is-on {
   background: var(--bg-hover);
   border-color: var(--border-medium);

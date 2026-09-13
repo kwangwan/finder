@@ -24,6 +24,9 @@ from app.services.copy_service import (
     JOB_RETENTION_HOURS, MAX_PENDING_JOBS_PER_USER,
 )
 from app.services.s3_service import s3_service, build_storage_key
+from app.services.thumbnail_service import thumbnail_service
+from app.services import image_rotate_service
+from app.models.face import FaceSignature
 from app.services.document_service import document_service
 from app.services.access_service import access_service
 from app.services import shared_policy_service
@@ -186,6 +189,10 @@ def _to_file_detail_response(f: FileItem, folder_name: Optional[str] = None, dow
     resp.last_editor_display_name = last_editor_display_name
     resp.is_task_document = is_task_document
     return resp
+
+
+class RotateRequest(BaseModel):
+    quarter_turns: int = 1
 
 class AttachedToRequest(BaseModel):
     file_ids: List[uuid.UUID] = Field(default_factory=list, max_length=500)
@@ -958,6 +965,84 @@ async def get_collab_state(
     if not state:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     return Response(content=bytes(state), media_type="application/octet-stream")
+
+
+@router.post("/{file_id}/rotate")
+async def rotate_image(
+    file_id: uuid.UUID,
+    req: RotateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    Turn a photograph, and keep it turned.
+
+    Rotating in the window only turned what was on screen; opening it again
+    showed it lying down as before. This writes the turn into the file, which
+    is what "회전" means to anyone who is not thinking about file formats.
+
+    Done without re-encoding wherever the format allows it — see
+    image_rotate_service. Everything derived from the picture follows: how big
+    it is seen to be, its thumbnail, and the faces found in it, whose boxes are
+    fractions of a picture that has just turned under them.
+    """
+    file_item = await db.get(FileItem, file_id)
+    if file_item is None or file_item.is_trashed:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+    if not await access_service.can_access_file(db, current_user, file_id):
+        raise HTTPException(status_code=403, detail="파일에 접근할 권한이 없습니다.")
+    await access_service.require_write_at(db, current_user, file_item.workspace_id, file_item.folder_id)
+    if file_item.file_type != "image" or not file_item.s3_key:
+        raise HTTPException(status_code=400, detail="사진만 돌릴 수 있습니다.")
+
+    turns = req.quarter_turns % 4
+    if turns == 0:
+        return {"ok": True, "unchanged": True}
+
+    data = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
+    if not data:
+        raise HTTPException(status_code=404, detail="원본을 찾을 수 없습니다.")
+
+    turned = await run_in_threadpool(image_rotate_service.rotate_bytes, data, turns)
+    if turned is None:
+        raise HTTPException(status_code=400, detail="이 사진은 돌릴 수 없습니다.")
+    body, width, height = turned
+
+    if not await run_in_threadpool(
+        s3_service.put_object, file_item.s3_key, body,
+        file_item.mime_type or "image/jpeg",
+    ):
+        raise HTTPException(status_code=500, detail="사진을 저장하지 못했습니다.")
+
+    file_item.media_width, file_item.media_height = width, height
+    file_item.size_bytes = len(body)
+
+    if file_item.thumbnail_s3_key:
+        thumb = await run_in_threadpool(thumbnail_service.generate_image_thumbnail, body)
+        if thumb:
+            await run_in_threadpool(
+                s3_service.put_object, file_item.thumbnail_s3_key, thumb, "image/webp")
+
+    # The faces were found in the picture as it stood; the picture has turned.
+    # A box is (x, y, w, h) in fractions, and a quarter turn clockwise sends
+    # (x, y) to (1 - y - h, x) with the sides exchanged.
+    faces = (await db.execute(
+        select(FaceSignature).where(FaceSignature.file_id == file_id)
+    )).scalars().all()
+    for _ in range(turns):
+        for face in faces:
+            x, y, w, h = face.box_x, face.box_y, face.box_w, face.box_h
+            face.box_x, face.box_y = 1.0 - y - h, x
+            face.box_w, face.box_h = h, w
+
+    await db.commit()
+    await db.refresh(file_item)
+    return {
+        "ok": True,
+        "width": width,
+        "height": height,
+        "size_bytes": file_item.size_bytes,
+    }
 
 
 @router.put("/{file_id}/collab-state")

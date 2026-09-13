@@ -936,6 +936,17 @@ export async function moveFile(fileId, folder_id) {
   return res.json();
 }
 
+/** Turn a photograph and keep it turned. */
+export async function rotateFile(fileId, quarterTurns) {
+  const res = await apiFetch(`${API_BASE}/files/${fileId}/rotate`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ quarter_turns: quarterTurns }),
+  });
+  if (!res.ok) throw new Error('사진을 돌리지 못했습니다.');
+  return res.json();
+}
+
 export async function renameFile(fileId, name) {
   const res = await apiFetch(`${API_BASE}/files/${fileId}/rename`, {
     method: 'PUT',

@@ -41,7 +41,7 @@ import {
   Trash2,
   Paperclip
 } from '../../utils/icons';
-import { getMediaPreviewUrl, downloadFileChunked, getFileDetail, renameFile, ensureMediaToken, clearMediaToken } from '../../api';
+import { getMediaPreviewUrl, downloadFileChunked, getFileDetail, renameFile, rotateFile, ensureMediaToken, clearMediaToken } from '../../api';
 import { useNoteEditor, BN_THEME, blocksToMarkdownTableSafe } from '../../hooks/useNoteEditor';
 import AttachExistingFileModal from '../editor/AttachExistingFileModal';
 import DocumentToolbar from '../editor/DocumentToolbar';
@@ -324,6 +324,41 @@ export default function PreviewWindow({
   const [renameError, setRenameError] = useState(null);
   const [isSavingName, setSavingName] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [isSavingTurn, setSavingTurn] = useState(false);
+
+  /**
+   * Keep the turn.
+   *
+   * Turning used to be a thing that happened to the screen and then unhappened
+   * — reopen the photograph and it was lying down again. This writes it into
+   * the file, which is what turning a photograph means to anyone not thinking
+   * about file formats. The picture is reloaded afterwards with a fresh
+   * address, because the old one is cached and now shows the old way up.
+   */
+  const keepRotation = async () => {
+    const turns = ((Math.round(rotation / 90) % 4) + 4) % 4;
+    if (!turns || isSavingTurn) return;
+    setSavingTurn(true);
+    try {
+      const updated = await rotateFile(resolvedFile.id, turns);
+      setRotation(0);
+      setFileDetail((current) => ({
+        ...current,
+        media_width: updated.width,
+        media_height: updated.height,
+        size_bytes: updated.size_bytes,
+      }));
+      clearMediaToken();
+      await ensureMediaToken();
+      setMediaUrl(`${getMediaPreviewUrl(resolvedFile.id)}&turned=${Date.now()}`);
+      onFileRenamed?.(resolvedFile.id, resolvedFile.name);
+    } catch (e) {
+      setRotateError(e.message || '사진을 돌리지 못했습니다.');
+    } finally {
+      setSavingTurn(false);
+    }
+  };
+  const [rotateError, setRotateError] = useState(null);
 
   const commitRename = async () => {
     const name = renameTo.trim();
@@ -673,12 +708,30 @@ export default function PreviewWindow({
                 className="window-action-btn icon-only"
                 onClick={(e) => {
                   e.stopPropagation();
+                  setRotateError(null);
                   setRotation(prev => (prev + 90) % 360);
                 }}
-                title="90도 회전"
+                title="90도 회전 (보기만)"
               >
                 <RotateCw size={13} />
               </button>
+              {/* Turning is otherwise a thing that unhappens: close the window
+                  and the photograph is lying down again. Offered only once it
+                  has been turned, because there is nothing to keep until then. */}
+              {rotation % 360 !== 0 && (
+                <button
+                  type="button"
+                  className="window-action-btn is-keep"
+                  disabled={isSavingTurn}
+                  onClick={(e) => { e.stopPropagation(); keepRotation(); }}
+                  title={rotateError || '돌린 방향을 원본에 저장합니다'}
+                >
+                  {isSavingTurn
+                    ? <Loader2 size={13} className="spin" />
+                    : <Check size={13} />}
+                  <span>{rotateError ? '실패' : '이대로 저장'}</span>
+                </button>
+              )}
               <button
                 type="button"
                 className="window-action-btn icon-only"
