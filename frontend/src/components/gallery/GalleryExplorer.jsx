@@ -5,7 +5,7 @@ import {
 import {
   listGalleryItems, getGallerySummary, getGalleryMap, getFileDownloadUrl,
   getFaceMatches, getThumbnailUrl, getFaceIndexStatus, getGalleryPath, getGalleryPlace,
-  listGalleryUploaders, listGalleryCameras,
+  listGalleryUploaders, listGalleryCameras, listGalleryFolders,
 } from '../../api';
 import GalleryGrid from './GalleryGrid';
 import GalleryLightbox from './GalleryLightbox';
@@ -180,11 +180,13 @@ function readUrlState() {
       kind: ['image', 'video'].includes(params.get('gkind')) ? params.get('gkind') : 'all',
       uploader: params.get('guploader') || '',
       camera: params.get('gcam') ? params.get('gcam').split('|').filter(Boolean) : [],
+      folder: params.get('gfolder') || '',
       placed: ['yes', 'no'].includes(params.get('gplaced')) ? params.get('gplaced') : '',
       q: params.get('gq') || '',
     };
   } catch (e) {
-    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: '', camera: [], placed: '', q: '' };
+    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: '',
+             camera: [], folder: '', placed: '', q: '' };
   }
 }
 
@@ -199,6 +201,8 @@ export default function GalleryExplorer({
   const [uploader, setUploader] = useState(initial.uploader);
   const [uploaders, setUploaders] = useState([]);
   const [cameras, setCameras] = useState([]);
+  const [folders, setFolders] = useState([]);
+  const [folder, setFolder] = useState(initial.folder);
   const [camera, setCamera] = useState(initial.camera);
   const [hasPlace, setHasPlace] = useState(initial.placed);
   const [queryText, setQueryText] = useState(initial.q);
@@ -269,10 +273,10 @@ export default function GalleryExplorer({
     if (!workspaceId || scopeRef.current !== filterScope) return;
     try {
       window.localStorage.setItem(filterScope, JSON.stringify({
-        year, month, kind, uploader, camera, hasPlace, q: queryText,
+        year, month, kind, uploader, camera, folder, hasPlace, q: queryText,
       }));
     } catch (e) { /* a browser that will not remember still works */ }
-  }, [filterScope, workspaceId, year, month, kind, uploader, camera, hasPlace, queryText]);
+  }, [filterScope, workspaceId, year, month, kind, uploader, camera, folder, hasPlace, queryText]);
 
   useEffect(() => {
     // The first arrival keeps whatever the address bar asked for — a link
@@ -291,6 +295,7 @@ export default function GalleryExplorer({
     setKind(saved?.kind ?? 'all');
     setUploader(saved?.uploader ?? '');
     setCamera(Array.isArray(saved?.camera) ? saved.camera : []);
+    setFolder(saved?.folder ?? '');
     setHasPlace(saved?.hasPlace ?? '');
     setQueryText(saved?.q ?? '');
     setPlace(null);
@@ -311,8 +316,9 @@ export default function GalleryExplorer({
   const filters = useMemo(() => ({
     q, kind, year, month, uploader: uploader || null,
     camera: camera.length ? camera.join('|') : null,
+    folder: folder || null,
     placed: hasPlace || null,
-  }), [q, kind, year, month, uploader, camera, hasPlace]);
+  }), [q, kind, year, month, uploader, camera, folder, hasPlace]);
 
   // The address bar carries the view, so a reload — or a link sent to
   // somebody — comes back to the same year in the same mode. Each change is
@@ -339,6 +345,7 @@ export default function GalleryExplorer({
       set('gkind', kind);
       set('guploader', uploader);
       set('gcam', camera.join('|'));
+      set('gfolder', folder);
       set('gplaced', hasPlace);
       set('gq', q);
       set('gphoto', openId);
@@ -353,7 +360,7 @@ export default function GalleryExplorer({
       if (first) window.history.replaceState({}, '', url);
       else window.history.pushState({}, '', url);
     } catch (e) { /* the view still works without the address bar agreeing */ }
-  }, [mode, year, month, kind, uploader, camera, hasPlace, q, openId]);
+  }, [mode, year, month, kind, uploader, camera, folder, hasPlace, q, openId]);
 
   /**
    * Going back inside the gallery.
@@ -390,6 +397,9 @@ export default function GalleryExplorer({
     listGalleryCameras(workspaceId)
       .then((data) => { if (!cancelled) setCameras(data.items || []); })
       .catch(() => { if (!cancelled) setCameras([]); });
+    listGalleryFolders(workspaceId)
+      .then((data) => { if (!cancelled) setFolders(data.items || []); })
+      .catch(() => { if (!cancelled) setFolders([]); });
     return () => { cancelled = true; };
   }, [workspaceId]);
 
@@ -671,7 +681,7 @@ export default function GalleryExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, faceSort, faceSearch?.face?.id]);
 
-  const activeFilters = [q, kind !== 'all', uploader, camera.length, hasPlace]
+  const activeFilters = [q, kind !== 'all', uploader, camera.length, folder, hasPlace]
     .filter(Boolean).length;
 
   // Everything currently narrowing the library, in words — so an empty screen
@@ -682,12 +692,13 @@ export default function GalleryExplorer({
     kind === 'image' ? '사진만' : kind === 'video' ? '영상만' : null,
     uploader ? uploaders.find((p) => p.id === uploader)?.name : null,
     camera.length ? (camera.length === 1 ? camera[0] : `카메라 ${camera.length}대`) : null,
+    folder ? folders.find((f) => f.id === folder)?.name : null,
     hasPlace === 'yes' ? '지도에 있는 것' : hasPlace === 'no' ? '위치 없는 것' : null,
   ].filter(Boolean);
 
   const clearFilters = () => {
     setYear(null); setMonth(null); setQueryText(''); setKind('all');
-    setUploader(''); setCamera([]); setHasPlace('');
+    setUploader(''); setCamera([]); setFolder(''); setHasPlace('');
   };
 
   const filterControls = (
@@ -761,6 +772,21 @@ export default function GalleryExplorer({
                   label: `${c.name} · ${c.count.toLocaleString()}`,
                 }))}
                 onChange={(next) => { setCamera(next); setPlace(null); }}
+              />
+            )}
+
+            {folders.length > 1 && (
+              <Dropdown
+                value={folder}
+                label="폴더로 거르기"
+                options={[
+                  { value: '', label: '폴더 전체' },
+                  ...folders.map((f) => ({
+                    value: f.id,
+                    label: `${f.name} · ${f.count.toLocaleString()}`,
+                  })),
+                ]}
+                onChange={(value) => { setFolder(value); setPlace(null); }}
               />
             )}
 

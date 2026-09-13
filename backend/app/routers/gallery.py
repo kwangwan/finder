@@ -100,8 +100,14 @@ def _apply_filters(
     uploader: Optional[uuid.UUID] = None,
     camera: Optional[str] = None,
     placed: Optional[str] = None,
+    folder: Optional[uuid.UUID] = None,
 ):
     """Everything the caller narrowed the library down by."""
+    # Which folder the photographs sit in. Who *uploaded* a photograph cannot
+    # be changed after the fact; which folder it is in can, by moving it —
+    # which makes this the practical way to say "my mother's trip".
+    if folder:
+        conditions.append(FileItem.folder_id == folder)
     if uploader:
         conditions.append(FileItem.created_by == uploader)
     # Names only. The box used to search camera makes and models as well, which
@@ -187,6 +193,41 @@ def _item(file_item: FileItem) -> dict:
 async def _require_member(db: AsyncSession, user: User, workspace_id: uuid.UUID) -> None:
     if not await access_service.is_workspace_member(db, user, workspace_id):
         raise HTTPException(status_code=403, detail="이 워크스페이스에 접근할 권한이 없습니다.")
+
+
+@router.get("/folders")
+async def gallery_folders(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user),
+):
+    """
+    The folders photographs are actually in, and how many each holds.
+
+    Only folders that hold some directly — a folder of documents is not a thing
+    to narrow a photo library by — and counted the same way the filter matches,
+    so the number beside a name is the number that comes back when it is
+    chosen.
+    """
+    await _require_member(db, current_user, workspace_id)
+    from app.models import Folder
+
+    rows = (await db.execute(
+        select(Folder.id, Folder.name, func.count(FileItem.id).label("count"))
+        .join(FileItem, FileItem.folder_id == Folder.id)
+        .where(and_(*_media_conditions(workspace_id, "all")))
+        .group_by(Folder.id, Folder.name)
+        .order_by(func.count(FileItem.id).desc())
+        .limit(200)
+    )).all()
+    loose = (await db.execute(
+        select(func.count(FileItem.id))
+        .where(and_(*_media_conditions(workspace_id, "all"), FileItem.folder_id.is_(None)))
+    )).scalar_one()
+    return {
+        "items": [{"id": str(r.id), "name": r.name, "count": r.count} for r in rows],
+        "unfiled_count": loose,
+    }
 
 
 @router.get("/cameras")
@@ -280,6 +321,7 @@ async def list_gallery_items(
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -299,7 +341,7 @@ async def list_gallery_items(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
         date_from=date_from, date_to=date_to, bbox=bbox, placed_only=placed_only,
-        uploader=uploader, camera=camera, placed=placed,
+        uploader=uploader, camera=camera, placed=placed, folder=folder,
     )
 
     total = (await db.execute(
@@ -335,6 +377,7 @@ async def gallery_summary(
     tz: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -352,7 +395,7 @@ async def gallery_summary(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=None, month=None,
-        date_from=None, date_to=None, bbox=None, placed_only=False, uploader=uploader, camera=camera, placed=placed,
+        date_from=None, date_to=None, bbox=None, placed_only=False, uploader=uploader, camera=camera, placed=placed, folder=folder,
     )
 
     local_taken = func.timezone(str(zone), func.coalesce(FileItem.taken_at, FileItem.created_at))
@@ -446,6 +489,7 @@ async def gallery_map(
     tz: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -465,7 +509,7 @@ async def gallery_map(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader, camera=camera, placed=placed,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader, camera=camera, placed=placed, folder=folder,
     )
 
     grid = _grid_size(zoom)
@@ -603,6 +647,7 @@ async def gallery_path(
     tz: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -646,7 +691,7 @@ async def gallery_path(
     conditions = _apply_filters(
         _media_conditions(workspace_id, kind),
         q=q, zone=zone, year=year, month=month,
-        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader, camera=camera, placed=placed,
+        date_from=None, date_to=None, bbox=bbox, placed_only=True, uploader=uploader, camera=camera, placed=placed, folder=folder,
     )
     total = (await db.execute(
         select(func.count(FileItem.id)).where(and_(*conditions))
@@ -693,6 +738,7 @@ async def gallery_place(
     page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -716,7 +762,7 @@ async def gallery_place(
         return _apply_filters(
             _media_conditions(workspace_id, kind),
             q=q, zone=zone, year=year, month=month,
-            date_from=from_day, date_to=to_day, bbox=None, placed_only=True, uploader=uploader, camera=camera, placed=placed,
+            date_from=from_day, date_to=to_day, bbox=None, placed_only=True, uploader=uploader, camera=camera, placed=placed, folder=folder,
         )
 
     conditions = base(date_from, date_to)
@@ -789,6 +835,7 @@ async def gallery_neighbours(
     limit: int = Query(24, ge=1, le=100),
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -1017,6 +1064,7 @@ async def faces_like_this(
     sort: str = Query("newest", pattern="^(newest|oldest|closest)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    folder: Optional[uuid.UUID] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -1057,7 +1105,7 @@ async def faces_like_this(
                     _media_conditions(workspace_id, kind),
                     q=q, zone=_zone(tz), year=year, month=month,
                     date_from=None, date_to=None, bbox=None, placed_only=False,
-                    uploader=uploader, camera=camera, placed=placed,
+                    uploader=uploader, camera=camera, placed=placed, folder=folder,
                 ), FileItem.id.in_(list(best.keys()))))
             )).all()
         }

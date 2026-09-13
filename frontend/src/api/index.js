@@ -2200,6 +2200,14 @@ export async function getGalleryPlace(workspaceId, latitude, longitude, filters 
   return res.json();
 }
 
+export async function listGalleryFolders(workspaceId) {
+  const res = await apiFetch(`${API_BASE}/gallery/folders?${galleryParams(workspaceId)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error('폴더 목록을 불러오지 못했습니다.');
+  return res.json();
+}
+
 export async function listGalleryCameras(workspaceId) {
   const res = await apiFetch(`${API_BASE}/gallery/cameras?${galleryParams(workspaceId)}`, {
     headers: authHeaders(),
