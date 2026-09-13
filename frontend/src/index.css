@@ -6345,6 +6345,7 @@ input.bd-name:focus {
 
 .ui-dd-menu > span { display: flex; flex-direction: column; }
 
+.ui-dd-menu button:disabled { opacity: 0.42; cursor: default; }
 .ui-dd-menu button {
   display: flex;
   align-items: center;

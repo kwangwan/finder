@@ -78,8 +78,9 @@ function MultiPick({ label, allLabel, options, values, onChange }) {
                 role="option"
                 aria-selected={values.includes(o.value)}
                 className={values.includes(o.value) ? 'on' : ''}
-                title={o.title}
-                onClick={() => toggle(o.value)}
+                title={o.disabledReason || o.title}
+                disabled={!!o.disabledReason}
+                onClick={() => { if (!o.disabledReason) toggle(o.value); }}
               >
                 <span>{o.label}</span>
               </button>
@@ -119,6 +120,11 @@ function LonePick({ label, hint }) {
  * so it stops after a few levels and the whole path is there to hover instead.
  */
 const INDENT_LIMIT = 4;
+
+/** Is this folder inside that one? Read off the path, which is built of names. */
+function isInside(folder, ancestor) {
+  return folder.path.startsWith(`${ancestor.path} / `);
+}
 
 function folderOption(folder) {
   const step = Math.min(folder.depth, INDENT_LIMIT);
@@ -807,8 +813,33 @@ export default function GalleryExplorer({
                 label="폴더"
                 allLabel="폴더 전체"
                 values={folder}
-                options={folders.map(folderOption)}
-                onChange={(next) => { setFolder(next); setPlace(null); }}
+                options={folders.map((f) => {
+                  const covering = folders.find(
+                    (other) => folder.includes(other.id) && isInside(f, other),
+                  );
+                  return {
+                    ...folderOption(f),
+                    // A folder already comes with everything inside it, so a
+                    // folder inside a chosen one is not a choice left to make.
+                    // Offered but not pressable, and saying why: hiding it
+                    // would make the tree change shape as it was used.
+                    disabledReason: covering
+                      ? `이미 '${covering.name}' 에 포함되어 있습니다`
+                      : undefined,
+                  };
+                })}
+                onChange={(next) => {
+                  // Choosing a folder makes any of its children redundant.
+                  const kept = next.filter((id) => {
+                    const chosen = folders.find((f) => f.id === id);
+                    return !chosen || !next.some((other) => {
+                      const above = folders.find((f) => f.id === other);
+                      return above && above.id !== id && isInside(chosen, above);
+                    });
+                  });
+                  setFolder(kept);
+                  setPlace(null);
+                }}
               />
             )}
 
