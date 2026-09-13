@@ -32,7 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 def _faces_for_image(data: bytes):
-    return face_service.dedupe_faces(face_service.faces_in_image_bytes(data))
+    # No folding by likeness here. Every face in one photograph is its own
+    # face — the detector has already dropped overlapping boxes — and folding
+    # them removed one of two children sitting together.
+    return face_service.faces_in_image_bytes(data)
 
 
 def _faces_for_video(source: str):

@@ -364,17 +364,31 @@ def faces_in_video_file(path: str, max_frames: int = None) -> List[dict]:
 
 def dedupe_faces(faces: List[dict], threshold: float = float(os.getenv("FACE_SAME_FILE", "0.45"))) -> List[dict]:
     """
-    One entry per person per file, keeping the clearest sighting of them.
+    One entry per person per clip, keeping the clearest sighting of them.
 
-    Cosine similarity on unit vectors, so this is a dot product. The threshold
-    is deliberately loose: within a single clip, two faces this close are the
-    same person at two moments, and keeping both would make that person count
-    twice in every search that follows.
+    For a film only. Thirty frames of one person is that person thirty times,
+    and keeping them all would make them count thirty times in every search
+    that follows — so faces this close *at different moments* are folded into
+    the clearest one.
+
+    Two faces found in the *same* moment are never folded together, however
+    alike. They are two faces standing in two places in one picture, which
+    makes them two people by construction; the detector has already removed
+    overlapping boxes of a single face. This is not a detail: applied to a
+    still photograph, folding by likeness quietly deleted one of two babies
+    sitting side by side, because babies resemble each other more than the
+    threshold allows for — and it is a still photograph's second face that is
+    most worth having.
     """
     kept: List[dict] = []
     for face in sorted(faces, key=lambda f: f["score"], reverse=True):
         vector = np.array(face["embedding"], dtype=np.float32)
-        if any(float(np.dot(vector, np.array(k["embedding"], dtype=np.float32))) >= threshold for k in kept):
+        same_moment = face.get("frame_time")
+        if any(
+            k.get("frame_time") != same_moment
+            and float(np.dot(vector, np.array(k["embedding"], dtype=np.float32))) >= threshold
+            for k in kept
+        ):
             continue
         kept.append(face)
     return kept
