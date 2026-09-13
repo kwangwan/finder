@@ -469,7 +469,7 @@ export default function GalleryExplorer({
     setOpenId(null);
     setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0, loading: true });
     try {
-      const data = await getFaceMatches(workspaceId, face.id, 1, PAGE_SIZE, how);
+      const data = await getFaceMatches(workspaceId, face.id, 1, PAGE_SIZE, how, filters);
       setFaceSearch({
         face, fromItem, items: data.items, total: data.total_count,
         page: data.page, totalPages: data.total_pages, loading: false,
@@ -478,13 +478,13 @@ export default function GalleryExplorer({
       setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0,
                       loading: false, error: e.message });
     }
-  }, [workspaceId, faceSort]);
+  }, [workspaceId, faceSort, filters]);
 
   const loadMoreFaces = useCallback(async () => {
     if (!faceSearch || faceSearch.loading || faceSearch.page >= faceSearch.totalPages) return;
     setFaceSearch((s) => ({ ...s, loading: true }));
     try {
-      const data = await getFaceMatches(workspaceId, faceSearch.face.id, faceSearch.page + 1, PAGE_SIZE, faceSort);
+      const data = await getFaceMatches(workspaceId, faceSearch.face.id, faceSearch.page + 1, PAGE_SIZE, faceSort, filters);
       setFaceSearch((s) => ({
         ...s, items: [...s.items, ...data.items], page: data.page,
         totalPages: data.total_pages, loading: false,
@@ -492,7 +492,7 @@ export default function GalleryExplorer({
     } catch (e) {
       setFaceSearch((s) => ({ ...s, loading: false }));
     }
-  }, [workspaceId, faceSearch, faceSort]);
+  }, [workspaceId, faceSearch, faceSort, filters]);
 
   useEffect(() => {
     // Always, on the map. The line is how the map says "in this order" — a
@@ -656,6 +656,20 @@ export default function GalleryExplorer({
       ) : <span>&nbsp;</span>}
     </div>
   );
+
+  // Changing what is being looked for while this person's photographs are on
+  // screen asks the same question again, narrowed. Before, the filters sat
+  // there doing nothing, which reads as a filter that is broken.
+  const askedFaceRef = useRef(null);
+  useEffect(() => {
+    if (!faceSearch?.face) { askedFaceRef.current = null; return; }
+    const asked = `${faceSearch.face.id}:${JSON.stringify(filters)}:${faceSort}`;
+    if (askedFaceRef.current === asked) return;
+    if (askedFaceRef.current === null) { askedFaceRef.current = asked; return; }
+    askedFaceRef.current = asked;
+    searchByFace(faceSearch.face, faceSearch.fromItem, faceSort);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, faceSort, faceSearch?.face?.id]);
 
   const activeFilters = [q, kind !== 'all', uploader, camera.length, hasPlace]
     .filter(Boolean).length;
