@@ -60,34 +60,30 @@ export default function GalleryLightbox({
   const imageRef = useRef(null);
   const stageRef = useRef(null);
   const videoRef = useRef(null);
-  const videoHolderRef = useRef(null);
   // Which sighting of a face in a film is being looked at. A film's faces are
   // each at a moment, so one of them is on screen at a time — the one whose
   // moment the film has been sent to.
   const [shownFace, setShownFace] = useState(null);
-  // Where the film actually is inside its box. It is fitted by `contain`, so
-  // the picture is letterboxed and the element's rectangle is not the
-  // picture's rectangle — a box placed as a percentage of the element lands
-  // beside the face rather than on it, by however much the black bars are.
   const [videoFrame, setVideoFrame] = useState(null);
 
+  // Where the picture actually is inside the <video>. The element is filled by
+  // `contain`, so the picture is letterboxed and the element's rectangle is
+  // not the picture's — a box placed as a percentage of the element misses by
+  // however thick the black bars are.
+  //
+  // The box is drawn *inside the player*, so these offsets and the box are in
+  // one coordinate space. Measuring across two nested wrappers was the earlier
+  // mistake: the numbers were each correct and belonged to different frames.
   const measureVideo = useCallback(() => {
     const video = videoRef.current;
-    const holder = videoHolderRef.current;
-    if (!video || !holder || !video.videoWidth || !video.videoHeight) return;
-    // Measured against the holder the box is drawn in, not against whatever
-    // the video's offsetParent happens to be — the player wraps it in a
-    // positioned div of its own, so offsetLeft/offsetTop are in that div's
-    // coordinates and putting them on a box in this one lands it somewhere
-    // else entirely. Rectangles are in one shared space and cannot disagree.
-    const inner = video.getBoundingClientRect();
-    const outer = holder.getBoundingClientRect();
-    const scale = Math.min(inner.width / video.videoWidth, inner.height / video.videoHeight);
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    const scale = Math.min(video.clientWidth / video.videoWidth,
+                           video.clientHeight / video.videoHeight);
     const width = video.videoWidth * scale;
     const height = video.videoHeight * scale;
     setVideoFrame({
-      left: inner.left - outer.left + (inner.width - width) / 2,
-      top: inner.top - outer.top + (inner.height - height) / 2,
+      left: video.offsetLeft + (video.clientWidth - width) / 2,
+      top: video.offsetTop + (video.clientHeight - height) / 2,
       width,
       height,
     });
@@ -237,7 +233,7 @@ export default function GalleryLightbox({
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         {isVideo ? (
-          <div className="gal-light-video" ref={videoHolderRef}>
+          <div className="gal-light-video">
             <VideoPlayer
               src={src}
               file={{ id: item.id, name: item.name, size_bytes: item.size_bytes }}
@@ -246,30 +242,25 @@ export default function GalleryLightbox({
               onLoaded={() => { retriedRef.current = false; setLoaded(true); }}
               onDownload={() => onDownload?.(item)}
               onElement={(node) => { videoRef.current = node; }}
+              overlay={shownFace && videoFrame ? (
+                <div className="gal-face-pane is-on-video" style={videoFrame}>
+                  <button
+                    type="button"
+                    className="gal-face-box"
+                    style={{
+                      left: `${shownFace.box[0] * 100}%`,
+                      top: `${shownFace.box[1] * 100}%`,
+                      width: `${shownFace.box[2] * 100}%`,
+                      height: `${shownFace.box[3] * 100}%`,
+                    }}
+                    onClick={(e) => { e.stopPropagation(); onSearchFace?.(shownFace, item); }}
+                    title="이 사람이 나온 사진 찾기"
+                  >
+                    <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
+                  </button>
+                </div>
+              ) : null}
             />
-            {/* The face the film has been sent to, drawn where it is. A film
-                cannot carry its faces the way a photograph does — they are at
-                moments, not in one picture — so one is shown at a time and
-                pressing it asks the same question pressing a face on a
-                photograph asks. */}
-            {shownFace && videoFrame && (
-              <div className="gal-face-pane is-on-video" style={videoFrame}>
-                <button
-                  type="button"
-                  className="gal-face-box"
-                  style={{
-                    left: `${shownFace.box[0] * 100}%`,
-                    top: `${shownFace.box[1] * 100}%`,
-                    width: `${shownFace.box[2] * 100}%`,
-                    height: `${shownFace.box[3] * 100}%`,
-                  }}
-                  onClick={(e) => { e.stopPropagation(); onSearchFace?.(shownFace, item); }}
-                  title="이 사람이 나온 사진 찾기"
-                >
-                  <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
-                </button>
-              </div>
-            )}
           </div>
         ) : (
           <>

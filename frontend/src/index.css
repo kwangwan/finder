@@ -8100,6 +8100,7 @@ input.bd-name:focus {
 /* Over a film rather than a photograph: the same box, but it must sit above
    the player's own controls layer to be pressable at all. */
 .gal-face-pane.is-on-video { position: absolute; z-index: 3; pointer-events: none; }
+
 .gal-face-pane.is-on-video .gal-face-box { pointer-events: auto; }
 
 .gal-light-people { display: inline-flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }

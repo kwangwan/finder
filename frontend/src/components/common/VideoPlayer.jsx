@@ -19,7 +19,11 @@ export default function VideoPlayer({
   style = {},
   // Handed the <video> itself, so a caller can send it to a moment — the one
   // where a particular face was found, say.
-  onElement = null
+  onElement = null,
+  // Drawn inside this player, over the video. Anything positioned here shares
+  // the video's own coordinates, which is the only way to put a box on a face
+  // and have it land there.
+  overlay = null
 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
@@ -159,6 +163,8 @@ export default function VideoPlayer({
           }}
         />
       )}
+
+      {overlay}
 
       {/* Main HTML5 Video Element */}
       <video
