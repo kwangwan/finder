@@ -389,7 +389,10 @@ def faces_in_video(source) -> List[dict]:
                 turn = _which_way_up(image)
                 if turn is None:
                     continue
-            faces.extend(faces_in_image(_turned(image, turn), at))
+            found = faces_in_image(_turned(image, turn), at)
+            for face in found:
+                face["frame_turn"] = turn
+            faces.extend(found)
             if len(faces) > MAX_FACES_PER_VIDEO:
                 break
         return faces

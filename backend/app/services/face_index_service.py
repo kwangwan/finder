@@ -129,6 +129,7 @@ async def record_faces(db: AsyncSession, file_item: FileItem, found: list) -> in
             box_w=face["box"][2], box_h=face["box"][3],
             det_score=face["score"],
             frame_time=face.get("frame_time"),
+            frame_turn=int(face.get("frame_turn") or 0),
         ))
     await db.execute(
         update(FileItem)

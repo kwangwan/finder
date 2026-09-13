@@ -910,12 +910,13 @@ async def face_crop(
         url = await run_in_threadpool(s3_service.internal_presigned_get_url, file_item.s3_key)
         # The turn is not recorded per face, so it is worked out again from the
         # frame itself — the same way the sweep decided it.
-        raw = await run_in_threadpool(face_service.frame_at, url or file_item.s3_key, face.frame_time, 0)
-        if raw is not None:
-            turn = await run_in_threadpool(face_service.which_way_up, raw)
-            if turn:
-                raw = await run_in_threadpool(face_service._turned, raw, turn)
-        image = raw
+        # The turn is the one the sweep settled on for this film. Working it
+        # out again here, frame by frame, gave different answers for different
+        # faces of the same film — some cut-outs came back lying on their side.
+        image = await run_in_threadpool(
+            face_service.frame_at, url or file_item.s3_key,
+            face.frame_time, int(face.frame_turn or 0),
+        )
     else:
         data = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
         image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
@@ -960,14 +961,35 @@ async def faces_in_item(
     from app.models import FaceSignature
 
     file_item = await db.get(FileItem, file_id)
+    from app.services import face_index_service
+
     rows = (await db.execute(
         select(FaceSignature).where(FaceSignature.file_id == file_id)
         # A film's faces are moments; they belong in the order they happen.
         # A photograph's have no time, so they fall back to left-to-right.
         .order_by(FaceSignature.frame_time.nulls_first(), FaceSignature.box_x)
     )).scalars().all()
+    # Folded into people. A film shows the same person at four moments and
+    # says "four" — which is four sightings, not four people. They are grouped
+    # here rather than merged at index time because the moments are worth
+    # keeping: each one is a place in the film you can be sent to.
+    people = []
+    for row in rows:
+        vector = np.asarray(row.embedding, dtype=np.float32)
+        for group in people:
+            if float(np.dot(vector, group["_vector"])) >= face_index_service.SAME_PERSON_SIMILARITY:
+                group["faces"].append(row.to_dict())
+                break
+        else:
+            people.append({"_vector": vector, "faces": [row.to_dict()]})
+    for group in people:
+        group.pop("_vector", None)
+        # The clearest sighting speaks for the person.
+        group["id"] = max(group["faces"], key=lambda f: f["score"] or 0)["id"]
+
     return {
         "faces": [r.to_dict() for r in rows],
+        "people": people,
         "scanned": bool(file_item and file_item.faces_scanned_at),
     }
 

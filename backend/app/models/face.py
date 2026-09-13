@@ -76,6 +76,10 @@ class FaceSignature(Base):
     box_h = Column(Float, nullable=False)
     det_score = Column(Float, nullable=True)
     frame_time = Column(Float, nullable=True)
+    # How far the film had to be turned before this face was the right way up.
+    # Kept so that cutting the face out later turns it the same way, rather
+    # than working it out again from a frame that may show nobody.
+    frame_turn = Column(Integer, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
@@ -91,4 +95,5 @@ class FaceSignature(Base):
             "box": [self.box_x, self.box_y, self.box_w, self.box_h],
             "score": self.det_score,
             "frame_time": self.frame_time,
+            "frame_turn": self.frame_turn,
         }

@@ -56,6 +56,10 @@ export default function GalleryLightbox({
   const idleTimer = useRef(null);
   const retriedRef = useRef(false);
   const [faces, setFaces] = useState([]);
+  const [people, setPeople] = useState([]);
+  // A film can hold a great many moments, so the people in it live behind a
+  // button rather than in a strip that grows with the film's length.
+  const [isCastOpen, setCastOpen] = useState(false);
   const [scanned, setScanned] = useState(true);
   const [frame, setFrame] = useState(null);
   const imageRef = useRef(null);
@@ -101,12 +105,15 @@ export default function GalleryLightbox({
     if (!item) return undefined;
     let cancelled = false;
     setFaces([]);
+    setPeople([]);
+    setCastOpen(false);
     setScanned(true);
     setShownFace(null);
     getFacesInItem(item.id)
       .then((data) => {
         if (cancelled) return;
         setFaces(data.faces || []);
+        setPeople(data.people || []);
         setScanned(data.scanned !== false);
       })
       .catch(() => { if (!cancelled) setFaces([]); });
@@ -271,43 +278,56 @@ export default function GalleryLightbox({
         </button>
       )}
 
-      {isVideo && faces.length > 0 && (
-        /* Everyone this film has in it, cut out of the moment each was found.
-           A box drawn over a playing film is a box over a picture that has
+      {isVideo && isCastOpen && people.length > 0 && (
+        /* Everyone this film has in it, each cut out of the moment they were
+           found. A box drawn over a playing film points at a picture that has
            already moved on; a face is better handed over as a face. Pressing
-           one asks for that person; pressing the time below it sends the film
-           there. */
-        <div className="gal-light-cast">
-          {faces.map((face) => (
-            <div key={face.id} className={`gal-cast-one ${shownFace?.id === face.id ? 'is-on' : ''}`}>
-              <button
-                type="button"
-                className="gal-cast-face"
-                onClick={() => onSearchFace?.(face, item)}
-                title="이 사람이 나온 사진 찾기"
-              >
-                <img src={getFaceCropUrl(face.id)} alt="" loading="lazy" />
-              </button>
-              <button
-                type="button"
-                className="gal-cast-at"
-                title="이 사람이 나온 순간으로"
-                onClick={() => {
-                  setShownFace(face);
-                  const video = videoRef.current;
-                  if (video && face.frame_time != null) {
-                    video.pause();
-                    video.currentTime = face.frame_time;
-                  }
-                }}
-              >
-                {face.frame_time == null
-                  ? '—'
-                  : `${Math.floor(face.frame_time / 60)}:${String(Math.floor(face.frame_time % 60)).padStart(2, '0')}`}
-              </button>
-            </div>
-          ))}
-        </div>
+           one asks for that person; pressing a moment sends the film there. */
+        <aside className="gal-cast" onClick={(e) => e.stopPropagation()}>
+          <header>
+            <strong>이 영상에 나온 사람</strong>
+            <span>{people.length}명</span>
+            <button type="button" onClick={() => setCastOpen(false)} aria-label="닫기">
+              <X size={14} />
+            </button>
+          </header>
+          <div className="gal-cast-list">
+            {people.map((person) => (
+              <div key={person.id} className="gal-cast-one">
+                <button
+                  type="button"
+                  className="gal-cast-face"
+                  onClick={() => onSearchFace?.(person.faces[0], item)}
+                  title="이 사람이 나온 사진 찾기"
+                >
+                  <img src={getFaceCropUrl(person.id)} alt="" loading="lazy" />
+                </button>
+                <div className="gal-cast-when">
+                  {person.faces.map((face) => (
+                    <button
+                      key={face.id}
+                      type="button"
+                      className={shownFace?.id === face.id ? 'is-on' : ''}
+                      title="이 순간으로"
+                      onClick={() => {
+                        setShownFace(face);
+                        const video = videoRef.current;
+                        if (video && face.frame_time != null) {
+                          video.pause();
+                          video.currentTime = face.frame_time;
+                        }
+                      }}
+                    >
+                      {face.frame_time == null
+                        ? '—'
+                        : `${Math.floor(face.frame_time / 60)}:${String(Math.floor(face.frame_time % 60)).padStart(2, '0')}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
       )}
 
       <footer className="gal-light-foot">
@@ -338,10 +358,15 @@ export default function GalleryLightbox({
                 <Users size={12} /> {faces.length}명
               </span>
             )}
-            {faces.length > 0 && isVideo && (
-              <span className="gal-light-people">
-                <Users size={12} /> {faces.length}명
-              </span>
+            {isVideo && people.length > 0 && (
+              <button
+                type="button"
+                className="gal-light-cast-open"
+                onClick={() => setCastOpen((v) => !v)}
+                title="이 영상에 나온 사람 보기"
+              >
+                <Users size={12} /> {people.length}명
+              </button>
             )}
             {!scanned && (
               <span title="이 사진은 아직 얼굴을 찾기 전입니다">

@@ -396,6 +396,9 @@ async def init_db():
         # nothing was found, so an empty photograph is not examined forever);
         # the index is the same kind the document search already uses.
         for name, ddl in (
+            ("kb_face_signatures.frame_turn",
+             "ALTER TABLE kb_face_signatures ADD COLUMN IF NOT EXISTS "
+             "frame_turn INTEGER NOT NULL DEFAULT 0"),
             ("kb_files.faces_scanned_at",
              "ALTER TABLE kb_files ADD COLUMN IF NOT EXISTS faces_scanned_at TIMESTAMPTZ"),
             ("idx_faces_embedding_hnsw",
