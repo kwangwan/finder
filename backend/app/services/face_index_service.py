@@ -64,6 +64,37 @@ async def _looking(fn, *args):
     return await asyncio.get_running_loop().run_in_executor(face_service.cv_pool, fn, *args)
 
 
+# How long one file may take before it is given up on.
+#
+# A six-gigabyte film read over the network can stall on a seek with nothing
+# to say for itself, and the sweep then waits on it forever. Before, it waited
+# on the whole batch too: nothing in a batch was written until every file in it
+# had finished, so one stuck film froze the visible progress of eleven others
+# and held their work unwritten. Each file now finishes on its own, and none
+# may take longer than this.
+FILE_TIMEOUT = float(os.getenv("FACE_FILE_TIMEOUT", "420"))
+
+
+async def _look_and_record(file_item: FileItem) -> int:
+    """One file, looked at and written down, on its own."""
+    try:
+        found = await asyncio.wait_for(find_faces(file_item), timeout=FILE_TIMEOUT)
+    except asyncio.TimeoutError:
+        # Marked as looked at all the same. A file that cannot be read in seven
+        # minutes will not be readable in seven more, and leaving it unmarked
+        # means the sweep picks it up again on every pass and stops there.
+        logger.warning("[Faces] %s took too long, giving up on it", file_item.name)
+        found = []
+    except Exception as e:
+        logger.warning("[Faces] %s could not be examined: %s", file_item.name, e)
+        found = []
+
+    async with AsyncSessionLocal() as db:
+        written = await record_faces(db, file_item, found)
+        await db.commit()
+    return written
+
+
 async def find_faces(file_item: FileItem) -> list:
     """
     Look at one file and come back with the faces in it.
@@ -163,7 +194,8 @@ async def sweep(batch_size: int = 8, limit: Optional[int] = None, workspace_id=N
     Its own sessions, one per batch, so a long sweep never holds a connection
     open for an hour and a failure costs one batch rather than the run.
 
-    Three sessions rather than one, and that division is the point. Choosing a
+    Two sessions rather than one for the choosing and the slow part, and then
+    one small one per file for the writing — that division is the point. Choosing a
     batch is a read; fetching and decoding it takes minutes; writing it down is
     a write. Done in one session the read's transaction stays open across the
     whole minute, which means a lock held on the files table for a minute —
@@ -204,13 +236,10 @@ async def sweep(batch_size: int = 8, limit: Optional[int] = None, workspace_id=N
         # megabytes and finding the faces in it takes about fifty milliseconds.
         # Fetched several at a time, the sweep stops being a queue of downloads
         # and becomes what it should be, which is the decoder working flat out.
-        results = await asyncio.gather(*(find_faces(f) for f in batch))
-
-        async with AsyncSessionLocal() as db:
-            for file_item, found in zip(batch, results):
-                faces += await record_faces(db, file_item, found)
-                scanned += 1
-            await db.commit()
+        results = await asyncio.gather(*(_look_and_record(f) for f in batch))
+        for found in results:
+            faces += found
+            scanned += 1
         await asyncio.sleep(0)   # let the rest of the app breathe between batches
 
     return {
