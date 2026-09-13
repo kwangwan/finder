@@ -61,6 +61,10 @@ export default function GalleryLightbox({
   const imageRef = useRef(null);
   const stageRef = useRef(null);
   const videoRef = useRef(null);
+  // Held through a callback that does not change between renders. An inline
+  // one is a new function each time, and React answers that by handing back
+  // null before the new one is attached.
+  const holdVideo = useCallback((node) => { videoRef.current = node; }, []);
   // Which sighting of a face in a film is being looked at. A film's faces are
   // each at a moment, so one of them is on screen at a time — the one whose
   // moment the film has been sent to.
