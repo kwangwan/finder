@@ -283,6 +283,44 @@ def _keyframes_spread(container, stream, duration: float, cap: int):
         yield frame
 
 
+# How a film is turned before it is looked at.
+#
+# A phone shoots portrait by writing a landscape picture plus "turn this a
+# quarter". Players obey; a decoder hands you the picture as written. So a
+# portrait film arrives on its side — faces lying sideways, which the detector
+# is poor at, and boxes in coordinates nobody who watches the film would
+# recognise. That is both halves of the same bug: few faces found, and the ones
+# found drawn in the wrong place at the wrong size.
+#
+# The turn is written in a display matrix this build of the library will not
+# read back. So it is settled by trying: look at one frame each way and keep
+# the way that finds faces. Upright faces are found far more readily than
+# sideways ones, which makes the detector itself the best available reader of
+# the matrix. Decided once per film, from the first frame that shows anybody.
+_TURNS = (0, 90, 270, 180)
+
+
+def _turned(image: np.ndarray, turn: int) -> np.ndarray:
+    if turn == 90:
+        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+    if turn == 270:
+        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    if turn == 180:
+        return cv2.rotate(image, cv2.ROTATE_180)
+    return image
+
+
+def _which_way_up(image: np.ndarray) -> Optional[int]:
+    """The turn that finds the most face, or nothing if no turn finds any."""
+    best, best_turn = 0.0, None
+    for turn in _TURNS:
+        found = faces_in_image(_turned(image, turn))
+        weight = sum(f["score"] for f in found)
+        if weight > best:
+            best, best_turn = weight, turn
+    return best_turn
+
+
 def faces_in_video(source) -> List[dict]:
     """
     Every face across a film, at the moments the film itself is built from.
@@ -335,6 +373,7 @@ def faces_in_video(source) -> List[dict]:
         )
 
         faces: List[dict] = []
+        turn = None
         for frame in frames:
             try:
                 image = frame.to_ndarray(format="bgr24")
@@ -343,7 +382,14 @@ def faces_in_video(source) -> List[dict]:
             at = None
             if frame.pts is not None and stream.time_base:
                 at = round(float(frame.pts * stream.time_base), 2)
-            faces.extend(faces_in_image(image, at))
+            if turn is None:
+                # Still deciding. Whichever way up finds somebody is the way
+                # this film is meant to be watched; until one does, nothing is
+                # settled and the frame is simply taken as it came.
+                turn = _which_way_up(image)
+                if turn is None:
+                    continue
+            faces.extend(faces_in_image(_turned(image, turn), at))
             if len(faces) > MAX_FACES_PER_VIDEO:
                 break
         return faces

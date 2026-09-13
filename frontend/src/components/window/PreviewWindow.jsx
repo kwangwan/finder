@@ -772,6 +772,13 @@ export default function PreviewWindow({
             </button>
           </div>
 
+        </div>
+      </div>
+
+      {/* Outside the header, deliberately. Inside it, this inherited the drag
+          handle's whole manner — text that cannot be selected, a grab cursor,
+          and a mousedown that moved the window instead of starting a
+          selection. A dialog is not part of the title bar. */}
       {(isRenaming || showAbout) && (
         <div
           className="window-dialog-back"
@@ -827,8 +834,6 @@ export default function PreviewWindow({
           </div>
         </div>
       )}
-        </div>
-      </div>
 
       {/* What this file is joined to — the documents holding it, what it
           holds, and the 할 일 it belongs to. Above the body so a connection is

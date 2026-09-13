@@ -2839,6 +2839,7 @@ h1, h2, h3, h4, h5, h6,
 
 /* ── 창 안의 작은 대화상자 ─────────────────────────────────────────────── */
 .window-dialog-back {
+  cursor: default;
   position: absolute;
   inset: 0;
   z-index: 40;
@@ -2849,6 +2850,11 @@ h1, h2, h3, h4, h5, h6,
   background: rgba(0, 0, 0, 0.4);
 }
 .window-dialog {
+  /* Its own manners, whatever it is nested in: text here is for reading and
+     copying, not for dragging a window by. */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: default;
   width: min(340px, 100%);
   max-height: 100%;
   display: flex;

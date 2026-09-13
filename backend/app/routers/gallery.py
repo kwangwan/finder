@@ -883,7 +883,9 @@ async def faces_in_item(
     file_item = await db.get(FileItem, file_id)
     rows = (await db.execute(
         select(FaceSignature).where(FaceSignature.file_id == file_id)
-        .order_by(FaceSignature.box_x)
+        # A film's faces are moments; they belong in the order they happen.
+        # A photograph's have no time, so they fall back to left-to-right.
+        .order_by(FaceSignature.frame_time.nulls_first(), FaceSignature.box_x)
     )).scalars().all()
     return {
         "faces": [r.to_dict() for r in rows],
