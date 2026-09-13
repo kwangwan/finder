@@ -60,6 +60,7 @@ export default function GalleryLightbox({
   const imageRef = useRef(null);
   const stageRef = useRef(null);
   const videoRef = useRef(null);
+  const videoHolderRef = useRef(null);
   // Which sighting of a face in a film is being looked at. A film's faces are
   // each at a moment, so one of them is on screen at a time — the one whose
   // moment the film has been sent to.
@@ -72,14 +73,21 @@ export default function GalleryLightbox({
 
   const measureVideo = useCallback(() => {
     const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) return;
-    const scale = Math.min(video.clientWidth / video.videoWidth,
-                           video.clientHeight / video.videoHeight);
+    const holder = videoHolderRef.current;
+    if (!video || !holder || !video.videoWidth || !video.videoHeight) return;
+    // Measured against the holder the box is drawn in, not against whatever
+    // the video's offsetParent happens to be — the player wraps it in a
+    // positioned div of its own, so offsetLeft/offsetTop are in that div's
+    // coordinates and putting them on a box in this one lands it somewhere
+    // else entirely. Rectangles are in one shared space and cannot disagree.
+    const inner = video.getBoundingClientRect();
+    const outer = holder.getBoundingClientRect();
+    const scale = Math.min(inner.width / video.videoWidth, inner.height / video.videoHeight);
     const width = video.videoWidth * scale;
     const height = video.videoHeight * scale;
     setVideoFrame({
-      left: video.offsetLeft + (video.clientWidth - width) / 2,
-      top: video.offsetTop + (video.clientHeight - height) / 2,
+      left: inner.left - outer.left + (inner.width - width) / 2,
+      top: inner.top - outer.top + (inner.height - height) / 2,
       width,
       height,
     });
@@ -87,9 +95,21 @@ export default function GalleryLightbox({
 
   useEffect(() => {
     if (!shownFace) return undefined;
+    const video = videoRef.current;
     measureVideo();
-    window.addEventListener('resize', measureVideo);
-    return () => window.removeEventListener('resize', measureVideo);
+    // Again once the film has actually arrived at the moment and after any
+    // reflow: the size is not known until there is a picture.
+    const again = () => measureVideo();
+    window.addEventListener('resize', again);
+    video?.addEventListener('seeked', again);
+    video?.addEventListener('loadedmetadata', again);
+    const timer = window.setTimeout(again, 120);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('resize', again);
+      video?.removeEventListener('seeked', again);
+      video?.removeEventListener('loadedmetadata', again);
+    };
   }, [shownFace, measureVideo]);
 
   // A fresh address for a picture whose token has run out — the same recovery
@@ -217,7 +237,7 @@ export default function GalleryLightbox({
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         {isVideo ? (
-          <div className="gal-light-video">
+          <div className="gal-light-video" ref={videoHolderRef}>
             <VideoPlayer
               src={src}
               file={{ id: item.id, name: item.name, size_bytes: item.size_bytes }}
@@ -355,9 +375,7 @@ export default function GalleryLightbox({
                       if (video && face.frame_time != null) {
                         video.pause();
                         video.currentTime = face.frame_time;
-                        // The size is known once there is a picture; asking
-                        // before that gives zeroes.
-                        window.setTimeout(measureVideo, 60);
+                        // The rest is handled by the `seeked` listener.
                       }
                     }}
                   >
