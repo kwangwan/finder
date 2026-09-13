@@ -977,6 +977,14 @@ async def faces_in_item(
     for row in rows:
         vector = np.asarray(row.embedding, dtype=np.float32)
         for group in people:
+            # Never two faces of one moment. They stand in two places in one
+            # picture, which makes them two people however alike they look —
+            # and in a family library people do look alike; two relatives in
+            # one frame measured 0.54 against each other. Without this the
+            # panel showed one person appearing twice at the very same second,
+            # which is the one thing that cannot happen.
+            if any(f["frame_time"] == row.frame_time for f in group["faces"]):
+                continue
             if float(np.dot(vector, group["_vector"])) >= face_index_service.SAME_PERSON_SIMILARITY:
                 group["faces"].append(row.to_dict())
                 break
