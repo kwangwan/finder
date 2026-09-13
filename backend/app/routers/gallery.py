@@ -16,18 +16,23 @@ by year picture and is what makes the scrubber possible.
 """
 import math
 import uuid
+
+import cv2
+import numpy as np
 from datetime import date as dt_date, datetime, timezone as dt_timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Float, String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import get_current_approved_user
+from app.core.security import get_current_approved_user, get_current_approved_user_query_or_header
 from app.models import FileItem, User
 from app.services.access_service import access_service
+from app.services.s3_service import s3_service
 
 router = APIRouter(prefix="/api/gallery", tags=["Gallery"])
 
@@ -862,6 +867,80 @@ async def faces_status(
         "files_with_faces": files_with_faces,
         "models_ready": face_service.models_ready(),
     }
+
+
+@router.get("/faces/{face_id}/crop")
+async def face_crop(
+    face_id: uuid.UUID,
+    # Reached the way a thumbnail is — as the src of an <img>, which cannot
+    # carry a header — so it takes the same short-lived media token.
+    token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_approved_user_query_or_header),
+):
+    """
+    This one face, cut out of the picture it was found in.
+
+    A film cannot show its faces the way a photograph can — they are at
+    moments, spread through it — so the way to offer them is as pictures of
+    their own. Cut once and kept: getting one back out of a film means seeking
+    into it and decoding, which is seconds, and nobody should wait for that
+    twice.
+    """
+    from app.models import FaceSignature
+    from app.services import face_service
+
+    face = await db.get(FaceSignature, face_id)
+    if face is None:
+        raise HTTPException(status_code=404, detail="얼굴을 찾을 수 없습니다.")
+    if not await access_service.can_access_file(db, current_user, face.file_id):
+        raise HTTPException(status_code=403, detail="이 얼굴에 접근할 권한이 없습니다.")
+
+    cached_key = f"faces/{face_id}.jpg"
+    cached = await run_in_threadpool(s3_service.get_object_content, cached_key)
+    if cached:
+        return Response(content=cached, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+    file_item = await db.get(FileItem, face.file_id)
+    if file_item is None or not file_item.s3_key:
+        raise HTTPException(status_code=404, detail="원본을 찾을 수 없습니다.")
+
+    if file_item.file_type == "video":
+        url = await run_in_threadpool(s3_service.internal_presigned_get_url, file_item.s3_key)
+        # The turn is not recorded per face, so it is worked out again from the
+        # frame itself — the same way the sweep decided it.
+        raw = await run_in_threadpool(face_service.frame_at, url or file_item.s3_key, face.frame_time, 0)
+        if raw is not None:
+            turn = await run_in_threadpool(face_service.which_way_up, raw)
+            if turn:
+                raw = await run_in_threadpool(face_service._turned, raw, turn)
+        image = raw
+    else:
+        data = await run_in_threadpool(s3_service.get_object_content, file_item.s3_key)
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
+
+    if image is None:
+        raise HTTPException(status_code=404, detail="이 얼굴을 꺼낼 수 없습니다.")
+
+    height, width = image.shape[:2]
+    x, y = face.box_x * width, face.box_y * height
+    w, h = face.box_w * width, face.box_h * height
+    pad = max(w, h) * 0.35          # a face with a little room around it
+    left, top = max(0, int(x - pad)), max(0, int(y - pad))
+    right, bottom = min(width, int(x + w + pad)), min(height, int(y + h + pad))
+    crop = image[top:bottom, left:right]
+    if crop.size == 0:
+        raise HTTPException(status_code=404, detail="이 얼굴을 꺼낼 수 없습니다.")
+    side = 192
+    crop = cv2.resize(crop, (side, side), interpolation=cv2.INTER_AREA)
+    ok, encoded = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 86])
+    if not ok:
+        raise HTTPException(status_code=500, detail="이 얼굴을 저장할 수 없습니다.")
+    body = encoded.tobytes()
+    await run_in_threadpool(s3_service.put_object, cached_key, body, "image/jpeg")
+    return Response(content=body, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/items/{file_id}/faces")

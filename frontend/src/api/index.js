@@ -2160,6 +2160,12 @@ export async function getFacesInItem(fileId) {
   return res.json();
 }
 
+/** This one face, cut out of whatever it was found in. */
+export function getFaceCropUrl(faceId) {
+  const token = getCachedMediaToken();
+  return `${API_BASE}/gallery/faces/${faceId}/crop${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+}
+
 export async function getFaceMatches(workspaceId, faceId, page = 1, pageSize = 80, sort = 'newest', filters = {}) {
   const params = galleryParams(workspaceId, { ...filters, page, page_size: pageSize, sort });
   const res = await apiFetch(`${API_BASE}/gallery/faces/${faceId}/matches?${params}`, {

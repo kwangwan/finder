@@ -8109,7 +8109,52 @@ input.bd-name:focus {
 
 .gal-face-pane.is-on-video .gal-face-box { pointer-events: auto; }
 
-.gal-light-people { display: inline-flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.gal-light-people { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* Everyone a film has in it, along the bottom. Faces rather than boxes: a box
+   over a playing film points at a picture that has already moved on. */
+.gal-light-cast {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.5rem 1.25rem 0.2rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  z-index: 6;
+}
+.gal-light-cast::-webkit-scrollbar { height: 5px; }
+.gal-light-cast::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 999px; }
+.gal-cast-one { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; flex: none; }
+.gal-cast-face {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.gal-cast-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+@media (hover: hover) and (pointer: fine) {
+  .gal-cast-face:hover { border-color: #fff; transform: scale(1.06); }
+}
+.gal-cast-one.is-on .gal-cast-face { border-color: var(--accent-primary); }
+.gal-cast-at {
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.6);
+  font: inherit;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.gal-cast-at:hover { color: #fff; }
+.gal-cast-one.is-on .gal-cast-at { color: var(--accent-primary); }
 .gal-light-people button {
   padding: 0.12rem 0.42rem;
   border: 1px solid rgba(255, 255, 255, 0.25);

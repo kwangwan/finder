@@ -408,6 +408,37 @@ def faces_in_video_file(path: str, max_frames: int = None) -> List[dict]:
     return faces_in_video(path)
 
 
+def frame_at(source, seconds: Optional[float], turn: int = 0):
+    """
+    One frame of a film, at a moment, the right way up.
+
+    Used to cut out a face long after the film was looked at, so it repeats the
+    turning the sweep worked out rather than working it out again.
+    """
+    is_url = isinstance(source, str) and source.startswith(("http://", "https://"))
+    container = av.open(source, timeout=VIDEO_OPEN_TIMEOUT,
+                        options=HTTP_OPTIONS if is_url else None)
+    try:
+        stream = container.streams.video[0]
+        stream.codec_context.skip_frame = "NONKEY"
+        if seconds:
+            container.seek(int(float(seconds) / stream.time_base), stream=stream)
+        frame = next(container.decode(stream), None)
+        if frame is None:
+            return None
+        return _turned(frame.to_ndarray(format="bgr24"), turn)
+    finally:
+        try:
+            container.close()
+        except Exception:
+            pass
+
+
+def which_way_up(image: np.ndarray) -> Optional[int]:
+    """Public name for the turn-finding above."""
+    return _which_way_up(image)
+
+
 def dedupe_faces(faces: List[dict], threshold: float = float(os.getenv("FACE_SAME_FILE", "0.45"))) -> List[dict]:
     """
     One entry per person per clip, keeping the clearest sighting of them.

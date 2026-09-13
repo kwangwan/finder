@@ -6,6 +6,7 @@ import {
 import VideoPlayer from '../common/VideoPlayer';
 import {
   getMediaPreviewUrl, getThumbnailUrl, ensureMediaToken, clearMediaToken, getFacesInItem,
+  getFaceCropUrl,
 } from '../../api';
 
 /**
@@ -63,57 +64,11 @@ export default function GalleryLightbox({
   // Which sighting of a face in a film is being looked at. A film's faces are
   // each at a moment, so one of them is on screen at a time — the one whose
   // moment the film has been sent to.
+  // Which of a film's faces is being pointed at. A film's faces are moments
+  // rather than places in one picture, so they are offered as pictures of
+  // their own beneath it — see the strip below — and this only marks which one
+  // the film has been sent to.
   const [shownFace, setShownFace] = useState(null);
-  const [videoFrame, setVideoFrame] = useState(null);
-
-  // Where the picture actually is inside the <video>. The element is filled by
-  // `contain`, so the picture is letterboxed and the element's rectangle is
-  // not the picture's — a box placed as a percentage of the element misses by
-  // however thick the black bars are.
-  //
-  // The box is drawn *inside the player*, so these offsets and the box are in
-  // one coordinate space. Measuring across two nested wrappers was the earlier
-  // mistake: the numbers were each correct and belonged to different frames.
-  const holdVideo = useCallback((node) => { videoRef.current = node; }, []);
-
-  const measureVideo = useCallback(() => {
-    const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) return;
-    const scale = Math.min(video.clientWidth / video.videoWidth,
-                           video.clientHeight / video.videoHeight);
-    const width = video.videoWidth * scale;
-    const height = video.videoHeight * scale;
-    setVideoFrame({
-      left: video.offsetLeft + (video.clientWidth - width) / 2,
-      top: video.offsetTop + (video.clientHeight - height) / 2,
-      width,
-      height,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!shownFace) return undefined;
-    const video = videoRef.current;
-    if (!video) return undefined;
-    const again = () => measureVideo();
-    again();
-    // Whatever changes the picture's shape or place: the film arriving at the
-    // moment, the metadata landing, the window or the player resizing. A
-    // single measurement taken at the wrong instant is the whole bug.
-    const observer = new ResizeObserver(again);
-    observer.observe(video);
-    window.addEventListener('resize', again);
-    video.addEventListener('seeked', again);
-    video.addEventListener('loadedmetadata', again);
-    video.addEventListener('loadeddata', again);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', again);
-      video.removeEventListener('seeked', again);
-      video.removeEventListener('loadedmetadata', again);
-      video.removeEventListener('loadeddata', again);
-    };
-  }, [shownFace, measureVideo]);
 
   // A fresh address for a picture whose token has run out — the same recovery
   // the rest of the app does, kept to one attempt so a genuinely missing file
@@ -144,7 +99,6 @@ export default function GalleryLightbox({
     setFaces([]);
     setScanned(true);
     setShownFace(null);
-    setVideoFrame(null);
     getFacesInItem(item.id)
       .then((data) => {
         if (cancelled) return;
@@ -250,24 +204,6 @@ export default function GalleryLightbox({
               onLoaded={() => { retriedRef.current = false; setLoaded(true); }}
               onDownload={() => onDownload?.(item)}
               onElement={holdVideo}
-              overlay={shownFace && videoFrame ? (
-                <div className="gal-face-pane is-on-video" style={videoFrame}>
-                  <button
-                    type="button"
-                    className="gal-face-box"
-                    style={{
-                      left: `${shownFace.box[0] * 100}%`,
-                      top: `${shownFace.box[1] * 100}%`,
-                      width: `${shownFace.box[2] * 100}%`,
-                      height: `${shownFace.box[3] * 100}%`,
-                    }}
-                    onClick={(e) => { e.stopPropagation(); onSearchFace?.(shownFace, item); }}
-                    title="이 사람이 나온 사진 찾기"
-                  >
-                    <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
-                  </button>
-                </div>
-              ) : null}
             />
           </div>
         ) : (
@@ -331,6 +267,45 @@ export default function GalleryLightbox({
         </button>
       )}
 
+      {isVideo && faces.length > 0 && (
+        /* Everyone this film has in it, cut out of the moment each was found.
+           A box drawn over a playing film is a box over a picture that has
+           already moved on; a face is better handed over as a face. Pressing
+           one asks for that person; pressing the time below it sends the film
+           there. */
+        <div className="gal-light-cast">
+          {faces.map((face) => (
+            <div key={face.id} className={`gal-cast-one ${shownFace?.id === face.id ? 'is-on' : ''}`}>
+              <button
+                type="button"
+                className="gal-cast-face"
+                onClick={() => onSearchFace?.(face, item)}
+                title="이 사람이 나온 사진 찾기"
+              >
+                <img src={getFaceCropUrl(face.id)} alt="" loading="lazy" />
+              </button>
+              <button
+                type="button"
+                className="gal-cast-at"
+                title="이 사람이 나온 순간으로"
+                onClick={() => {
+                  setShownFace(face);
+                  const video = videoRef.current;
+                  if (video && face.frame_time != null) {
+                    video.pause();
+                    video.currentTime = face.frame_time;
+                  }
+                }}
+              >
+                {face.frame_time == null
+                  ? '—'
+                  : `${Math.floor(face.frame_time / 60)}:${String(Math.floor(face.frame_time % 60)).padStart(2, '0')}`}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <footer className="gal-light-foot">
         <div className="gal-light-meta">
           <span className="gal-light-name">{item.name}</span>
@@ -362,27 +337,6 @@ export default function GalleryLightbox({
             {faces.length > 0 && isVideo && (
               <span className="gal-light-people">
                 <Users size={12} /> {faces.length}명
-                {faces.map((face, index) => (
-                  <button
-                    key={face.id}
-                    type="button"
-                    className={shownFace?.id === face.id ? 'is-on' : ''}
-                    title="이 사람이 나온 순간으로"
-                    onClick={() => {
-                      setShownFace(face);
-                      const video = videoRef.current;
-                      if (video && face.frame_time != null) {
-                        video.pause();
-                        video.currentTime = face.frame_time;
-                        // The rest is handled by the `seeked` listener.
-                      }
-                    }}
-                  >
-                    {face.frame_time == null
-                      ? `${index + 1}번째`
-                      : `${Math.floor(face.frame_time / 60)}:${String(Math.floor(face.frame_time % 60)).padStart(2, '0')}`}
-                  </button>
-                ))}
               </span>
             )}
             {!scanned && (
