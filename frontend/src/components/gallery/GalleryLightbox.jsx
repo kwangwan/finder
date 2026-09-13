@@ -64,6 +64,33 @@ export default function GalleryLightbox({
   // each at a moment, so one of them is on screen at a time — the one whose
   // moment the film has been sent to.
   const [shownFace, setShownFace] = useState(null);
+  // Where the film actually is inside its box. It is fitted by `contain`, so
+  // the picture is letterboxed and the element's rectangle is not the
+  // picture's rectangle — a box placed as a percentage of the element lands
+  // beside the face rather than on it, by however much the black bars are.
+  const [videoFrame, setVideoFrame] = useState(null);
+
+  const measureVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) return;
+    const scale = Math.min(video.clientWidth / video.videoWidth,
+                           video.clientHeight / video.videoHeight);
+    const width = video.videoWidth * scale;
+    const height = video.videoHeight * scale;
+    setVideoFrame({
+      left: video.offsetLeft + (video.clientWidth - width) / 2,
+      top: video.offsetTop + (video.clientHeight - height) / 2,
+      width,
+      height,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!shownFace) return undefined;
+    measureVideo();
+    window.addEventListener('resize', measureVideo);
+    return () => window.removeEventListener('resize', measureVideo);
+  }, [shownFace, measureVideo]);
 
   // A fresh address for a picture whose token has run out — the same recovery
   // the rest of the app does, kept to one attempt so a genuinely missing file
@@ -205,21 +232,23 @@ export default function GalleryLightbox({
                 moments, not in one picture — so one is shown at a time and
                 pressing it asks the same question pressing a face on a
                 photograph asks. */}
-            {shownFace && (
-              <button
-                type="button"
-                className="gal-face-box is-on-video"
-                style={{
-                  left: `${shownFace.box[0] * 100}%`,
-                  top: `${shownFace.box[1] * 100}%`,
-                  width: `${shownFace.box[2] * 100}%`,
-                  height: `${shownFace.box[3] * 100}%`,
-                }}
-                onClick={(e) => { e.stopPropagation(); onSearchFace?.(shownFace, item); }}
-                title="이 사람이 나온 사진 찾기"
-              >
-                <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
-              </button>
+            {shownFace && videoFrame && (
+              <div className="gal-face-pane is-on-video" style={videoFrame}>
+                <button
+                  type="button"
+                  className="gal-face-box"
+                  style={{
+                    left: `${shownFace.box[0] * 100}%`,
+                    top: `${shownFace.box[1] * 100}%`,
+                    width: `${shownFace.box[2] * 100}%`,
+                    height: `${shownFace.box[3] * 100}%`,
+                  }}
+                  onClick={(e) => { e.stopPropagation(); onSearchFace?.(shownFace, item); }}
+                  title="이 사람이 나온 사진 찾기"
+                >
+                  <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
+                </button>
+              </div>
             )}
           </div>
         ) : (
@@ -326,6 +355,9 @@ export default function GalleryLightbox({
                       if (video && face.frame_time != null) {
                         video.pause();
                         video.currentTime = face.frame_time;
+                        // The size is known once there is a picture; asking
+                        // before that gives zeroes.
+                        window.setTimeout(measureVideo, 60);
                       }
                     }}
                   >

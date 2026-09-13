@@ -7711,7 +7711,7 @@ input.bd-name:focus {
   opacity: 0.5;
 }
 
-.gal-light-video { width: min(100%, 1500px); height: 100%; padding: 1.5rem; }
+.gal-light-video { position: relative; width: min(100%, 1500px); height: 100%; padding: 1.5rem; }
 
 .gal-light-close, .gal-light-nav, .gal-light-acts button {
   position: absolute;
@@ -8099,7 +8099,8 @@ input.bd-name:focus {
 .gal-face-box:hover .gal-face-hint { opacity: 1; }
 /* Over a film rather than a photograph: the same box, but it must sit above
    the player's own controls layer to be pressable at all. */
-.gal-face-box.is-on-video { position: absolute; z-index: 3; }
+.gal-face-pane.is-on-video { position: absolute; z-index: 3; pointer-events: none; }
+.gal-face-pane.is-on-video .gal-face-box { pointer-events: auto; }
 
 .gal-light-people { display: inline-flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
 .gal-light-people button {
