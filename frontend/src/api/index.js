@@ -2160,8 +2160,8 @@ export async function getFacesInItem(fileId) {
   return res.json();
 }
 
-export async function getFaceMatches(workspaceId, faceId, page = 1, pageSize = 80) {
-  const params = galleryParams(workspaceId, { page, page_size: pageSize });
+export async function getFaceMatches(workspaceId, faceId, page = 1, pageSize = 80, sort = 'newest') {
+  const params = galleryParams(workspaceId, { page, page_size: pageSize, sort });
   const res = await apiFetch(`${API_BASE}/gallery/faces/${faceId}/matches?${params}`, {
     headers: authHeaders(),
   });

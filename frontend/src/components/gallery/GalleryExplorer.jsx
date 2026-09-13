@@ -227,6 +227,9 @@ export default function GalleryExplorer({
   // clearing a box. Held beside the ordinary state so that going back does
   // not have to reload what was already there.
   const [faceSearch, setFaceSearch] = useState(null);
+  // Newest first, like the rest of the gallery — the grid's month headings
+  // assume it. "닮은 순" is still there for anyone who wants the surest first.
+  const [faceSort, setFaceSort] = useState('newest');
   const [faceStatus, setFaceStatus] = useState(null);
   // The map's two extras: the trail of a chosen period, and whichever place
   // is currently being looked into.
@@ -462,11 +465,11 @@ export default function GalleryExplorer({
     return () => { cancelled = true; };
   }, [mode, workspaceId, filters, mapView]);
 
-  const searchByFace = useCallback(async (face, fromItem) => {
+  const searchByFace = useCallback(async (face, fromItem, how = faceSort) => {
     setOpenId(null);
     setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0, loading: true });
     try {
-      const data = await getFaceMatches(workspaceId, face.id, 1, PAGE_SIZE);
+      const data = await getFaceMatches(workspaceId, face.id, 1, PAGE_SIZE, how);
       setFaceSearch({
         face, fromItem, items: data.items, total: data.total_count,
         page: data.page, totalPages: data.total_pages, loading: false,
@@ -475,13 +478,13 @@ export default function GalleryExplorer({
       setFaceSearch({ face, fromItem, items: [], total: 0, page: 0, totalPages: 0,
                       loading: false, error: e.message });
     }
-  }, [workspaceId]);
+  }, [workspaceId, faceSort]);
 
   const loadMoreFaces = useCallback(async () => {
     if (!faceSearch || faceSearch.loading || faceSearch.page >= faceSearch.totalPages) return;
     setFaceSearch((s) => ({ ...s, loading: true }));
     try {
-      const data = await getFaceMatches(workspaceId, faceSearch.face.id, faceSearch.page + 1, PAGE_SIZE);
+      const data = await getFaceMatches(workspaceId, faceSearch.face.id, faceSearch.page + 1, PAGE_SIZE, faceSort);
       setFaceSearch((s) => ({
         ...s, items: [...s.items, ...data.items], page: data.page,
         totalPages: data.total_pages, loading: false,
@@ -489,7 +492,7 @@ export default function GalleryExplorer({
     } catch (e) {
       setFaceSearch((s) => ({ ...s, loading: false }));
     }
-  }, [workspaceId, faceSearch]);
+  }, [workspaceId, faceSearch, faceSort]);
 
   useEffect(() => {
     // Always, on the map. The line is how the map says "in this order" — a
@@ -872,6 +875,22 @@ export default function GalleryExplorer({
                     ? '찾는 중…'
                     : `${faceSearch.total.toLocaleString()}개를 찾았습니다`}
                 </span>
+              </div>
+              <div className="gal-seg gal-face-sort" role="group" aria-label="정렬">
+                {[['newest', '최신순'], ['oldest', '오래된 순'], ['closest', '닮은 순']].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={faceSort === value ? 'is-on' : ''}
+                    onClick={() => {
+                      if (faceSort === value) return;
+                      setFaceSort(value);
+                      searchByFace(faceSearch.face, faceSearch.fromItem, value);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
               <button type="button" className="gal-face-back" onClick={() => setFaceSearch(null)}>
                 <X size={13} /> 갤러리로 돌아가기

@@ -895,6 +895,7 @@ async def faces_in_item(
 async def faces_like_this(
     face_id: uuid.UUID,
     workspace_id: uuid.UUID,
+    sort: str = Query("newest", pattern="^(newest|oldest|closest)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     db: AsyncSession = Depends(get_db),
@@ -924,7 +925,32 @@ async def faces_like_this(
         current = best.get(row.file_id)
         if current is None or row.similarity > current:
             best[row.file_id] = row.similarity
-    ordered = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
+
+    # By when they were taken, newest first — the same order as everywhere else
+    # in the gallery, and the order the grid's month headings assume. Ranked by
+    # likeness instead, the months came out shuffled and the same month
+    # appeared over and over as the list crossed back into it.
+    #
+    # Free to do: the whole match set is already in hand, and the dates are one
+    # indexed read of the files it names. Ordering by likeness is still offered
+    # for anyone who wants the surest ones first.
+    taken = func.coalesce(FileItem.taken_at, FileItem.created_at)
+    when = {
+        row[0]: row[1]
+        for row in (await db.execute(
+            select(FileItem.id, taken).where(FileItem.id.in_(list(best.keys())))
+        )).all()
+    } if best else {}
+
+    if sort == "closest":
+        ordered = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
+    else:
+        floor = datetime.min.replace(tzinfo=dt_timezone.utc)
+        ordered = sorted(
+            best.items(),
+            key=lambda kv: (when.get(kv[0]) or floor, kv[1]),
+            reverse=(sort == "newest"),
+        )
     total = len(ordered)
     window = ordered[(page - 1) * page_size: page * page_size]
 

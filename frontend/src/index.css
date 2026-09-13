@@ -8098,6 +8098,9 @@ input.bd-name:focus {
 }
 .gal-face-box:hover .gal-face-hint { opacity: 1; }
 
+.gal-face-sort { margin-left: auto; }
+.gal-face-sort button { padding: 0.28rem 0.6rem; font-size: 0.73rem; }
+
 .gal-face-bar {
   position: sticky;
   top: 0;
