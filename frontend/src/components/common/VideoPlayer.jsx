@@ -16,12 +16,19 @@ export default function VideoPlayer({
   onLoaded,
   autoPlay = false,
   className = '',
-  style = {}
+  style = {},
+  // Handed the <video> itself, so a caller can send it to a moment — the one
+  // where a particular face was found, say.
+  onElement = null
 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const videoRef = useRef(null);
+  const attach = (node) => {
+    videoRef.current = node;
+    onElement?.(node);
+  };
 
   const thumbnailUrl = file?.thumbnail_s3_key || file?.thumbnail_url
     ? (file.thumbnail_url || getThumbnailUrl(file.id))
@@ -155,7 +162,7 @@ export default function VideoPlayer({
 
       {/* Main HTML5 Video Element */}
       <video
-        ref={videoRef}
+        ref={attach}
         src={src}
         poster={thumbnailUrl || undefined}
         controls

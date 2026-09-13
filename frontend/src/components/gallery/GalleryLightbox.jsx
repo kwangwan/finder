@@ -59,6 +59,11 @@ export default function GalleryLightbox({
   const [frame, setFrame] = useState(null);
   const imageRef = useRef(null);
   const stageRef = useRef(null);
+  const videoRef = useRef(null);
+  // Which sighting of a face in a film is being looked at. A film's faces are
+  // each at a moment, so one of them is on screen at a time — the one whose
+  // moment the film has been sent to.
+  const [shownFace, setShownFace] = useState(null);
 
   // A fresh address for a picture whose token has run out — the same recovery
   // the rest of the app does, kept to one attempt so a genuinely missing file
@@ -88,6 +93,7 @@ export default function GalleryLightbox({
     let cancelled = false;
     setFaces([]);
     setScanned(true);
+    setShownFace(null);
     getFacesInItem(item.id)
       .then((data) => {
         if (cancelled) return;
@@ -192,7 +198,29 @@ export default function GalleryLightbox({
               onRecoverSrc={recoverSrc}
               onLoaded={() => { retriedRef.current = false; setLoaded(true); }}
               onDownload={() => onDownload?.(item)}
+              onElement={(node) => { videoRef.current = node; }}
             />
+            {/* The face the film has been sent to, drawn where it is. A film
+                cannot carry its faces the way a photograph does — they are at
+                moments, not in one picture — so one is shown at a time and
+                pressing it asks the same question pressing a face on a
+                photograph asks. */}
+            {shownFace && (
+              <button
+                type="button"
+                className="gal-face-box is-on-video"
+                style={{
+                  left: `${shownFace.box[0] * 100}%`,
+                  top: `${shownFace.box[1] * 100}%`,
+                  width: `${shownFace.box[2] * 100}%`,
+                  height: `${shownFace.box[3] * 100}%`,
+                }}
+                onClick={(e) => { e.stopPropagation(); onSearchFace?.(shownFace, item); }}
+                title="이 사람이 나온 사진 찾기"
+              >
+                <span className="gal-face-hint"><Users size={11} /> 이 사람 찾기</span>
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -278,9 +306,34 @@ export default function GalleryLightbox({
               </button>
             )}
             {item.width && item.height && <span><Maximize2 size={12} /> {item.width} × {item.height}</span>}
-            {faces.length > 0 && (
+            {faces.length > 0 && !isVideo && (
               <span title="사진 위의 얼굴을 누르면 같은 사람을 찾습니다">
                 <Users size={12} /> {faces.length}명
+              </span>
+            )}
+            {faces.length > 0 && isVideo && (
+              <span className="gal-light-people">
+                <Users size={12} /> {faces.length}명
+                {faces.map((face, index) => (
+                  <button
+                    key={face.id}
+                    type="button"
+                    className={shownFace?.id === face.id ? 'is-on' : ''}
+                    title="이 사람이 나온 순간으로"
+                    onClick={() => {
+                      setShownFace(face);
+                      const video = videoRef.current;
+                      if (video && face.frame_time != null) {
+                        video.pause();
+                        video.currentTime = face.frame_time;
+                      }
+                    }}
+                  >
+                    {face.frame_time == null
+                      ? `${index + 1}번째`
+                      : `${Math.floor(face.frame_time / 60)}:${String(Math.floor(face.frame_time % 60)).padStart(2, '0')}`}
+                  </button>
+                ))}
               </span>
             )}
             {!scanned && (

@@ -8097,6 +8097,27 @@ input.bd-name:focus {
   backdrop-filter: blur(4px);
 }
 .gal-face-box:hover .gal-face-hint { opacity: 1; }
+/* Over a film rather than a photograph: the same box, but it must sit above
+   the player's own controls layer to be pressable at all. */
+.gal-face-box.is-on-video { position: absolute; z-index: 3; }
+
+.gal-light-people { display: inline-flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.gal-light-people button {
+  padding: 0.12rem 0.42rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: none;
+  color: rgba(255, 255, 255, 0.82);
+  font: inherit;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.gal-light-people button.is-on {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  color: #fff;
+}
 
 .gal-face-sort { margin-left: auto; }
 .gal-face-sort button { padding: 0.28rem 0.6rem; font-size: 0.73rem; }
