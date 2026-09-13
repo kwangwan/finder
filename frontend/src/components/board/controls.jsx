@@ -97,7 +97,7 @@ export function Dropdown({ value, options, onChange, label, className = '', widt
         aria-label={label}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="ui-dd-label">{current?.label}</span>
+        <span className="ui-dd-label">{current?.short ?? current?.label}</span>
         <ChevronDown size={12} />
       </button>
       {open && (
@@ -110,6 +110,7 @@ export function Dropdown({ value, options, onChange, label, className = '', widt
                 role="option"
                 aria-selected={o.value === value}
                 className={o.value === value ? 'on' : ''}
+                title={o.title}
                 onClick={() => { setOpen(false); if (o.value !== value) onChange(o.value); }}
               >
                 <span>{o.label}</span>

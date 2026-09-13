@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import Float, String, and_, cast, func, or_, select
+from sqlalchemy import Float, String, and_, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -86,6 +86,32 @@ def _as_day(value: str) -> dt_date:
         raise HTTPException(status_code=400, detail="날짜를 읽을 수 없습니다.")
 
 
+def _ids(value: Optional[str]) -> list:
+    """Several ids from one query parameter, refusing anything that is not one."""
+    if not value:
+        return []
+    out = []
+    for part in str(value).split("|"):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(uuid.UUID(part))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="잘못된 값이 있습니다.")
+    return out
+
+
+def _folder_subtree(folder_ids: list):
+    """These folders and everything beneath them, as something a WHERE can use."""
+    from app.models import Folder
+
+    top = select(Folder.id).where(Folder.id.in_(folder_ids)).cte("subtree", recursive=True)
+    below = select(Folder.id).where(Folder.parent_id == top.c.id)
+    tree = top.union_all(below)
+    return select(tree.c.id)
+
+
 def _apply_filters(
     conditions: list,
     *,
@@ -97,19 +123,27 @@ def _apply_filters(
     date_to: Optional[str],
     bbox: Optional[str],
     placed_only: bool,
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     camera: Optional[str] = None,
     placed: Optional[str] = None,
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
 ):
     """Everything the caller narrowed the library down by."""
     # Which folder the photographs sit in. Who *uploaded* a photograph cannot
     # be changed after the fact; which folder it is in can, by moving it —
     # which makes this the practical way to say "my mother's trip".
-    if folder:
-        conditions.append(FileItem.folder_id == folder)
-    if uploader:
-        conditions.append(FileItem.created_by == uploader)
+    #
+    # A folder means itself and everything under it, so that picking a parent
+    # gives what is beneath it rather than the nothing it holds directly.
+    wanted = _ids(folder)
+    if wanted:
+        conditions.append(FileItem.folder_id.in_(_folder_subtree(wanted)))
+    # Several of each, because "these two people" and "this trip and that one"
+    # are ordinary things to ask, and asking them one at a time is not asking
+    # them at all.
+    chosen = _ids(uploader)
+    if chosen:
+        conditions.append(FileItem.created_by.in_(chosen))
     # Names only. The box used to search camera makes and models as well, which
     # meant typing a word and not knowing which of three things it had matched
     # — and nobody guesses "SM-G991N" into a search box anyway. The cameras are
@@ -202,30 +236,68 @@ async def gallery_folders(
     current_user: User = Depends(get_current_approved_user),
 ):
     """
-    The folders photographs are actually in, and how many each holds.
+    The folders photographs are in, each with where it sits.
 
-    Only folders that hold some directly — a folder of documents is not a thing
-    to narrow a photo library by — and counted the same way the filter matches,
-    so the number beside a name is the number that comes back when it is
-    chosen.
+    Only the folders that lead to photographs: one that holds some, or one with
+    such a folder somewhere beneath it. A folder of documents is not something
+    to narrow a photo library by; a folder holding the folders of a trip is.
+
+    But two folders can be called the same thing, and a list of bare names is
+    then a list of nothing: "제주" under one year and "제주" under another look
+    identical with no way to tell them apart. So each comes with the path that
+    leads to it, for the reader to tell them apart by.
+
+    A folder's number counts everything beneath it, and choosing it returns
+    everything beneath it, so the number beside a name is exactly what comes
+    back when it is chosen.
     """
     await _require_member(db, current_user, workspace_id)
-    from app.models import Folder
 
-    rows = (await db.execute(
-        select(Folder.id, Folder.name, func.count(FileItem.id).label("count"))
-        .join(FileItem, FileItem.folder_id == Folder.id)
-        .where(and_(*_media_conditions(workspace_id, "all")))
-        .group_by(Folder.id, Folder.name)
-        .order_by(func.count(FileItem.id).desc())
-        .limit(200)
-    )).all()
+    rows = (await db.execute(text("""
+        WITH RECURSIVE tree AS (
+            SELECT id, parent_id, name, name::text AS path, 0 AS depth
+            FROM kb_folders
+            WHERE workspace_id = :ws AND parent_id IS NULL
+            UNION ALL
+            SELECT c.id, c.parent_id, c.name, t.path || ' / ' || c.name, t.depth + 1
+            FROM kb_folders c JOIN tree t ON c.parent_id = t.id
+            WHERE c.workspace_id = :ws
+        ),
+        placed AS (
+            -- every media file, and the folder it is in …
+            SELECT f.id AS file_id, f.folder_id
+            FROM kb_files f
+            WHERE f.workspace_id = :ws
+              AND f.is_trashed = FALSE
+              AND f.s3_key IS NOT NULL
+              AND f.file_type IN ('image', 'video')
+              AND f.folder_id IS NOT NULL
+            UNION ALL
+            -- … and again for each folder above it, so that a parent counts
+            -- what lies beneath without walking the tree once per folder
+            SELECT placed.file_id, d.parent_id
+            FROM placed JOIN kb_folders d ON d.id = placed.folder_id
+            WHERE d.parent_id IS NOT NULL
+        ),
+        tally AS (
+            SELECT folder_id, COUNT(DISTINCT file_id) AS n
+            FROM placed GROUP BY folder_id
+        )
+        SELECT tree.id, tree.name, tree.path, tree.depth, tally.n
+        FROM tally JOIN tree ON tree.id = tally.folder_id
+        ORDER BY tree.path
+        LIMIT 500
+    """), {"ws": str(workspace_id)})).all()
+
     loose = (await db.execute(
         select(func.count(FileItem.id))
         .where(and_(*_media_conditions(workspace_id, "all"), FileItem.folder_id.is_(None)))
     )).scalar_one()
     return {
-        "items": [{"id": str(r.id), "name": r.name, "count": r.count} for r in rows],
+        "items": [
+            {"id": str(r.id), "name": r.name, "path": r.path, "depth": r.depth, "count": r.n}
+            for r in rows
+        ],
         "unfiled_count": loose,
     }
 
@@ -314,14 +386,14 @@ async def list_gallery_items(
     date_to: Optional[str] = None,
     bbox: Optional[str] = Query(None, description="south,west,north,east"),
     placed_only: bool = False,
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     sort: str = Query("newest", pattern="^(newest|oldest)$"),
     tz: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -373,11 +445,11 @@ async def gallery_summary(
     workspace_id: uuid.UUID,
     q: Optional[str] = None,
     kind: str = Query("all", pattern="^(all|image|video)$"),
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     tz: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -485,11 +557,11 @@ async def gallery_map(
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
     bbox: Optional[str] = None,
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     tz: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -643,11 +715,11 @@ async def gallery_path(
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
     bbox: Optional[str] = None,
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     tz: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -725,7 +797,7 @@ async def gallery_place(
     kind: str = Query("all", pattern="^(all|image|video)$"),
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     bbox: Optional[str] = Query(None, description="south,west,north,east — the ground a dot covers"),
     # Arriving from the trail asks a narrower question: not "this place", but
     # "this place while we were there". Days rather than moments, because the
@@ -738,7 +810,7 @@ async def gallery_place(
     page_size: int = Query(40, ge=1, le=MAX_PAGE_SIZE),
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -835,7 +907,7 @@ async def gallery_neighbours(
     limit: int = Query(24, ge=1, le=100),
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):
@@ -1057,14 +1129,14 @@ async def faces_like_this(
     kind: str = Query("all", pattern="^(all|image|video)$"),
     year: Optional[int] = Query(None, ge=1900, le=2200),
     month: Optional[int] = Query(None, ge=1, le=12),
-    uploader: Optional[uuid.UUID] = None,
+    uploader: Optional[str] = None,
     camera: Optional[str] = Query(None, description="'make model', several separated by |"),
     placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
     tz: Optional[str] = None,
     sort: str = Query("newest", pattern="^(newest|oldest|closest)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
-    folder: Optional[uuid.UUID] = None,
+    folder: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_approved_user),
 ):

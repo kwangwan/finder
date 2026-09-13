@@ -78,6 +78,7 @@ function MultiPick({ label, allLabel, options, values, onChange }) {
                 role="option"
                 aria-selected={values.includes(o.value)}
                 className={values.includes(o.value) ? 'on' : ''}
+                title={o.title}
                 onClick={() => toggle(o.value)}
               >
                 <span>{o.label}</span>
@@ -107,6 +108,28 @@ function LonePick({ label, hint }) {
       </button>
     </span>
   );
+}
+
+/**
+ * A folder, shown so that what contains what is visible.
+ *
+ * Two folders can be called the same thing, and a list of bare names cannot
+ * tell them apart. Indenting shows the containing, which is what distinguishes
+ * them — but indenting without end turns a deep tree into a sideways scroll,
+ * so it stops after a few levels and the whole path is there to hover instead.
+ */
+const INDENT_LIMIT = 4;
+
+function folderOption(folder) {
+  const step = Math.min(folder.depth, INDENT_LIMIT);
+  const lead = '\u00a0\u00a0'.repeat(step);
+  const mark = folder.depth > INDENT_LIMIT ? '⋯ ' : folder.depth > 0 ? '└ ' : '';
+  return {
+    value: folder.id,
+    short: folder.name,
+    title: folder.path,
+    label: `${lead}${mark}${folder.name} · ${folder.count.toLocaleString()}`,
+  };
 }
 
 const PAGE_SIZE = 80;
@@ -178,15 +201,15 @@ function readUrlState() {
       year: params.get('gyear') ? Number(params.get('gyear')) : null,
       month: params.get('gmonth') ? Number(params.get('gmonth')) : null,
       kind: ['image', 'video'].includes(params.get('gkind')) ? params.get('gkind') : 'all',
-      uploader: params.get('guploader') || '',
+      uploader: params.get('guploader') ? params.get('guploader').split('|').filter(Boolean) : [],
       camera: params.get('gcam') ? params.get('gcam').split('|').filter(Boolean) : [],
-      folder: params.get('gfolder') || '',
+      folder: params.get('gfolder') ? params.get('gfolder').split('|').filter(Boolean) : [],
       placed: ['yes', 'no'].includes(params.get('gplaced')) ? params.get('gplaced') : '',
       q: params.get('gq') || '',
     };
   } catch (e) {
-    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: '',
-             camera: [], folder: '', placed: '', q: '' };
+    return { mode: 'grid', year: null, month: null, kind: 'all', uploader: [],
+             camera: [], folder: [], placed: '', q: '' };
   }
 }
 
@@ -293,9 +316,9 @@ export default function GalleryExplorer({
     setYear(saved?.year ?? null);
     setMonth(saved?.month ?? null);
     setKind(saved?.kind ?? 'all');
-    setUploader(saved?.uploader ?? '');
+    setUploader(Array.isArray(saved?.uploader) ? saved.uploader : []);
     setCamera(Array.isArray(saved?.camera) ? saved.camera : []);
-    setFolder(saved?.folder ?? '');
+    setFolder(Array.isArray(saved?.folder) ? saved.folder : []);
     setHasPlace(saved?.hasPlace ?? '');
     setQueryText(saved?.q ?? '');
     setPlace(null);
@@ -314,9 +337,10 @@ export default function GalleryExplorer({
 
   const requestId = useRef(0);
   const filters = useMemo(() => ({
-    q, kind, year, month, uploader: uploader || null,
+    q, kind, year, month,
+    uploader: uploader.length ? uploader.join('|') : null,
     camera: camera.length ? camera.join('|') : null,
-    folder: folder || null,
+    folder: folder.length ? folder.join('|') : null,
     placed: hasPlace || null,
   }), [q, kind, year, month, uploader, camera, folder, hasPlace]);
 
@@ -343,9 +367,9 @@ export default function GalleryExplorer({
       set('gyear', year);
       set('gmonth', month);
       set('gkind', kind);
-      set('guploader', uploader);
+      set('guploader', uploader.join('|'));
       set('gcam', camera.join('|'));
-      set('gfolder', folder);
+      set('gfolder', folder.join('|'));
       set('gplaced', hasPlace);
       set('gq', q);
       set('gphoto', openId);
@@ -410,7 +434,7 @@ export default function GalleryExplorer({
     if (!workspaceId) return;
     let cancelled = false;
     getGallerySummary(workspaceId, {
-      q, kind, uploader: uploader || null,
+      q, kind, uploader: uploader.length ? uploader.join('|') : null,
       camera: camera.length ? camera.join('|') : null,
       placed: hasPlace || null,
     })
@@ -632,7 +656,9 @@ export default function GalleryExplorer({
   };
 
   const periodLabel = year ? `${year}년${month ? ` ${month}월` : ''}` : '전체 기간';
-  const uploaderName = uploader ? uploaders.find((p) => p.id === uploader)?.name : null;
+  const uploaderName = uploader.length === 1
+    ? uploaders.find((p) => p.id === uploader[0])?.name
+    : (uploader.length ? `${uploader.length}명` : null);
   const placed = summary?.placed_count || 0;
 
   /**
@@ -681,7 +707,7 @@ export default function GalleryExplorer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, faceSort, faceSearch?.face?.id]);
 
-  const activeFilters = [q, kind !== 'all', uploader, camera.length, folder, hasPlace]
+  const activeFilters = [q, kind !== 'all', uploader.length, camera.length, folder.length, hasPlace]
     .filter(Boolean).length;
 
   // Everything currently narrowing the library, in words — so an empty screen
@@ -690,15 +716,17 @@ export default function GalleryExplorer({
     year ? `${year}년${month ? ` ${month}월` : ''}` : null,
     q ? `"${q}"` : null,
     kind === 'image' ? '사진만' : kind === 'video' ? '영상만' : null,
-    uploader ? uploaders.find((p) => p.id === uploader)?.name : null,
+    uploader.length ? (uploader.length === 1
+      ? uploaders.find((p) => p.id === uploader[0])?.name : `올린 사람 ${uploader.length}명`) : null,
     camera.length ? (camera.length === 1 ? camera[0] : `카메라 ${camera.length}대`) : null,
-    folder ? folders.find((f) => f.id === folder)?.name : null,
+    folder.length ? (folder.length === 1
+      ? folders.find((f) => f.id === folder[0])?.name : `폴더 ${folder.length}곳`) : null,
     hasPlace === 'yes' ? '지도에 있는 것' : hasPlace === 'no' ? '위치 없는 것' : null,
   ].filter(Boolean);
 
   const clearFilters = () => {
     setYear(null); setMonth(null); setQueryText(''); setKind('all');
-    setUploader(''); setCamera([]); setFolder(''); setHasPlace('');
+    setUploader([]); setCamera([]); setFolder([]); setHasPlace('');
   };
 
   const filterControls = (
@@ -737,17 +765,16 @@ export default function GalleryExplorer({
               />
             )}
             {uploaders.length > 1 && (
-              <Dropdown
-                value={uploader}
-                label="올린 사람으로 거르기"
-                options={[
-                  { value: '', label: `올린 사람 전체` },
-                  ...uploaders.map((person, index) => ({
-                    value: person.id,
-                    label: `${person.name}${index === 0 ? ' (나)' : ''} · ${person.count.toLocaleString()}`,
-                  })),
-                ]}
-                onChange={(value) => { setUploader(value); setPlace(null); }}
+              <MultiPick
+                label="올린 사람"
+                allLabel="올린 사람 전체"
+                values={uploader}
+                options={uploaders.map((person, index) => ({
+                  value: person.id,
+                  short: person.name,
+                  label: `${person.name}${index === 0 ? ' (나)' : ''} · ${person.count.toLocaleString()}`,
+                }))}
+                onChange={(next) => { setUploader(next); setPlace(null); }}
               />
             )}
 
@@ -776,17 +803,12 @@ export default function GalleryExplorer({
             )}
 
             {folders.length > 1 && (
-              <Dropdown
-                value={folder}
-                label="폴더로 거르기"
-                options={[
-                  { value: '', label: '폴더 전체' },
-                  ...folders.map((f) => ({
-                    value: f.id,
-                    label: `${f.name} · ${f.count.toLocaleString()}`,
-                  })),
-                ]}
-                onChange={(value) => { setFolder(value); setPlace(null); }}
+              <MultiPick
+                label="폴더"
+                allLabel="폴더 전체"
+                values={folder}
+                options={folders.map(folderOption)}
+                onChange={(next) => { setFolder(next); setPlace(null); }}
               />
             )}
 
