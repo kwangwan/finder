@@ -90,12 +90,12 @@ MIN_FACE_FRACTION = 44 / 2048
 
 # How many moments are taken from one clip, and how close together they may be
 # before it is worth spreading them out instead of taking them all.
-# Forty moments of a clip rather than every keyframe it has. Looking at a
-# frame costs fifteen times what it did under the old model, and a five-minute
-# clip has hundreds of keyframes showing the same two people — forty spread
-# across the whole of it says who was in it just as well, and the difference
-# is a day of machine time against an hour.
-VIDEO_MOMENTS = int(os.getenv("FACE_VIDEO_MOMENTS", "40"))
+# Twenty moments of a clip rather than every keyframe it has. Measured, one
+# frame costs about a second to look at — so the number of moments *is* the
+# cost of a film, and forty of them meant a minute each. A clip's moments are
+# the most redundant thing in the library: the same two people, over and over.
+# Twenty spread across the whole of it says who was in it just as well.
+VIDEO_MOMENTS = int(os.getenv("FACE_VIDEO_MOMENTS", "20"))
 SECONDS_PER_MOMENT = 4
 VIDEO_OPEN_TIMEOUT = 60
 MAX_FACES_PER_VIDEO = 900
@@ -297,7 +297,10 @@ def _keyframes_spread(container, stream, duration: float, cap: int):
 # the way that finds faces. Upright faces are found far more readily than
 # sideways ones, which makes the detector itself the best available reader of
 # the matrix. Decided once per film, from the first frame that shows anybody.
-_TURNS = (0, 90, 270, 180)
+# Upside down is not a way anybody holds a camera; it is in the list only
+# because the matrix can say it, and trying it costs a quarter of every
+# decision.
+_TURNS = (0, 90, 270)
 
 # How many frames may be spent settling which way up a film is. Every attempt
 # costs a look in each of four directions, so a film with nobody in it used to
