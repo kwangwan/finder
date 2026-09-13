@@ -108,14 +108,25 @@ def extract_image_metadata(head_bytes: bytes) -> Dict[str, Any]:
         return out
 
     try:
+        exif = img.getexif()
+    except Exception:
+        exif = None
+
+    try:
         if img.width and img.height:
-            out["media_width"], out["media_height"] = img.width, img.height
+            width, height = img.width, img.height
+            # As the photograph is *seen*, not as the sensor wrote it. A phone
+            # held sideways records a landscape picture plus "turn this", and
+            # every viewer obeys — so a portrait photograph stored here as
+            # landscape is laid out in the gallery as a landscape one, which is
+            # how a wall of upright photographs came to be arranged lying down.
+            if exif and exif.get(274) in (5, 6, 7, 8):
+                width, height = height, width
+            out["media_width"], out["media_height"] = width, height
     except Exception:
         pass
 
-    try:
-        exif = img.getexif()
-    except Exception:
+    if not exif:
         return out
     if not exif:
         return out
@@ -223,8 +234,49 @@ def _parse_iso6709(text: str):
     return round(lat, 6), round(lon, 6)
 
 
+def _parse_tkhd(buf: bytes) -> Dict[str, Any]:
+    """
+    How big the film is, as it is meant to be watched.
+
+    The track header carries the picture's size and, next to it, the matrix
+    that says how to turn it — which is how a phone stores a portrait film: a
+    landscape picture plus "turn this a quarter". Read the size without the
+    matrix and every upright film is recorded as a wide one, and the gallery
+    lays it out lying down.
+
+    There is one of these per track; the sound track's size is zero, so the
+    first with a real size is the picture.
+    """
+    at = -1
+    while True:
+        at = buf.find(b"tkhd", at + 1)
+        if at < 0:
+            return {}
+        try:
+            version = buf[at + 4]
+            # From just past 'tkhd': version(1) flags(3), then the two dates,
+            # the track id, a reserved word and the duration — twice as wide
+            # in version 1 — then two reserved words, then layer, alternate
+            # group, volume and one more reserved.
+            after = at + 8 + (32 if version == 1 else 20)
+            after += 8
+            after += 2 + 2 + 2 + 2
+            matrix = struct.unpack_from(">9i", buf, after)
+            width, height = struct.unpack_from(">II", buf, after + 36)
+            width, height = width >> 16, height >> 16      # 16.16 fixed point
+            if not width or not height:
+                continue
+            a, b = matrix[0], matrix[1]
+            if a == 0 and b != 0:       # a quarter turn either way
+                width, height = height, width
+            return {"media_width": int(width), "media_height": int(height)}
+        except Exception:
+            continue
+
+
 def extract_video_metadata(buf: bytes) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
+    out.update(_parse_tkhd(buf))
     taken = _parse_mvhd(buf)
     if taken:
         out["taken_at"] = taken
