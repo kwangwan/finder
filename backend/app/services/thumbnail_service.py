@@ -20,6 +20,15 @@ class ThumbnailService:
         """Generate a resized WebP thumbnail from image bytes using Pillow."""
         try:
             with Image.open(io.BytesIO(image_bytes)) as img:
+                # Turned the way the camera says it was held. A phone writes
+                # the picture as the sensor saw it and adds "this was taken
+                # sideways"; browsers obey that when shown the original, and
+                # Pillow does not. Without this the thumbnail is saved lying
+                # down — and as a WebP it carries no such note, so nothing
+                # downstream can put it right. The gallery is thumbnails, so
+                # the gallery was full of photographs on their side.
+                img = ImageOps.exif_transpose(img)
+
                 # Convert RGBA / P modes to RGB if saving to RGB-only or preserve RGBA for WebP
                 if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
                     img = img.convert("RGBA")
