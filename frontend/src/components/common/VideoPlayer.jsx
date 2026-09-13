@@ -29,10 +29,16 @@ export default function VideoPlayer({
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const videoRef = useRef(null);
-  const attach = (node) => {
-    videoRef.current = node;
-    onElement?.(node);
-  };
+
+  // Handed out from an effect rather than through a ref callback. A callback
+  // written inline is a new function on every render, and React answers that
+  // by detaching the old one — calling it with null — before attaching the
+  // new one. A caller that measures the element in that gap measures nothing
+  // and keeps whatever it had, which is how a box ended up drawn to the shape
+  // of the last video rather than this one.
+  useEffect(() => {
+    onElement?.(videoRef.current);
+  });
 
   const thumbnailUrl = file?.thumbnail_s3_key || file?.thumbnail_url
     ? (file.thumbnail_url || getThumbnailUrl(file.id))
@@ -168,7 +174,7 @@ export default function VideoPlayer({
 
       {/* Main HTML5 Video Element */}
       <video
-        ref={attach}
+        ref={videoRef}
         src={src}
         poster={thumbnailUrl || undefined}
         controls

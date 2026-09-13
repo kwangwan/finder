@@ -895,6 +895,14 @@ async def faces_in_item(
 async def faces_like_this(
     face_id: uuid.UUID,
     workspace_id: uuid.UUID,
+    q: Optional[str] = None,
+    kind: str = Query("all", pattern="^(all|image|video)$"),
+    year: Optional[int] = Query(None, ge=1900, le=2200),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    uploader: Optional[uuid.UUID] = None,
+    camera: Optional[str] = Query(None, description="'make model', several separated by |"),
+    placed: Optional[str] = Query(None, pattern="^(yes|no)$"),
+    tz: Optional[str] = None,
     sort: str = Query("newest", pattern="^(newest|oldest|closest)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
@@ -925,6 +933,24 @@ async def faces_like_this(
         current = best.get(row.file_id)
         if current is None or row.similarity > current:
             best[row.file_id] = row.similarity
+
+    # Narrowed the same way the rest of the gallery is. The filters were on
+    # screen while this was showing and did nothing to it, which reads as a
+    # broken filter rather than as one that does not apply here — and "이 사람이
+    # 나온 2023년 사진" is a reasonable thing to want.
+    if best and (q or kind != "all" or year or month or uploader or camera or placed):
+        allowed = {
+            row[0]
+            for row in (await db.execute(
+                select(FileItem.id).where(and_(*_apply_filters(
+                    _media_conditions(workspace_id, kind),
+                    q=q, zone=_zone(tz), year=year, month=month,
+                    date_from=None, date_to=None, bbox=None, placed_only=False,
+                    uploader=uploader, camera=camera, placed=placed,
+                ), FileItem.id.in_(list(best.keys()))))
+            )).all()
+        }
+        best = {file_id: score for file_id, score in best.items() if file_id in allowed}
 
     # By when they were taken, newest first — the same order as everywhere else
     # in the gallery, and the order the grid's month headings assume. Ranked by

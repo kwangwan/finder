@@ -74,6 +74,8 @@ export default function GalleryLightbox({
   // The box is drawn *inside the player*, so these offsets and the box are in
   // one coordinate space. Measuring across two nested wrappers was the earlier
   // mistake: the numbers were each correct and belonged to different frames.
+  const holdVideo = useCallback((node) => { videoRef.current = node; }, []);
+
   const measureVideo = useCallback(() => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
@@ -92,19 +94,24 @@ export default function GalleryLightbox({
   useEffect(() => {
     if (!shownFace) return undefined;
     const video = videoRef.current;
-    measureVideo();
-    // Again once the film has actually arrived at the moment and after any
-    // reflow: the size is not known until there is a picture.
+    if (!video) return undefined;
     const again = () => measureVideo();
+    again();
+    // Whatever changes the picture's shape or place: the film arriving at the
+    // moment, the metadata landing, the window or the player resizing. A
+    // single measurement taken at the wrong instant is the whole bug.
+    const observer = new ResizeObserver(again);
+    observer.observe(video);
     window.addEventListener('resize', again);
-    video?.addEventListener('seeked', again);
-    video?.addEventListener('loadedmetadata', again);
-    const timer = window.setTimeout(again, 120);
+    video.addEventListener('seeked', again);
+    video.addEventListener('loadedmetadata', again);
+    video.addEventListener('loadeddata', again);
     return () => {
-      window.clearTimeout(timer);
+      observer.disconnect();
       window.removeEventListener('resize', again);
-      video?.removeEventListener('seeked', again);
-      video?.removeEventListener('loadedmetadata', again);
+      video.removeEventListener('seeked', again);
+      video.removeEventListener('loadedmetadata', again);
+      video.removeEventListener('loadeddata', again);
     };
   }, [shownFace, measureVideo]);
 
@@ -137,6 +144,7 @@ export default function GalleryLightbox({
     setFaces([]);
     setScanned(true);
     setShownFace(null);
+    setVideoFrame(null);
     getFacesInItem(item.id)
       .then((data) => {
         if (cancelled) return;
@@ -241,7 +249,7 @@ export default function GalleryLightbox({
               onRecoverSrc={recoverSrc}
               onLoaded={() => { retriedRef.current = false; setLoaded(true); }}
               onDownload={() => onDownload?.(item)}
-              onElement={(node) => { videoRef.current = node; }}
+              onElement={holdVideo}
               overlay={shownFace && videoFrame ? (
                 <div className="gal-face-pane is-on-video" style={videoFrame}>
                   <button
