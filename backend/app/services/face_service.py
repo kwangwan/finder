@@ -299,6 +299,13 @@ def _keyframes_spread(container, stream, duration: float, cap: int):
 # the matrix. Decided once per film, from the first frame that shows anybody.
 _TURNS = (0, 90, 270, 180)
 
+# How many frames may be spent settling which way up a film is. Every attempt
+# costs a look in each of four directions, so a film with nobody in it used to
+# pay four times over for every single moment — forty moments, a hundred and
+# sixty looks, to learn nothing. After a few frames without a face, take the
+# film as it comes: there is nobody in it to be the wrong way up.
+TURN_TRIES = 3
+
 
 def _turned(image: np.ndarray, turn: int) -> np.ndarray:
     if turn == 90:
@@ -374,6 +381,7 @@ def faces_in_video(source) -> List[dict]:
 
         faces: List[dict] = []
         turn = None
+        tries = 0
         for frame in frames:
             try:
                 image = frame.to_ndarray(format="bgr24")
@@ -384,11 +392,13 @@ def faces_in_video(source) -> List[dict]:
                 at = round(float(frame.pts * stream.time_base), 2)
             if turn is None:
                 # Still deciding. Whichever way up finds somebody is the way
-                # this film is meant to be watched; until one does, nothing is
-                # settled and the frame is simply taken as it came.
+                # this film is meant to be watched.
                 turn = _which_way_up(image)
                 if turn is None:
-                    continue
+                    tries += 1
+                    if tries < TURN_TRIES:
+                        continue
+                    turn = 0        # nobody so far; take it as it comes
             found = faces_in_image(_turned(image, turn), at)
             for face in found:
                 face["frame_turn"] = turn
